@@ -1,30 +1,37 @@
 """HTTP layer for the inspection pipeline.
 
-    POST /inspection/ocr       multipart/form-data, field "image"
-      -> InstantOcrOut
-         (image info + quality + raw OCR regions — the evidence layer only;
-          no model, no retrieval, no rules)
+Both endpoints take ONE package, photographed from one or more sides
+(multipart/form-data):
 
-    POST /inspection/analyze   multipart/form-data, field "image"
-      -> InspectionAnalysisOut
-         (the same OCR evidence + declarations + product identification
-          + ranked verified Indian Standard candidates)
+    image  (+ optional side)       a single photo — the original contract
+    images (+ optional sides)      several photos of the same package; `sides`,
+                                   when given, lists one side per image in order
+                                   (FRONT, BACK, LEFT, RIGHT, TOP, BOTTOM, UNKNOWN)
+
+    POST /inspection/ocr       -> InstantOcrOut
+         (per-image OCR evidence + combined declarations; no model, no
+          retrieval, no rules)
+
+    POST /inspection/analyze   -> InspectionAnalysisOut
+         (the same evidence + product identification + verified Indian Standard
+          candidates + deterministic compliance over all images)
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
+from app.api import get_product_finder
 from app.inspection import (
     MAX_BYTES,
     ImageError,
     InspectionAnalysisOut,
     InspectionAnalyzer,
     InstantOcrOut,
+    PackageUpload,
 )
-from app.api import get_product_finder
 from app.llm import LocalLLM
 from app.ocr import OcrError
 
@@ -64,30 +71,66 @@ async def _read_image(image: UploadFile) -> bytes:
     return data
 
 
-@router.post("/ocr", response_model=InstantOcrOut)
-async def instant_ocr(
-    image: UploadFile = File(...),
-    analyzer: InspectionAnalyzer = Depends(get_ocr_analyzer),
-) -> InstantOcrOut:
-    """Instant OCR: decode the uploaded image, run quality checks and local
-    OCR, and return the raw OCR regions. Nothing is interpreted."""
-    data = await _read_image(image)
+async def _package(
+    image: UploadFile | None,
+    side: str | None,
+    images: list[UploadFile] | None,
+    sides: list[str] | None,
+) -> list[PackageUpload]:
+    """Turn the form into package uploads: either `image` or `images`, not both."""
+    images = images or []
+    if image is not None and images:
+        raise HTTPException(status_code=422, detail="Send either 'image' or 'images', not both.")
+    if image is not None:
+        files, labels = [image], [side]
+    elif images:
+        if sides and len(sides) != len(images):
+            raise HTTPException(
+                status_code=422,
+                detail=f"'sides' has {len(sides)} entries for {len(images)} images.",
+            )
+        files, labels = images, (sides or [None] * len(images))
+    else:
+        raise HTTPException(status_code=422, detail="Upload at least one image ('image' or 'images').")
+    return [
+        PackageUpload(data=await _read_image(f), filename=f.filename or "upload", side=label)
+        for f, label in zip(files, labels)
+    ]
+
+
+def _run(fn, uploads):
     try:
-        return analyzer.ocr(data, image.filename or "upload")
+        return fn(uploads)
     except ImageError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except OcrError as exc:
         raise HTTPException(status_code=503, detail=f"OCR unavailable: {exc}") from exc
+
+
+@router.post("/ocr", response_model=InstantOcrOut)
+async def instant_ocr(
+    image: UploadFile | None = File(None),
+    side: str | None = Form(None),
+    images: list[UploadFile] | None = File(None),
+    sides: list[str] | None = Form(None),
+    analyzer: InspectionAnalyzer = Depends(get_ocr_analyzer),
+) -> InstantOcrOut:
+    """Instant OCR: decode each uploaded image, run quality checks and local
+    OCR, and return the raw OCR regions per image plus the declarations read
+    from all of them. Nothing else is interpreted."""
+    uploads = await _package(image, side, images, sides)
+    return _run(analyzer.ocr_package, uploads)
 
 
 @router.post("/analyze", response_model=InspectionAnalysisOut)
-async def analyze(image: UploadFile = File(...)) -> InspectionAnalysisOut:
-    """Smart Inspection: the same OCR step, then declaration extraction,
-    product identification and verified Indian Standard candidates."""
-    data = await _read_image(image)
-    try:
-        return get_analyzer().analyze(data, image.filename or "upload")
-    except ImageError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except OcrError as exc:
-        raise HTTPException(status_code=503, detail=f"OCR unavailable: {exc}") from exc
+async def analyze(
+    image: UploadFile | None = File(None),
+    side: str | None = Form(None),
+    images: list[UploadFile] | None = File(None),
+    sides: list[str] | None = Form(None),
+) -> InspectionAnalysisOut:
+    """Smart Inspection: the same OCR step for every image, then declaration
+    extraction, product identification, verified Indian Standard candidates and
+    deterministic compliance over the combined evidence."""
+    uploads = await _package(image, side, images, sides)
+    return _run(get_analyzer().analyze_package, uploads)

@@ -74,6 +74,8 @@ class CheckEvidence:
     image_id: str | None
     ocr_confidence: float | None
     bbox: list[int] | None
+    source_images: list[str] = field(default_factory=list)
+    source_sides: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -228,6 +230,7 @@ def _evidence(decl) -> CheckEvidence:
         declaration_field=decl.field, declaration_status=decl.status, value=decl.value,
         raw_text=decl.raw_text, source_regions=list(decl.source_regions), image_id=decl.image_id,
         ocr_confidence=decl.ocr_confidence, bbox=decl.bbox,
+        source_images=list(decl.source_images), source_sides=list(decl.source_sides),
     )
 
 
@@ -251,8 +254,9 @@ def _rule_printed_standard_number(req: Requirement, standard: str, declarations:
     decl = next((d for d in declarations.fields if d.field == req.declaration_field), None)
     if decl is None or decl.status == NOT_DETECTED:
         return result(REVIEW, "EVIDENCE_NOT_DETECTED",
-                      "No IS number was detected in the OCR text. It may be on another side of the "
-                      "package or unreadable — not detected is not the same as missing.",
+                      "No IS number was detected in the OCR text of the uploaded image(s). It may be "
+                      "on a side that was not photographed, or unreadable — not detected is not the "
+                      "same as missing.",
                       "NOT_DETECTED")
 
     ev = [_evidence(decl)]

@@ -52,6 +52,11 @@ flowchart LR
     style RPT stroke-dasharray: 4 4
 ```
 
+Both endpoints take one package: a single photo (`image`, optional `side`) or several
+photos of the same package (`images` with `sides` = FRONT / BACK / LEFT / RIGHT / TOP /
+BOTTOM / UNKNOWN). Each photo is OCR'd separately and every value keeps the photo and
+OCR region it came from; a photo that cannot be read is reported as failed, and sides
+that were not photographed are reported as not uploaded — never as missing.
 `POST /inspection/ocr` returns the OCR regions and declarations only.
 `POST /inspection/analyze` (multipart, field `image`) runs everything through the
 compliance check. A standard match is retrieval evidence, not a compliance or
@@ -102,6 +107,7 @@ Sample label images live in [`samples/ocr-labels/`](samples/ocr-labels/):
 | `real_*` (Wikimedia Commons) | real-world label photos, incl. hard cases | OCR stress tests |
 
 ```bash
+# one photo; for several sides use: -F images=@front.jpg -F sides=FRONT -F images=@back.jpg -F sides=BACK
 curl -s -F "image=@samples/ocr-labels/synth_led-lamp.png" \
   http://127.0.0.1:8000/inspection/analyze | jq '.product, [.standards[].standard_number]'
 ```

@@ -287,8 +287,12 @@ placeholder data (`frontend/src/mocks.tsx`) — the legal-metrology PASS/FAIL ru
 engine and the officer report are not built yet. Run: backend on :8000, then
 `cd frontend && npm install && npm run dev` (proxies `/api` -> :8000).
 
-Phases 1–14 and inspection Milestones 1–4 (Instant OCR, declarations, product
-identification, deterministic compliance) are complete. Compliance coverage is data:
+Phases 1–14 and inspection Milestones 1–5 (Instant OCR, declarations, product
+identification, deterministic compliance, multi-side packages) are complete. A package
+can be photographed from several sides: every image is OCR'd on its own, region ids
+are unique per inspection (`I2-OCR-004`) and carry `image_id` + `side`, declarations
+merge across photos (DUPLICATE keeps every source, CONFLICT withholds the value), and a
+failed side is reported, never treated as absent. Compliance coverage is data:
 only standards with verified requirements in `data/inspection_requirements.json` are
 `SUPPORTED_FOR_INSPECTION` (currently IS 14543:2016 and IS 13428:2005); every other
 standard is `STANDARD_ONLY` and returns REVIEW. The remaining work is requirement
@@ -313,7 +317,7 @@ sih26/
       laboratory.py    # Phase 7: BIS-recognized laboratory search
       ocr.py           # Phase 13: local OCR engine wrapper (rapidocr-onnxruntime)
       inspection.py    # InspectionAnalyzer + response models (ocr / analyze)
-      inspection_api.py# POST /inspection/ocr (Instant OCR) + /inspection/analyze
+      inspection_api.py# POST /inspection/ocr (Instant OCR) + /inspection/analyze; one package = `image` or `images`+`sides`
       declarations.py  # deterministic declarations: DETECTED / UNCERTAIN / NOT_DETECTED, linked to OCR regions
       product_identification.py # product + standard candidates over the KB (retrieval engine + phrase gate)
       requirements.py  # verified inspection requirements: load, validate (quote must be in a verified record), coverage
@@ -343,6 +347,7 @@ sih26/
       test_declarations.py # declaration extraction on controlled OCR fixtures (+ real-label regressions)
       test_product_identification.py # product/standard candidates, REVIEW paths, model stubbed
       test_compliance.py   # compliance rules, aggregation policy, grounding, traceability
+      test_multiside.py    # multi-side packages: per-image provenance, duplicates/conflicts, failed sides
       test_pipeline.py     # OCR -> standard candidates end-to-end + stage degradation
       test_plain_runners.py # pytest bridge — runs every runner, makes pytest authoritative
       fixtures/broken_kb/  # deliberately invalid KB for the loader tests

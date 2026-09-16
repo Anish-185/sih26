@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUpRight, ClipboardCheck, RotateCcw, ScanSearch } from "lucide-react";
+import { ArrowUpRight, ClipboardCheck, RotateCcw, ScanSearch, X } from "lucide-react";
 import {
   ApiError,
   api,
@@ -10,6 +10,9 @@ import {
   type InspectionAnalysis,
   type InstantOcr,
   type OcrRegion,
+  PACKAGE_SIDES,
+  type PackageImage,
+  type PackageSide,
   type ProductEvidence,
   type ProductIdentification,
   type StandardCandidate,
@@ -39,68 +42,106 @@ import {
   PhotoFragment,
   Ticks,
 } from "@/components/decor";
-import { ImageInspector } from "./ImageInspector";
+import { PackageImages, RegionSides, regionSides, useWhere } from "./PackageImages";
 
-// upload -> ocr (Instant OCR running) -> evidence (raw OCR shown)
+// upload (stage photos) -> ocr (Instant OCR running) -> evidence (raw OCR shown)
 //        -> workspace (after the user runs Smart Inspection)
 type Phase = "upload" | "ocr" | "evidence" | "workspace" | "error";
 
+/** A photo of the package waiting to be inspected. */
+interface Staged {
+  key: string;
+  file: File;
+  url: string;
+  side: PackageSide;
+}
+
+const MAX_IMAGES = 8;
+
 export function InspectionView() {
   const [phase, setPhase] = useState<Phase>("upload");
-  const [file, setFile] = useState<File | null>(null);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [staged, setStaged] = useState<Staged[]>([]);
+  const stagedRef = useRef<Staged[]>([]);
+  stagedRef.current = staged;
+  const [activeImageId, setActiveImageId] = useState<string | null>(null);
   // Selected OCR regions. One id when a region is picked; every source region
-  // when a declaration is picked, so all of its boxes light up on the image.
+  // when a declaration is picked, so all of its boxes light up.
   const [selection, setSelection] = useState<string[]>([]);
   const selectedRegion = selection[0] ?? null;
-  const setSelectedRegion = (id: string | null) => setSelection(id ? [id] : []);
-  const urlRef = useRef<string | null>(null);
 
   const ocrTask = useAsyncTask(api.instantOcr);
   const task = useAsyncTask(api.analyzeInspection);
 
   useEffect(() => {
-    return () => {
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-    };
+    return () => stagedRef.current.forEach((s) => URL.revokeObjectURL(s.url));
   }, []);
 
-  function start(files: File[]) {
-    const file = files[0];
-    if (!file) return;
+  const images = (task.data ?? ocrTask.data)?.images ?? [];
+  const urls = staged.map((s) => s.url);
 
-    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-    const url = URL.createObjectURL(file);
-    urlRef.current = url;
-    setFile(file);
-    setImageUrl(url);
+  // Selecting evidence switches to the photo its first region came from.
+  function selectRegions(ids: string[]) {
+    setSelection(ids);
+    const img = images.find((i) => i.ocr?.regions.some((r) => r.id === ids[0]));
+    if (img) setActiveImageId(img.image_id);
+  }
+  const setSelectedRegion = (id: string | null) => selectRegions(id ? [id] : []);
+
+  function addFiles(files: File[]) {
+    setStaged((prev) =>
+      [
+        ...prev,
+        ...files.map((file) => ({
+          key: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
+          file,
+          url: URL.createObjectURL(file),
+          side: "UNKNOWN" as PackageSide,
+        })),
+      ].slice(0, MAX_IMAGES),
+    );
+  }
+
+  function removeStaged(key: string) {
+    setStaged((prev) => {
+      prev.filter((s) => s.key === key).forEach((s) => URL.revokeObjectURL(s.url));
+      return prev.filter((s) => s.key !== key);
+    });
+  }
+
+  function setSide(key: string, side: PackageSide) {
+    setStaged((prev) => prev.map((s) => (s.key === key ? { ...s, side } : s)));
+  }
+
+  const uploads = () => staged.map((s) => ({ file: s.file, side: s.side }));
+
+  function runOcr() {
+    if (!staged.length) return;
     setSelection([]);
     task.reset();
     setPhase("ocr");
-
     ocrTask
-      .run(file)
-      .then(() => setPhase("evidence"))
+      .run(uploads())
+      .then((res) => {
+        setActiveImageId((res.images.find((i) => i.ocr) ?? res.images[0]).image_id);
+        setPhase("evidence");
+      })
       .catch(() => setPhase("error"));
   }
 
   // Smart Inspection is a separate, explicit step. The OCR evidence stays on
   // screen while it runs, and stays there if it fails.
   function runSmartInspection() {
-    if (!file) return;
+    if (!staged.length) return;
     task
-      .run(file)
+      .run(uploads())
       .then(() => setPhase("workspace"))
       .catch(() => {});
   }
 
   function reset() {
-    if (urlRef.current) {
-      URL.revokeObjectURL(urlRef.current);
-      urlRef.current = null;
-    }
-    setFile(null);
-    setImageUrl(null);
+    staged.forEach((s) => URL.revokeObjectURL(s.url));
+    setStaged([]);
+    setActiveImageId(null);
     setSelection([]);
     ocrTask.reset();
     task.reset();
@@ -115,7 +156,7 @@ export function InspectionView() {
         <PageHeader
           eyebrow="Inspection"
           title="Start an inspection"
-          lead="Upload an image of the product package. MetrIQ runs local PaddleOCR straight away and shows the detected text with its bounding boxes and confidence. Smart Inspection — declarations, product and Indian Standard — is a separate next step."
+          lead="Add one or more photos of the same package — front, back, sides — and mark each side if you know it. MetrIQ runs local PaddleOCR on every photo and shows what it read, with boxes and confidence. Smart Inspection — declarations, product, Indian Standard and compliance — is a separate next step."
           annotation={<Annotation lead="right">Capture → OCR → Inspect</Annotation>}
         />
 
@@ -160,7 +201,7 @@ export function InspectionView() {
             <Ticks edge="top" count={13} className="opacity-60" />
             <Ticks edge="bottom" count={13} className="opacity-60" />
             <div className="relative [&>div]:!border-0 [&>div]:!bg-transparent">
-              <Dropzone onFiles={start} />
+              <Dropzone onFiles={addFiles} disabled={staged.length >= MAX_IMAGES} />
             </div>
           </div>
           <Bracket tone="accent" className="-inset-2" />
@@ -168,6 +209,59 @@ export function InspectionView() {
             PNG · JPG · WEBP
           </Annotation>
         </div>
+
+        {staged.length > 0 && (
+          <Panel flush>
+            <PanelHeader
+              title="Package images"
+              meta={`${staged.length} of ${MAX_IMAGES} · one physical package`}
+            />
+            <ul className="grid gap-px bg-line sm:grid-cols-2 lg:grid-cols-4">
+              {staged.map((s, i) => (
+                <li key={s.key} className="bg-raised p-3">
+                  <div className="relative">
+                    <img src={s.url} alt={`Package photo ${i + 1}`} className="block h-32 w-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removeStaged(s.key)}
+                      aria-label={`Remove ${s.file.name}`}
+                      className="absolute right-1.5 top-1.5 border border-line bg-raised p-1 text-ink-soft hover:text-fail"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <Mono muted className="mt-2 block truncate text-[10px]">
+                    {String(i + 1).padStart(2, "0")} · {s.file.name}
+                  </Mono>
+                  <label className="mt-2 flex items-center gap-2">
+                    <span className="kicker">Side</span>
+                    <select
+                      value={s.side}
+                      onChange={(e) => setSide(s.key, e.target.value as PackageSide)}
+                      className="min-w-0 flex-1 border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink"
+                    >
+                      {PACKAGE_SIDES.map((side) => (
+                        <option key={side} value={side}>
+                          {side === "UNKNOWN" ? "Not sure" : side}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </li>
+              ))}
+            </ul>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-3">
+              <p className="text-[11px] text-ink-faint">
+                Photos of different packages must be inspected separately. Sides you
+                do not photograph are reported as not uploaded — never as missing.
+              </p>
+              <Button size="sm" onClick={runOcr}>
+                <ScanSearch className="h-3.5 w-3.5" />
+                Run OCR on {staged.length} {staged.length === 1 ? "image" : "images"}
+              </Button>
+            </div>
+          </Panel>
+        )}
       </div>
     );
   }
@@ -181,18 +275,23 @@ export function InspectionView() {
           <span className="eyebrow">Reading package</span>
           <span className="h-px w-8 bg-accent/40" aria-hidden />
         </div>
-        {imageUrl && (
-          <div className="relative border border-line bg-raised">
-            <img
-              src={imageUrl}
-              alt="Uploaded package"
-              className="block max-h-[320px] w-full object-contain opacity-80"
-            />
-            <Bracket tone="accent" />
-          </div>
-        )}
+        <div className="relative grid grid-cols-2 gap-px border border-line bg-line">
+          {staged.map((s) => (
+            <div key={s.key} className="bg-raised">
+              <img
+                src={s.url}
+                alt="Uploaded package"
+                className="block h-40 w-full object-contain opacity-80"
+              />
+              <Mono muted className="block px-2 py-1 text-[10px] uppercase tracking-[0.1em]">
+                {s.side === "UNKNOWN" ? "Side not set" : s.side}
+              </Mono>
+            </div>
+          ))}
+          <Bracket tone="accent" />
+        </div>
         <div className="flex items-center gap-3 text-[13px] text-ink-soft">
-          <InlineLoading label="Running local PaddleOCR" />
+          <InlineLoading label={`Running local PaddleOCR on ${staged.length} ${staged.length === 1 ? "image" : "images"}`} />
           <span>· first run loads the model, this can take a few seconds</span>
         </div>
       </div>
@@ -221,10 +320,15 @@ export function InspectionView() {
           for a failed read. Try a sharper, straight-on photo of the
           declaration panel, or a different image.
         </p>
-        <Button variant="secondary" size="sm" onClick={reset}>
-          <RotateCcw className="h-3.5 w-3.5" />
-          Try another image
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" size="sm" onClick={() => setPhase("upload")}>
+            Back to the images
+          </Button>
+          <Button variant="secondary" size="sm" onClick={reset}>
+            <RotateCcw className="h-3.5 w-3.5" />
+            Start over
+          </Button>
+        </div>
       </div>
     );
   }
@@ -233,7 +337,7 @@ export function InspectionView() {
 
   if (phase === "evidence") {
     const evidence = ocrTask.data;
-    if (!evidence || !imageUrl) {
+    if (!evidence || !staged.length) {
       return (
         <div className="py-16">
           <Button variant="secondary" size="sm" onClick={reset}>
@@ -245,11 +349,13 @@ export function InspectionView() {
     return (
       <OcrEvidence
         evidence={evidence}
-        imageUrl={imageUrl}
+        urls={urls}
+        activeImageId={activeImageId ?? evidence.images[0].image_id}
+        setActiveImageId={setActiveImageId}
         selectedRegion={selectedRegion}
         setSelectedRegion={setSelectedRegion}
         linkedRegions={selection}
-        selectRegions={setSelection}
+        selectRegions={selectRegions}
         onReset={reset}
         onSmartInspection={runSmartInspection}
         smartLoading={task.loading}
@@ -261,7 +367,7 @@ export function InspectionView() {
   /* ---------------------------------------------------------- workspace --- */
 
   const result = task.data;
-  if (!result || !imageUrl) {
+  if (!result || !staged.length) {
     // Defensive — should not happen; recover to upload.
     return (
       <div className="py-16">
@@ -275,11 +381,13 @@ export function InspectionView() {
   return (
     <Workspace
       result={result}
-      imageUrl={imageUrl}
+      urls={urls}
+      activeImageId={activeImageId ?? result.images[0].image_id}
+      setActiveImageId={setActiveImageId}
       selectedRegion={selectedRegion}
       setSelectedRegion={setSelectedRegion}
       linkedRegions={selection}
-      selectRegions={setSelection}
+      selectRegions={selectRegions}
       onReset={reset}
     />
   );
@@ -289,7 +397,9 @@ export function InspectionView() {
 
 function Workspace({
   result,
-  imageUrl,
+  urls,
+  activeImageId,
+  setActiveImageId,
   selectedRegion,
   setSelectedRegion,
   linkedRegions,
@@ -297,24 +407,28 @@ function Workspace({
   onReset,
 }: {
   result: InspectionAnalysis;
-  imageUrl: string;
+  urls: string[];
+  activeImageId: string;
+  setActiveImageId: (id: string) => void;
   selectedRegion: string | null;
   setSelectedRegion: (id: string | null) => void;
   linkedRegions: string[];
   selectRegions: (ids: string[]) => void;
   onReset: () => void;
 }) {
-  const { image, quality, ocr, declaration_stage, product, standards } = result;
+  const { image, quality, ocr, declaration_stage, product, standards, images } = result;
+  const activeImage = images.find((i) => i.image_id === activeImageId);
   const region = ocr.regions.find((r) => r.id === selectedRegion) ?? null;
   const declForRegion = declarationFor(declaration_stage, selectedRegion);
   const matched = product.status === "MATCHED";
 
   return (
+    <RegionSides.Provider value={regionSides(images)}>
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SectionHeading
           kicker={`Inspection · ${result.inspection_id}`}
-          title={image.filename}
+          title={images.length > 1 ? `${images.length} package images` : image.filename}
           className="[&_h1]:text-2xl [&_h1]:break-all"
         />
         <Button variant="secondary" size="sm" onClick={onReset}>
@@ -327,13 +441,14 @@ function Workspace({
         <span className="font-medium">Live pipeline.</span> Local OCR, then
         deterministic declaration extraction, then product identification and
         standard candidates retrieved from the verified BIS knowledge base. Every
-        value traces back to the OCR region it came from. A standard match is not
-        a compliance or certification decision — the legal-metrology rule engine
-        is the next phase, and unresolved stages read “review”, never a guess.
+        value traces back to the OCR region — and the photo — it came from. A
+        standard match is not a compliance or certification decision; compliance
+        applies only verified requirements, and unresolved stages read “review”,
+        never a guess.
       </Callout>
 
       {result.notes.length > 0 && (
-        <Callout tone="abstain" title="Notes on this image">
+        <Callout tone="abstain" title={images.length > 1 ? "Notes on the images" : "Notes on this image"}>
           <ul className="list-disc space-y-1 pl-4">
             {result.notes.map((n, i) => (
               <li key={i}>{n}</li>
@@ -345,12 +460,12 @@ function Workspace({
       <div className="grid gap-6 lg:grid-cols-[minmax(0,440px)_1fr]">
         {/* LEFT — image + summary */}
         <div className="space-y-4 lg:sticky lg:top-20 lg:self-start">
-          <ImageInspector
-            src={imageUrl}
-            label={`Package image · ${image.width}×${image.height}`}
-            width={image.width}
-            height={image.height}
-            regions={ocr.regions}
+          <PackageImages
+            images={images}
+            urls={urls}
+            coverage={result.package}
+            activeImageId={activeImageId}
+            onActivate={setActiveImageId}
             selectedId={selectedRegion}
             linkedIds={linkedRegions}
             onSelect={setSelectedRegion}
@@ -394,7 +509,10 @@ function Workspace({
 
         {/* RIGHT — OCR + pipeline results */}
         <div className="space-y-6">
-          <QualityPanel quality={quality} />
+          <QualityPanel
+            quality={activeImage?.quality ?? quality}
+            side={images.length > 1 ? activeImage?.side : undefined}
+          />
           <DeclarationsPanel
             stage={declaration_stage}
             selected={linkedRegions}
@@ -423,18 +541,14 @@ function Workspace({
             onSelect={setSelectedRegion}
           />
           {region && (
-            <RegionDetail
-              region={region}
-              declaration={declForRegion}
-              imageW={image.width}
-              imageH={image.height}
-            />
+            <RegionDetail region={region} declaration={declForRegion} images={images} />
           )}
           <RawTextPanel text={ocr.text} />
           <DownstreamPanel result={result} />
         </div>
       </div>
     </div>
+    </RegionSides.Provider>
   );
 }
 
@@ -445,7 +559,9 @@ const LOW_CONFIDENCE = 0.8;
 
 function OcrEvidence({
   evidence,
-  imageUrl,
+  urls,
+  activeImageId,
+  setActiveImageId,
   selectedRegion,
   setSelectedRegion,
   linkedRegions,
@@ -456,7 +572,9 @@ function OcrEvidence({
   smartError,
 }: {
   evidence: InstantOcr;
-  imageUrl: string;
+  urls: string[];
+  activeImageId: string;
+  setActiveImageId: (id: string) => void;
   selectedRegion: string | null;
   setSelectedRegion: (id: string | null) => void;
   linkedRegions: string[];
@@ -466,7 +584,8 @@ function OcrEvidence({
   smartLoading: boolean;
   smartError: unknown;
 }) {
-  const { image, quality, ocr, declaration_stage } = evidence;
+  const { image, quality, ocr, declaration_stage, images } = evidence;
+  const activeImage = images.find((i) => i.image_id === activeImageId);
   const region = ocr.regions.find((r) => r.id === selectedRegion) ?? null;
   const declForRegion = declarationFor(declaration_stage, selectedRegion);
   const hasText = ocr.region_count > 0;
@@ -479,11 +598,12 @@ function OcrEvidence({
     : null;
 
   return (
+    <RegionSides.Provider value={regionSides(images)}>
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SectionHeading
-          kicker={`Instant OCR · ${image.image_id}`}
-          title={image.filename}
+          kicker={`Instant OCR · ${images.length > 1 ? evidence.inspection_id : image.image_id}`}
+          title={images.length > 1 ? `${images.length} package images` : image.filename}
           className="[&_h1]:text-2xl [&_h1]:break-all"
         />
         <div className="flex flex-wrap items-center gap-2">
@@ -522,7 +642,7 @@ function OcrEvidence({
       )}
 
       {evidence.notes.length > 0 && (
-        <Callout tone="abstain" title="Notes on this image">
+        <Callout tone="abstain" title={images.length > 1 ? "Notes on the images" : "Notes on this image"}>
           <ul className="list-disc space-y-1 pl-4">
             {evidence.notes.map((n, i) => (
               <li key={i}>{n}</li>
@@ -534,12 +654,12 @@ function OcrEvidence({
       <div className="grid gap-6 lg:grid-cols-[minmax(0,440px)_1fr]">
         {/* LEFT — image with OCR boxes */}
         <div className="space-y-4 lg:sticky lg:top-20 lg:self-start">
-          <ImageInspector
-            src={imageUrl}
-            label={`Package image · ${image.width}×${image.height}`}
-            width={image.width}
-            height={image.height}
-            regions={ocr.regions}
+          <PackageImages
+            images={images}
+            urls={urls}
+            coverage={evidence.package}
+            activeImageId={activeImageId}
+            onActivate={setActiveImageId}
             selectedId={selectedRegion}
             linkedIds={linkedRegions}
             onSelect={setSelectedRegion}
@@ -551,10 +671,11 @@ function OcrEvidence({
                   {ocr.engine}
                 </Mono>
               </DefinitionRow>
-              <DefinitionRow label="Image">
+              <DefinitionRow label={images.length > 1 ? "Images" : "Image"}>
                 <Mono muted className="text-[11px]">
-                  {image.format} · {image.width}×{image.height} ·{" "}
-                  {Math.max(1, Math.round(image.bytes / 1024))} KB
+                  {images.length > 1
+                    ? `${evidence.package.usable_images} of ${images.length} readable · ${ocr.region_count} regions`
+                    : `${image.format} · ${image.width}×${image.height} · ${Math.max(1, Math.round(image.bytes / 1024))} KB`}
                 </Mono>
               </DefinitionRow>
               <DefinitionRow label="OCR time">
@@ -579,17 +700,16 @@ function OcrEvidence({
             onSelect={setSelectedRegion}
           />
           {region && (
-            <RegionDetail
-              region={region}
-              declaration={declForRegion}
-              imageW={image.width}
-              imageH={image.height}
-            />
+            <RegionDetail region={region} declaration={declForRegion} images={images} />
           )}
-          <QualityPanel quality={quality} />
+          <QualityPanel
+            quality={activeImage?.quality ?? quality}
+            side={images.length > 1 ? activeImage?.side : undefined}
+          />
         </div>
       </div>
     </div>
+    </RegionSides.Provider>
   );
 }
 
@@ -636,13 +756,15 @@ function OcrSummaryPanel({ ocr }: { ocr: InstantOcr["ocr"] }) {
 
 function QualityPanel({
   quality,
+  side,
 }: {
   quality: InspectionAnalysis["quality"];
+  side?: string;
 }) {
   return (
     <Panel flush>
       <PanelHeader
-        title="Image quality"
+        title={side ? `Image quality · ${side === "UNKNOWN" ? "selected photo" : side}` : "Image quality"}
         meta={quality.is_low_quality ? "flagged" : "ok"}
       />
       <dl className="grid grid-cols-3 gap-px border-b border-line bg-line">
@@ -714,6 +836,7 @@ function RegionsPanel({
                       {r.text}
                     </div>
                     <Mono muted className="mt-0.5 block text-[10px]">
+                      {r.side !== "UNKNOWN" ? `${r.side} · ` : ""}
                       {r.id} · box [{r.bbox.join(", ")}]
                     </Mono>
                   </div>
@@ -738,16 +861,17 @@ function RegionsPanel({
 function RegionDetail({
   region,
   declaration,
-  imageW,
-  imageH,
+  images,
 }: {
   region: OcrRegion;
   /** Omit on the Instant OCR view — nothing has been interpreted yet. */
   declaration?: Declaration | null;
-  imageW: number;
-  imageH: number;
+  images: PackageImage[];
 }) {
   const [x1, y1, x2, y2] = region.bbox;
+  const img = images.find((i) => i.image_id === region.image_id);
+  const imageW = img?.width ?? 0;
+  const imageH = img?.height ?? 0;
   return (
     <Panel flush>
       <PanelHeader title="Region evidence" meta={region.id} />
@@ -850,6 +974,7 @@ function DeclarationsPanel({
   selected: string[];
   onSelect: (ids: string[]) => void;
 }) {
+  const where = useWhere();
   const withEvidence = stage.fields.filter((d) => d.status !== "NOT_DETECTED");
   const notDetected = stage.fields.filter((d) => d.status === "NOT_DETECTED");
   const isActive = (d: Declaration) =>
@@ -924,7 +1049,7 @@ function DeclarationsPanel({
                     from “{d.raw_text}”
                   </Mono>
                   <Mono muted className="mt-0.5 block text-[10px]">
-                    {d.source_regions.join(" + ")}
+                    {where(d.source_regions)}
                     {d.ocr_confidence !== null &&
                       ` · OCR ${Math.round(d.ocr_confidence * 100)}%`}
                     {" · "}
@@ -934,6 +1059,19 @@ function DeclarationsPanel({
                     <p className="mt-1 text-[11px] leading-snug text-review">
                       {d.reason}
                     </p>
+                  )}
+                  {d.observations.length > 1 && (
+                    <div className="mt-2 border-l-2 border-line pl-2">
+                      <div className="kicker">
+                        {d.consistency === "CONFLICT" ? "Different readings" : "Same value read on"}
+                      </div>
+                      {d.observations.map((o, j) => (
+                        <Mono key={j} muted className="mt-0.5 block text-[10px]">
+                          {d.consistency === "CONFLICT" ? `${o.value ?? "—"} — ` : ""}
+                          {where(o.source_regions)} · OCR {Math.round(o.ocr_confidence * 100)}%
+                        </Mono>
+                      ))}
+                    </div>
                   )}
                   {d.note && (
                     <p className="mt-1 text-[11px] leading-snug text-ink-faint">
@@ -949,7 +1087,7 @@ function DeclarationsPanel({
 
       {stage.status !== "NO_RELIABLE_TEXT" && notDetected.length > 0 && (
         <p className="border-t border-line px-5 py-3 text-[11px] leading-relaxed text-ink-faint">
-          <span className="text-ink-soft">Not detected in the OCR text:</span>{" "}
+          <span className="text-ink-soft">Not detected in the OCR text of the uploaded images:</span>{" "}
           {notDetected.map((d) => d.label).join(" · ")}
         </p>
       )}
@@ -985,6 +1123,7 @@ function EvidenceRow({
   onSelect: (ids: string[]) => void;
   divider: boolean;
 }) {
+  const where = useWhere();
   const { clue } = evidence;
   const ids = clue.source_regions;
   const active =
@@ -1001,7 +1140,7 @@ function EvidenceRow({
         </Mono>
       )}
       <Mono muted className="mt-0.5 block text-[10px]">
-        {ids.length ? ids.join(" + ") : "not read from the label"}
+        {ids.length ? where(ids) : "not read from the label"}
         {clue.declaration_status ? ` · declaration ${clue.declaration_status.toLowerCase()}` : ""}
         {clue.ocr_confidence !== null ? ` · OCR ${Math.round(clue.ocr_confidence * 100)}%` : ""}
       </Mono>
@@ -1331,6 +1470,7 @@ function ComplianceCheckRow({
   selected: string[];
   onSelect: (ids: string[]) => void;
 }) {
+  const where = useWhere();
   const ids = check.evidence.flatMap((e) => e.source_regions);
   const active =
     ids.length > 0 && ids.length === selected.length && ids.every((id, i) => selected[i] === id);
@@ -1384,7 +1524,7 @@ function ComplianceCheckRow({
               “{e.raw_text}”
               <Mono muted className="mt-0.5 block text-[10px]">
                 {e.declaration_field} · {e.declaration_status.toLowerCase()} ·{" "}
-                {e.source_regions.join(" + ")}
+                {where(e.source_regions)}
                 {e.ocr_confidence !== null ? ` · OCR ${Math.round(e.ocr_confidence * 100)}%` : ""}
               </Mono>
             </div>

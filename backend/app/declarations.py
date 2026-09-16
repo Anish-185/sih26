@@ -17,7 +17,14 @@ whether the declaration is legally required or legally missing.
 
 Evidence: every DETECTED / UNCERTAIN field keeps ``source_regions`` (the OCR
 region ids), the joined ``raw_text`` of those regions, their union ``bbox``, the
-``image_id`` they were read from, and the lowest OCR confidence among them.
+``image_id`` / ``source_images`` / ``source_sides`` they were read from, and the
+lowest OCR confidence among them.
+
+Multi-side packages: regions from several photos of one package are extracted
+together. A label and a value are only joined inside the same photo. When the
+same field is read more than once, ``observations`` keeps every reading and
+``consistency`` says whether they agree (``DUPLICATE``) or not (``CONFLICT`` —
+the value is withheld and the field is UNCERTAIN). Nothing is chosen silently.
 """
 
 from __future__ import annotations
@@ -61,6 +68,10 @@ class Declaration:
     numeric_value: float | None = None
     note: str = ""
     reason: str = ""  # why UNCERTAIN / NOT_DETECTED
+    source_images: list[str] = field(default_factory=list)  # every image the regions came from
+    source_sides: list[str] = field(default_factory=list)  # package side of each source image
+    consistency: str = ""  # "SINGLE" | "DUPLICATE" | "CONFLICT" ("" when not detected)
+    observations: list["Observation"] = field(default_factory=list)  # each reading, when > 1
 
     @property
     def source_region_id(self) -> str | None:
@@ -68,6 +79,17 @@ class Declaration:
 
     def as_dict(self) -> dict:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class Observation:
+    """One reading of a field on the package, kept when a field is read more than once."""
+
+    value: str | None
+    source_regions: list[str]
+    source_images: list[str]
+    source_sides: list[str]
+    ocr_confidence: float
 
 
 @dataclass(frozen=True)
@@ -144,11 +166,7 @@ def extract_declarations(regions: Iterable[RegionLike]) -> DeclarationStage:
     regions = [r for r in regions if r is not None and isinstance(getattr(r, "text", None), str)]
     notes: list[str] = []
 
-    reliable = [
-        r for r in regions
-        if _conf(r) >= RELIABLE_TEXT_CONFIDENCE and len(re.findall(r"[A-Za-z0-9]", r.text)) >= 2
-    ]
-    if not reliable:
+    if not has_reliable_text(regions):
         why = "No OCR text to extract declarations from." if not regions else (
             "OCR text is too sparse or too low-confidence to extract declarations from."
         )
@@ -202,6 +220,14 @@ def extract_declarations(regions: Iterable[RegionLike]) -> DeclarationStage:
     )
 
 
+def has_reliable_text(regions) -> bool:
+    """At least one region read with reasonable confidence and a few letters/digits."""
+    return any(
+        _conf(r) >= RELIABLE_TEXT_CONFIDENCE and len(re.findall(r"[A-Za-z0-9]", r.text or "")) >= 2
+        for r in regions
+    )
+
+
 # ------------------------------------------------------------- evidence helpers
 
 
@@ -242,7 +268,13 @@ class _Cand:
     uncertain: str = ""  # non-empty => UNCERTAIN with this reason
 
 
-def _build(field_name: str, cand: _Cand, method: str | None = None) -> Declaration:
+def _build(
+    field_name: str,
+    cand: _Cand,
+    method: str | None = None,
+    consistency: str = "SINGLE",
+    observations: tuple = (),
+) -> Declaration:
     label, default_method = FIELDS[field_name]
     lowest = min(_conf(r) for r in cand.regions)
     status, reason = DETECTED, ""
@@ -251,8 +283,7 @@ def _build(field_name: str, cand: _Cand, method: str | None = None) -> Declarati
     elif lowest < LOW_OCR_CONFIDENCE:
         status = UNCERTAIN
         reason = f"OCR read the source text with low confidence ({round(lowest * 100)}%)."
-    image_id = next((getattr(r, "image_id", None) for r in cand.regions
-                     if getattr(r, "image_id", None)), None)
+    images = _distinct_attr(cand.regions, "image_id")
     return Declaration(
         field=field_name,
         label=label,
@@ -261,13 +292,43 @@ def _build(field_name: str, cand: _Cand, method: str | None = None) -> Declarati
         raw_text=" ".join(r.text.strip() for r in cand.regions),
         source_regions=[r.id for r in cand.regions],
         bbox=_union_bbox(cand.regions),
-        image_id=image_id,
+        image_id=images[0] if images else None,
         ocr_confidence=round(lowest, 4),
         method=method or default_method,
         unit=cand.unit,
         numeric_value=cand.numeric_value,
         note=cand.note,
         reason=reason,
+        source_images=images,
+        source_sides=_distinct_attr(cand.regions, "side"),
+        consistency=consistency,
+        observations=list(observations),
+    )
+
+
+def _distinct_attr(regions, name: str) -> list[str]:
+    out: list[str] = []
+    for r in regions:
+        value = getattr(r, name, None)
+        if value and value not in out:
+            out.append(value)
+    return out
+
+
+def _where(regions) -> str:
+    """'BACK I2-OCR-007' — side (when known) and region id, for reasons."""
+    return ", ".join(
+        f"{getattr(r, 'side')} {r.id}" if getattr(r, "side", None) else r.id for r in regions
+    )
+
+
+def _observation(cand: "_Cand") -> Observation:
+    return Observation(
+        value=cand.value,
+        source_regions=[r.id for r in cand.regions],
+        source_images=_distinct_attr(cand.regions, "image_id"),
+        source_sides=_distinct_attr(cand.regions, "side"),
+        ocr_confidence=round(min(_conf(r) for r in cand.regions), 4),
     )
 
 
@@ -283,6 +344,8 @@ def _resolve(field_name: str, cands: list[_Cand], method: str | None = None) -> 
     for c in cands:
         keys.setdefault(c.key if c.key is not None else (c.value or "").lower(), []).append(c)
 
+    observations = tuple(_observation(c) for c in cands) if len(cands) > 1 else ()
+
     if len(keys) == 1:
         group = next(iter(keys.values()))
         first = group[0]
@@ -293,18 +356,18 @@ def _resolve(field_name: str, cands: list[_Cand], method: str | None = None) -> 
         return _build(field_name, _Cand(
             regions=merged, value=first.value, unit=first.unit,
             numeric_value=first.numeric_value, note=first.note, uncertain=uncertain,
-        ), method)
+        ), method, consistency="DUPLICATE" if len(cands) > 1 else "SINGLE", observations=observations)
 
     readings = "; ".join(
-        f"{g[0].value} ({', '.join(r.id for c in g for r in c.regions)})" for g in keys.values()
+        f"{g[0].value} ({'; '.join(_where(c.regions) for c in g)})" for g in keys.values()
     )
     all_regions: list = []
     for c in cands:
         all_regions.extend(r for r in c.regions if r not in all_regions)
     return _build(field_name, _Cand(
         regions=all_regions, value=None,
-        uncertain=f"Different values found on the label: {readings}.",
-    ), method)
+        uncertain=f"Different values found on the package: {readings}.",
+    ), method, consistency="CONFLICT", observations=observations)
 
 
 def _label_only(field_name: str, regions, label: re.Pattern, what: str) -> Declaration | None:
@@ -328,6 +391,8 @@ def _adjacent(a, b) -> bool:
     directly below with a small gap."""
     if getattr(a, "bbox", None) is None or getattr(b, "bbox", None) is None:
         return False
+    if getattr(a, "image_id", None) != getattr(b, "image_id", None):
+        return False  # boxes on different photos are never next to each other
     ax1, ay1, ax2, ay2 = a.bbox
     bx1, by1, bx2, by2 = b.bbox
     h = max(1, min(ay2 - ay1, by2 - by1))
@@ -496,14 +561,14 @@ _RE_ADDRESS_TOKENS = re.compile(
 
 
 def _manufacturer_address(regions):
-    for r in regions:
-        t = r.text
-        if _RE_PIN.search(t) and "," in t and (_RE_STATE.search(t) or _RE_ADDRESS_TOKENS.search(t)):
-            return _build("manufacturer_address", _Cand(
-                regions=[r], value=t.strip(),
-                note="line with a 6-digit PIN code and address words",
-            ))
-    return None
+    cands = [
+        _Cand(regions=[r], value=r.text.strip(), key=re.sub(r"\W+", "", r.text.lower()),
+              note="line with a 6-digit PIN code and address words")
+        for r in regions
+        if _RE_PIN.search(r.text) and "," in r.text
+        and (_RE_STATE.search(r.text) or _RE_ADDRESS_TOKENS.search(r.text))
+    ]
+    return _resolve("manufacturer_address", cands)
 
 
 _DATE = (
@@ -652,24 +717,21 @@ _RE_FSSAI_WORD = re.compile(r"f\.?\s*s\.?\s*s\.?\s*a\.?\s*i", re.IGNORECASE)
 
 
 def _licence_number(regions):
-    for h in _hits(regions, _RE_CML):
-        return _build("licence_number", _Cand(
-            regions=h.regions, value=f"CM/L-{h.match.group(1)}",
-            note="BIS licence number format (CM/L) as printed — not verified.",
-        ))
-    for h in _hits(regions, _RE_REG):
-        return _build("licence_number", _Cand(
-            regions=h.regions, value=h.match.group(1).upper(),
-            note="Registration number as printed — not verified.",
-        ))
-    for h in _hits(regions, _RE_LIC):
-        if any(_RE_FSSAI_WORD.search(r.text) for r in h.regions):
-            continue  # FSSAI licences have their own field
-        return _build("licence_number", _Cand(
-            regions=h.regions, value=h.match.group(1).upper(),
-            uncertain="A licence number was found but the issuing authority is not stated.",
-        ))
-    return None
+    cml = [_Cand(regions=h.regions, value=f"CM/L-{h.match.group(1)}",
+                 note="BIS licence number format (CM/L) as printed — not verified.")
+           for h in _hits(regions, _RE_CML)]
+    if cml:
+        return _resolve("licence_number", cml)
+    reg = [_Cand(regions=h.regions, value=h.match.group(1).upper(),
+                 note="Registration number as printed — not verified.")
+           for h in _hits(regions, _RE_REG)]
+    if reg:
+        return _resolve("licence_number", reg)
+    lic = [_Cand(regions=h.regions, value=h.match.group(1).upper(),
+                 uncertain="A licence number was found but the issuing authority is not stated.")
+           for h in _hits(regions, _RE_LIC)
+           if not any(_RE_FSSAI_WORD.search(r.text) for r in h.regions)]  # FSSAI has its own field
+    return _resolve("licence_number", lic)
 
 
 _RE_BRAND = re.compile(r"\bbrand(?:\s*name)?\s*[:\-]\s*([A-Za-z0-9][^,;|]{1,40})", re.IGNORECASE)
@@ -677,13 +739,14 @@ _RE_TRADEMARK = re.compile(r"([A-Za-z][A-Za-z0-9&'.\- ]{1,30}?)\s*[®™]")
 
 
 def _brand(regions):
-    for h in _hits(regions, _RE_BRAND):
-        return _build("brand", _Cand(regions=h.regions, value=h.match.group(1).strip(),
-                                     note="labelled 'Brand' on the package"))
-    for h in _hits(regions, _RE_TRADEMARK):
-        return _build("brand", _Cand(regions=h.regions, value=h.match.group(1).strip(),
-                                     note="name marked with ® or ™"))
-    return None
+    labelled = [_Cand(regions=h.regions, value=h.match.group(1).strip(),
+                      note="labelled 'Brand' on the package")
+                for h in _hits(regions, _RE_BRAND)]
+    if labelled:
+        return _resolve("brand", labelled)
+    marked = [_Cand(regions=h.regions, value=h.match.group(1).strip(), note="name marked with ® or ™")
+              for h in _hits(regions, _RE_TRADEMARK)]
+    return _resolve("brand", marked)
 
 
 _RE_EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
@@ -693,13 +756,14 @@ _RE_EMAIL_TLD = re.compile(r"^(.+?\.(?:com|in|org|net|co\.in|gov\.in|info|biz|ex
 
 
 def _consumer_care(regions):
+    cands = []
     for h in _hits(regions, _RE_EMAIL):
         email, note = h.match.group(0), ""
         m = _RE_EMAIL_TLD.match(email)
         if m:  # OCR joined the next words: "haldirams.comandfor"
             email, note = m.group(1), f"OCR joined text after the address ('{email}'); trimmed at the domain ending."
-        return _build("consumer_care", _Cand(regions=h.regions, value=email, note=note))
-    return None
+        cands.append(_Cand(regions=h.regions, value=email, key=email.lower(), note=note))
+    return _resolve("consumer_care", cands)
 
 
 _RE_TOLLFREE = re.compile(
@@ -712,9 +776,11 @@ _RE_1800 = re.compile(r"\b(1\s?800[\s\-]?\d{2,4}[\s\-]?\d{3,4})\b")
 
 def _toll_free(regions):
     for pattern in (_RE_TOLLFREE, _RE_1800):
-        for h in _hits(regions, pattern):
-            return _build("toll_free", _Cand(regions=h.regions,
-                                             value=re.sub(r"\s+", " ", h.match.group(1)).strip()))
+        cands = [_Cand(regions=h.regions, value=re.sub(r"\s+", " ", h.match.group(1)).strip(),
+                       key=re.sub(r"\D", "", h.match.group(1)))
+                 for h in _hits(regions, pattern)]
+        if cands:
+            return _resolve("toll_free", cands)
     return None
 
 
@@ -725,15 +791,15 @@ _RE_FSSAI = re.compile(
 
 
 def _fssai_license(regions):
+    cands = []
     for h in _hits(regions, _RE_FSSAI):
         digits = re.sub(r"\D", "", h.match.group(1))
-        if len(digits) < 12:
-            continue
-        return _build("fssai_license", _Cand(
-            regions=h.regions, value=digits,
-            note="FSSAI food-safety licence — a food regulator ID, NOT an Indian Standard",
-        ))
-    return None
+        if len(digits) >= 12:
+            cands.append(_Cand(
+                regions=h.regions, value=digits, key=digits,
+                note="FSSAI food-safety licence — a food regulator ID, NOT an Indian Standard",
+            ))
+    return _resolve("fssai_license", cands)
 
 
 _RE_PDP = re.compile(r"principal\s*display\s*panel|principal\s*display", re.IGNORECASE)
@@ -751,11 +817,12 @@ _RE_PARENS = re.compile(r"^\s*\((.+)\)\s*$")
 
 
 def _product_description(regions):
+    cands = []
     for r in regions:
         m = _RE_PARENS.match(r.text)
         if m and len(m.group(1).split()) >= 2:
-            return _build("product_description", _Cand(regions=[r], value=m.group(1).strip()))
-    return None
+            cands.append(_Cand(regions=[r], value=m.group(1).strip()))
+    return _resolve("product_description", cands)
 
 
 _LABEL_WORDS = re.compile(
@@ -778,6 +845,16 @@ def _text_size(region) -> int:
 
 
 def _product_name(regions, claimed_region_ids: set[str]):
+    """The product name, chosen separately on each photo (text size is only
+    comparable within one photo), then merged like any other field."""
+    by_image: dict[object, list] = {}
+    for r in regions:
+        by_image.setdefault(getattr(r, "image_id", None), []).append(r)
+    cands = [c for group in by_image.values() if (c := _product_name_on_image(group, claimed_region_ids))]
+    return _resolve("product_name", cands)
+
+
+def _product_name_on_image(regions, claimed_region_ids: set[str]) -> _Cand | None:
     """Heuristic: the most prominent line that is not a labelled field.
 
     Prominence = text size relative to the median line, preferring earlier and
@@ -827,10 +904,10 @@ def _product_name(regions, claimed_region_ids: set[str]):
         uncertain = "The most prominent line is a single word — it could be the brand rather than the product name."
 
     value = t.title() if t.isupper() else t
-    return _build("product_name", _Cand(
-        regions=[r], value=value, uncertain=uncertain,
+    return _Cand(
+        regions=[r], value=value, key=re.sub(r"\W+", "", value.lower()), uncertain=uncertain,
         note="most prominent unlabelled line on the panel",
-    ))
+    )
 
 
 _EXTRACTORS = (

@@ -26,6 +26,7 @@ import hashlib
 import io
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import numpy as np
@@ -33,7 +34,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
 from app.api import ReasonOut, WhyOut
-from app.declarations import extract_declarations
+from app.declarations import extract_declarations, has_reliable_text
 from app.llm import LocalLLM
 from app.product import ProductStandardFinder
 from app.product_identification import RETRIEVAL_NOTE, product_name_of
@@ -46,6 +47,21 @@ MIN_DIMENSION = 80                    # px — smaller than this cannot hold a l
 MAX_DIMENSION = 6000                  # px — anything larger is downscaled for OCR
 OCR_MAX_SIDE = 2000                   # px — long side the OCR engine actually sees
 SUPPORTED_FORMATS = {"JPEG", "PNG", "WEBP", "BMP", "TIFF", "MPO"}
+
+# One inspection = one physical package, photographed from one or more sides.
+MAX_IMAGES = 8
+MAX_TOTAL_BYTES = 60 * 1024 * 1024
+PACKAGE_SIDES = ("FRONT", "BACK", "LEFT", "RIGHT", "TOP", "BOTTOM")
+SIDES = (*PACKAGE_SIDES, "UNKNOWN")
+
+
+@dataclass(frozen=True)
+class PackageUpload:
+    """One uploaded photo of the package. ``filename`` is display-only, never trusted."""
+
+    data: bytes
+    filename: str = "upload"
+    side: str | None = None
 
 
 class ImageError(ValueError):
@@ -80,8 +96,12 @@ class QualityOut(BaseModel):
 
 
 class OcrRegionOut(BaseModel):
-    id: str = Field(description="Stable within one analysis, e.g. OCR-001.")
+    id: str = Field(
+        description="Unique within one inspection: OCR-001 for a single image, "
+        "I2-OCR-001 for the second image of a multi-image package."
+    )
     image_id: str = Field(description="The image this region was read from.")
+    side: str = Field(default="UNKNOWN", description="Package side of that image.")
     text: str = Field(description="Raw recognised text, exactly as OCR returned it.")
     confidence: float = Field(ge=0.0, le=1.0)
     bbox: list[int] = Field(
@@ -99,6 +119,16 @@ class OcrOut(BaseModel):
     mean_confidence: float
     duration_ms: int
     regions: list[OcrRegionOut]
+
+
+class ObservationOut(BaseModel):
+    """One reading of a field, kept when the field was read more than once."""
+
+    value: str | None = None
+    source_regions: list[str]
+    source_images: list[str]
+    source_sides: list[str]
+    ocr_confidence: float
 
 
 class DeclarationOut(BaseModel):
@@ -125,6 +155,16 @@ class DeclarationOut(BaseModel):
     extraction_method: str = Field(description='"deterministic"')
     note: str = ""
     reason: str = Field(default="", description="Why UNCERTAIN / NOT_DETECTED.")
+    source_images: list[str] = Field(default_factory=list, description="Every image the value was read from.")
+    source_sides: list[str] = Field(default_factory=list, description="Package sides of those images.")
+    consistency: str = Field(
+        default="",
+        description='"SINGLE" | "DUPLICATE" (same value read more than once) | '
+        '"CONFLICT" (different values — withheld, UNCERTAIN) | "" when not detected',
+    )
+    observations: list[ObservationOut] = Field(
+        default_factory=list, description="Every reading, when the field was read more than once."
+    )
 
 
 class DeclarationStageOut(BaseModel):
@@ -138,6 +178,40 @@ class DeclarationStageOut(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class PackageImageOut(BaseModel):
+    """One photo of the package and its own OCR evidence."""
+
+    image_id: str
+    index: int = Field(description="1-based upload order.")
+    side: str = Field(description='"FRONT" | "BACK" | "LEFT" | "RIGHT" | "TOP" | "BOTTOM" | "UNKNOWN"')
+    filename: str
+    status: str = Field(
+        description='"COMPLETED" | "NO_RELIABLE_TEXT" (text read, none reliable) | '
+        '"NO_TEXT" (no text detected) | "FAILED" (image unreadable or OCR error)'
+    )
+    error: str | None = None
+    format: str | None = None
+    width: int | None = None
+    height: int | None = None
+    bytes: int
+    quality: QualityOut | None = None
+    ocr: OcrOut | None = None
+    notes: list[str] = Field(default_factory=list)
+
+
+class PackageCoverageOut(BaseModel):
+    """What the uploaded photos cover. "Not uploaded", "OCR failed" and "no text"
+    are different states, and none of them means a declaration is absent."""
+
+    image_count: int
+    usable_images: int
+    sides_uploaded: list[str]
+    sides_not_uploaded: list[str]
+    images_failed: list[str]
+    images_no_text: list[str]
+    images_no_reliable_text: list[str]
+
+
 class InstantOcrOut(BaseModel):
     """Instant OCR — raw OCR evidence plus the declarations read from it.
     No product identification, standard lookup or compliance check."""
@@ -146,10 +220,13 @@ class InstantOcrOut(BaseModel):
         description='"COMPLETED" (text found) | "NO_TEXT" (nothing legible — '
         "needs a better photo or officer review)"
     )
+    inspection_id: str
     created_at: str
-    image: ImageInfoOut
-    quality: QualityOut
-    ocr: OcrOut
+    image: ImageInfoOut = Field(description="The first readable image (kept for single-image clients).")
+    quality: QualityOut = Field(description="Quality of the first readable image.")
+    ocr: OcrOut = Field(description="OCR regions of every image combined.")
+    images: list[PackageImageOut]
+    package: PackageCoverageOut
     declaration_stage: DeclarationStageOut
     notes: list[str] = Field(default_factory=list)
 
@@ -237,6 +314,8 @@ class CheckEvidenceOut(BaseModel):
     image_id: str | None = None
     ocr_confidence: float | None = None
     bbox: list[int] | None = None
+    source_images: list[str] = Field(default_factory=list)
+    source_sides: list[str] = Field(default_factory=list)
 
 
 class RequirementSourceOut(BaseModel):
@@ -310,6 +389,8 @@ class InspectionAnalysisOut(BaseModel):
     image: ImageInfoOut
     quality: QualityOut
     ocr: OcrOut
+    images: list[PackageImageOut]
+    package: PackageCoverageOut
     declaration_stage: DeclarationStageOut
     product: ProductIdentificationOut
     standards: list[StandardCandidateOut] = Field(
@@ -350,75 +431,60 @@ class InspectionAnalyzer:
         self._ocr_engine = ocr_engine
         self._product_finder = product_finder
 
-    def ocr(self, data: bytes, filename: str) -> InstantOcrOut:
-        """Instant OCR: validate the image, measure quality, run OCR and return
-        the raw regions plus deterministic declarations. No product
-        identification, standard retrieval, model call or rule check happens
-        here."""
-        if not data:
-            raise ImageError("Empty upload.")
-        if len(data) > MAX_BYTES:
-            raise ImageError(
-                f"Image is {len(data) // (1024 * 1024)} MB; the limit is "
-                f"{MAX_BYTES // (1024 * 1024)} MB."
-            )
+    def ocr(self, data: bytes, filename: str, side: str | None = None) -> InstantOcrOut:
+        """Instant OCR of one image (see ``ocr_package``)."""
+        return self.ocr_package([PackageUpload(data, filename, side)])
 
-        image = self._decode(data)
-        fmt = (image.format or "").upper() or "UNKNOWN"
+    def analyze(self, data: bytes, filename: str, side: str | None = None) -> InspectionAnalysisOut:
+        """Smart Inspection of one image (see ``analyze_package``)."""
+        return self.analyze_package([PackageUpload(data, filename, side)])
 
-        # Respect EXIF orientation so bounding boxes line up with what the
-        # frontend renders, then work in RGB.
-        image = ImageOps.exif_transpose(image).convert("RGB")
-        width, height = image.size
+    def ocr_package(self, uploads: list[PackageUpload]) -> InstantOcrOut:
+        """Instant OCR of one package photographed from one or more sides.
 
-        if min(width, height) < MIN_DIMENSION:
-            raise ImageError(
-                f"Image is {width}x{height}px — too small to read a label."
-            )
+        Every image is validated and OCR'd on its own with the same engine; its
+        regions keep their image_id and side. Declarations are extracted from all
+        regions together. No product identification, standard retrieval, model
+        call or rule check happens here.
 
-        image_id = f"IMG-{hashlib.sha256(data).hexdigest()[:12].upper()}"
-        arr = np.asarray(image, dtype=np.uint8)
-        quality = self._quality(arr)
+        One image: any error is raised (unchanged single-image behaviour). Several
+        images: a failed image is reported with status FAILED and the others are
+        still processed; only if every image fails is an error raised.
+        """
+        sides = self._validate_package(uploads)
+        multi = len(uploads) > 1
+        images: list[PackageImageOut] = []
+        errors: list[Exception] = []
+        for index, (upload, side) in enumerate(zip(uploads, sides), start=1):
+            try:
+                images.append(self._read_image(upload, index, side, prefix=f"I{index}-" if multi else ""))
+            except (ImageError, OcrError) as exc:
+                if not multi:
+                    raise
+                errors.append(exc)
+                images.append(PackageImageOut(
+                    image_id=_image_id(upload.data), index=index, side=side,
+                    filename=upload.filename or "upload", status="FAILED", error=str(exc),
+                    bytes=len(upload.data),
+                ))
 
-        ocr_arr, scale = self._prepare_for_ocr(arr)
-        try:
-            raw_regions, elapsed = self._ocr_engine(ocr_arr)
-        except OcrError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            raise OcrError(f"OCR failed unexpectedly: {exc}") from exc
+        usable = [img for img in images if img.ocr is not None]
+        if not usable:
+            raise errors[0]
 
-        regions: list[OcrRegionOut] = []
-        for i, r in enumerate(raw_regions, start=1):
-            bbox = [int(round(v / scale)) for v in r.bbox]
-            polygon = [[int(round(x / scale)), int(round(y / scale))] for x, y in r.polygon]
-            regions.append(
-                OcrRegionOut(
-                    id=f"OCR-{i:03d}",
-                    image_id=image_id,
-                    text=r.text,
-                    confidence=round(r.confidence, 4),
-                    bbox=bbox,
-                    polygon=polygon,
-                )
-            )
-
-        mean_conf = (
-            round(sum(x.confidence for x in regions) / len(regions), 4)
-            if regions
-            else 0.0
-        )
-        joined = "\n".join(x.text for x in regions)
-
+        regions = [r for img in usable for r in img.ocr.regions]
         notes: list[str] = []
-        if not regions:
-            notes.append(
-                "OCR found no legible text in this image. "
-                "Try a sharper, straight-on photo of the declaration panel."
-            )
-        notes.extend(quality.notes)
+        for img in images:
+            label = _image_label(img) if multi else ""
+            if img.status == "FAILED":
+                notes.append(
+                    f"{label}: OCR failed ({img.error}). Evidence from this image is missing — "
+                    "that does not mean anything is absent from the package."
+                )
+            else:
+                notes.extend(f"{label}: {n}" if label else n for n in img.notes)
 
-        # Deterministic declarations over the OCR regions. Isolated so an
+        # Deterministic declarations over every image's regions. Isolated so an
         # extraction bug can never break the OCR evidence.
         try:
             declaration_stage = _declaration_stage_out(extract_declarations(regions))
@@ -429,33 +495,35 @@ class InspectionAnalyzer:
             )
             notes.append(f"Declaration extraction error: {exc}")
 
+        first = usable[0]
         return InstantOcrOut(
             status="COMPLETED" if regions else "NO_TEXT",
+            inspection_id=f"INS-{datetime.now(timezone.utc):%Y%m%d}-{uuid.uuid4().hex[:6].upper()}",
             created_at=datetime.now(timezone.utc).isoformat(),
             image=ImageInfoOut(
-                image_id=image_id,
-                filename=filename or "upload",
-                format=fmt,
-                width=width,
-                height=height,
-                bytes=len(data),
+                image_id=first.image_id, filename=first.filename, format=first.format or "UNKNOWN",
+                width=first.width or 0, height=first.height or 0, bytes=first.bytes,
             ),
-            quality=quality,
+            quality=first.quality,
             ocr=OcrOut(
                 engine=OCR_ENGINE,
-                text=joined,
+                text="\n".join(r.text for r in regions),
                 region_count=len(regions),
-                mean_confidence=mean_conf,
-                duration_ms=int(elapsed * 1000),
+                mean_confidence=round(sum(r.confidence for r in regions) / len(regions), 4) if regions else 0.0,
+                duration_ms=sum(img.ocr.duration_ms for img in usable),
                 regions=regions,
             ),
+            images=images,
+            package=_package_coverage(images),
             declaration_stage=declaration_stage,
             notes=notes,
         )
 
-    def analyze(self, data: bytes, filename: str) -> InspectionAnalysisOut:
-        """Smart Inspection: Instant OCR, then the downstream pipeline."""
-        evidence = self.ocr(data, filename)
+    def analyze_package(self, uploads: list[PackageUpload]) -> InspectionAnalysisOut:
+        """Smart Inspection of one package: Instant OCR of every image, then the
+        downstream pipeline (declarations -> product -> standards -> compliance)
+        over the combined evidence."""
+        evidence = self.ocr_package(uploads)
         regions = evidence.ocr.regions
         notes = list(evidence.notes)
 
@@ -477,17 +545,135 @@ class InspectionAnalyzer:
             )
             notes.append(f"Downstream pipeline error: {exc}")
 
+        # The compliance result must say when some photos gave no usable evidence.
+        package = evidence.package
+        gaps = package.images_failed + package.images_no_text + package.images_no_reliable_text
+        if len(evidence.images) > 1 and gaps:
+            compliance.notes.append(
+                "Some images gave no usable OCR evidence (" + "; ".join(gaps) + "). Checks use the "
+                "remaining images only; missing evidence is not treated as absent."
+            )
+
         return InspectionAnalysisOut(
-            inspection_id=f"INS-{datetime.now(timezone.utc):%Y%m%d}-{uuid.uuid4().hex[:6].upper()}",
+            inspection_id=evidence.inspection_id,
             created_at=evidence.created_at,
             image=evidence.image,
             quality=evidence.quality,
             ocr=evidence.ocr,
+            images=evidence.images,
+            package=package,
             declaration_stage=declaration_stage,
             product=product,
             standards=standards,
             compliance=compliance,
             pipeline=pipeline,
+            notes=notes,
+        )
+
+    @staticmethod
+    def _validate_package(uploads: list[PackageUpload]) -> list[str]:
+        if not uploads:
+            raise ImageError("Upload at least one image.")
+        if len(uploads) > MAX_IMAGES:
+            raise ImageError(f"At most {MAX_IMAGES} images per package.")
+        if sum(len(u.data) for u in uploads) > MAX_TOTAL_BYTES:
+            raise ImageError(f"Images exceed the {MAX_TOTAL_BYTES // (1024 * 1024)} MB total limit.")
+        sides: list[str] = []
+        for u in uploads:
+            side = (u.side or "UNKNOWN").strip().upper() or "UNKNOWN"
+            if side not in SIDES:
+                raise ImageError(f"Unknown package side '{u.side}'. Use one of: {', '.join(SIDES)}.")
+            sides.append(side)
+        seen: set[str] = set()
+        for u in uploads:
+            key = hashlib.sha256(u.data).hexdigest()
+            if u.data and key in seen:
+                raise ImageError("The same image was uploaded more than once.")
+            seen.add(key)
+        return sides
+
+    def _read_image(self, upload: PackageUpload, index: int, side: str, prefix: str) -> PackageImageOut:
+        """Validate, measure and OCR one image. Raises ImageError / OcrError."""
+        data = upload.data
+        if not data:
+            raise ImageError("Empty upload.")
+        if len(data) > MAX_BYTES:
+            raise ImageError(
+                f"Image is {len(data) // (1024 * 1024)} MB; the limit is "
+                f"{MAX_BYTES // (1024 * 1024)} MB."
+            )
+
+        image = self._decode(data)
+        fmt = (image.format or "").upper() or "UNKNOWN"
+
+        # Respect EXIF orientation so bounding boxes line up with what the
+        # frontend renders, then work in RGB.
+        image = ImageOps.exif_transpose(image).convert("RGB")
+        width, height = image.size
+
+        if min(width, height) < MIN_DIMENSION:
+            raise ImageError(
+                f"Image is {width}x{height}px — too small to read a label."
+            )
+
+        image_id = _image_id(data)
+        arr = np.asarray(image, dtype=np.uint8)
+        quality = self._quality(arr)
+
+        ocr_arr, scale = self._prepare_for_ocr(arr)
+        try:
+            raw_regions, elapsed = self._ocr_engine(ocr_arr)
+        except OcrError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise OcrError(f"OCR failed unexpectedly: {exc}") from exc
+
+        regions: list[OcrRegionOut] = []
+        for i, r in enumerate(raw_regions, start=1):
+            bbox = [int(round(v / scale)) for v in r.bbox]
+            polygon = [[int(round(x / scale)), int(round(y / scale))] for x, y in r.polygon]
+            regions.append(
+                OcrRegionOut(
+                    id=f"{prefix}OCR-{i:03d}",
+                    image_id=image_id,
+                    side=side,
+                    text=r.text,
+                    confidence=round(r.confidence, 4),
+                    bbox=bbox,
+                    polygon=polygon,
+                )
+            )
+
+        mean_conf = (
+            round(sum(x.confidence for x in regions) / len(regions), 4)
+            if regions
+            else 0.0
+        )
+        notes: list[str] = []
+        if not regions:
+            status = "NO_TEXT"
+            notes.append(
+                "OCR found no legible text in this image. "
+                "Try a sharper, straight-on photo of the declaration panel."
+            )
+        elif not has_reliable_text(regions):
+            status = "NO_RELIABLE_TEXT"
+            notes.append("OCR read only low-confidence fragments in this image.")
+        else:
+            status = "COMPLETED"
+        notes.extend(quality.notes)
+
+        return PackageImageOut(
+            image_id=image_id, index=index, side=side, filename=upload.filename or "upload",
+            status=status, format=fmt, width=width, height=height, bytes=len(data), quality=quality,
+            ocr=OcrOut(
+                engine=OCR_ENGINE,
+                text="\n".join(x.text for x in regions),
+                region_count=len(regions),
+                mean_confidence=mean_conf,
+                duration_ms=int(elapsed * 1000),
+                regions=regions,
+            ),
             notes=notes,
         )
 
@@ -566,6 +752,27 @@ class InspectionAnalyzer:
 # dataclass (app.pipeline) -> pydantic (*Out) converters
 # ---------------------------------------------------------------------------
 
+def _image_id(data: bytes) -> str:
+    return f"IMG-{hashlib.sha256(data).hexdigest()[:12].upper()}"
+
+
+def _image_label(img: PackageImageOut) -> str:
+    return f"{img.side} (image {img.index})"
+
+
+def _package_coverage(images: list[PackageImageOut]) -> PackageCoverageOut:
+    uploaded = [s for s in PACKAGE_SIDES if any(img.side == s for img in images)]
+    return PackageCoverageOut(
+        image_count=len(images),
+        usable_images=sum(img.status in ("COMPLETED", "NO_RELIABLE_TEXT") for img in images),
+        sides_uploaded=uploaded + (["UNKNOWN"] if any(img.side == "UNKNOWN" for img in images) else []),
+        sides_not_uploaded=[s for s in PACKAGE_SIDES if s not in uploaded],
+        images_failed=[_image_label(i) for i in images if i.status == "FAILED"],
+        images_no_text=[_image_label(i) for i in images if i.status == "NO_TEXT"],
+        images_no_reliable_text=[_image_label(i) for i in images if i.status == "NO_RELIABLE_TEXT"],
+    )
+
+
 def _declaration_stage_out(stage) -> DeclarationStageOut:
     return DeclarationStageOut(
         status=stage.status,
@@ -587,6 +794,10 @@ def _declaration_stage_out(stage) -> DeclarationStageOut:
                 extraction_method=d.extraction_method,
                 note=d.note,
                 reason=d.reason,
+                source_images=list(d.source_images),
+                source_sides=list(d.source_sides),
+                consistency=d.consistency,
+                observations=[ObservationOut(**o.__dict__) for o in d.observations],
             )
             for d in stage.fields
         ],

@@ -178,9 +178,20 @@ export interface AskResponse {
 
 /* ---- inspection: IMAGE -> OCR (/inspection/ocr) -> pipeline (/analyze) --- */
 
+/** Package sides a photo can show. UNKNOWN when the officer did not say. */
+export const PACKAGE_SIDES = ["FRONT", "BACK", "LEFT", "RIGHT", "TOP", "BOTTOM", "UNKNOWN"] as const;
+export type PackageSide = (typeof PACKAGE_SIDES)[number];
+
+/** One photo to upload for a package inspection. */
+export interface PackageUploadInput {
+  file: File;
+  side: PackageSide;
+}
+
 export interface OcrRegion {
-  id: string;
+  id: string; // unique within one inspection (OCR-001, or I2-OCR-001 for image 2)
   image_id: string; // the image this region was read from
+  side: PackageSide; // the package side of that image
   text: string;
   confidence: number; // 0–1
   bbox: [number, number, number, number]; // [x1,y1,x2,y2] in source pixels
@@ -210,6 +221,19 @@ export interface Declaration {
   extraction_method: "deterministic";
   note: string;
   reason: string; // why UNCERTAIN / NOT_DETECTED
+  source_images: string[]; // every image the value was read from
+  source_sides: PackageSide[]; // package sides of those images
+  consistency: "SINGLE" | "DUPLICATE" | "CONFLICT" | ""; // "" when not detected
+  observations: DeclarationObservation[]; // every reading, when read more than once
+}
+
+/** One reading of a declaration field on the package. */
+export interface DeclarationObservation {
+  value: string | null;
+  source_regions: string[];
+  source_images: string[];
+  source_sides: PackageSide[];
+  ocr_confidence: number;
 }
 
 export interface DeclarationStage {
@@ -278,6 +302,8 @@ export interface CheckEvidence {
   image_id: string | null;
   ocr_confidence: number | null;
   bbox: [number, number, number, number] | null;
+  source_images: string[];
+  source_sides: PackageSide[];
 }
 
 /** The verified BIS knowledge record a requirement quotes. */
@@ -365,13 +391,44 @@ export interface OcrResult {
   regions: OcrRegion[];
 }
 
+/** One photo of the package and its own OCR evidence. */
+export interface PackageImage {
+  image_id: string;
+  index: number; // 1-based upload order
+  side: PackageSide;
+  filename: string;
+  status: "COMPLETED" | "NO_RELIABLE_TEXT" | "NO_TEXT" | "FAILED";
+  error: string | null;
+  format: string | null;
+  width: number | null;
+  height: number | null;
+  bytes: number;
+  quality: ImageQuality | null;
+  ocr: OcrResult | null; // null when OCR failed
+  notes: string[];
+}
+
+/** What the photos cover. Not uploaded / failed / no text are different states. */
+export interface PackageCoverage {
+  image_count: number;
+  usable_images: number;
+  sides_uploaded: PackageSide[];
+  sides_not_uploaded: PackageSide[];
+  images_failed: string[];
+  images_no_text: string[];
+  images_no_reliable_text: string[];
+}
+
 /** Instant OCR — raw OCR evidence plus the declarations read from it. */
 export interface InstantOcr {
   status: "COMPLETED" | "NO_TEXT";
+  inspection_id: string;
   created_at: string;
-  image: InspectionImage;
-  quality: ImageQuality;
-  ocr: OcrResult;
+  image: InspectionImage; // first readable image
+  quality: ImageQuality; // of the first readable image
+  ocr: OcrResult; // every image's regions combined
+  images: PackageImage[];
+  package: PackageCoverage;
   declaration_stage: DeclarationStage;
   notes: string[];
 }
@@ -382,6 +439,8 @@ export interface InspectionAnalysis {
   image: InspectionImage;
   quality: ImageQuality;
   ocr: OcrResult;
+  images: PackageImage[];
+  package: PackageCoverage;
   declaration_stage: DeclarationStage;
   product: ProductIdentification;
   standards: StandardCandidate[]; // ranked, verified knowledge-base records only
@@ -389,6 +448,15 @@ export interface InspectionAnalysis {
   compliance: ComplianceEvaluation;
   pipeline: PipelineStages;
   notes: string[];
+}
+
+function packageForm(uploads: PackageUploadInput[]): FormData {
+  const form = new FormData();
+  for (const u of uploads) {
+    form.append("images", u.file);
+    form.append("sides", u.side);
+  }
+  return form;
 }
 
 /* --------------------------------------------------------------- endpoints --- */
@@ -424,26 +492,20 @@ export const api = {
       120_000,
     ),
 
-  // Instant OCR: send the package image, get the raw OCR regions and the
-  // declarations read from them back.
-  instantOcr: (file: File) => {
-    const form = new FormData();
-    form.append("image", file);
-    return request<InstantOcr>(
+  // Instant OCR: send every photo of one package, get each image's OCR regions
+  // and the declarations read from all of them back.
+  instantOcr: (uploads: PackageUploadInput[]) =>
+    request<InstantOcr>(
       "/inspection/ocr",
-      { method: "POST", body: form },
-      120_000,
-    );
-  },
+      { method: "POST", body: packageForm(uploads) },
+      60_000 + 60_000 * uploads.length,
+    ),
 
-  // Smart Inspection: OCR + declarations + product + verified standard.
-  analyzeInspection: (file: File) => {
-    const form = new FormData();
-    form.append("image", file);
-    return request<InspectionAnalysis>(
+  // Smart Inspection: OCR + declarations + product + standards + compliance.
+  analyzeInspection: (uploads: PackageUploadInput[]) =>
+    request<InspectionAnalysis>(
       "/inspection/analyze",
-      { method: "POST", body: form },
-      120_000,
-    );
-  },
+      { method: "POST", body: packageForm(uploads) },
+      60_000 + 60_000 * uploads.length,
+    ),
 };
