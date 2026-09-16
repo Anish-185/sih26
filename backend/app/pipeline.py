@@ -5,6 +5,7 @@
       -> product identification   (existing BIS retrieval engine + product phrase gate)
       -> standard candidates      (verified knowledge-base records only)
       -> compliance               (verified requirements + deterministic rules)
+      -> declaration completeness (what the photos show, never "legally missing")
 
 Each stage is isolated: a failure in one stage degrades that stage to REVIEW and
 the pipeline still returns. Nothing here fabricates a result.
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.completeness import DeclarationCompleteness, declaration_completeness
 from app.compliance import REVIEW, ComplianceEvaluation, evaluate_compliance
 from app.declarations import DeclarationStage, extract_declarations
 from app.llm import LocalLLM
@@ -37,6 +39,7 @@ class DownstreamResult:
     declaration_stage: DeclarationStage
     product: ProductIdentification
     compliance: ComplianceEvaluation
+    completeness: DeclarationCompleteness
     stages: PipelineStages
     notes: list[str]
 
@@ -69,7 +72,9 @@ def run_downstream(
     llm: LocalLLM | None = None,
     finder: ProductStandardFinder | None = None,
     requirements: RequirementSet | None = None,
+    unreadable_images: list[str] | tuple = (),
 ) -> DownstreamResult:
+    """``unreadable_images`` labels photos of this package that gave no usable OCR."""
     notes: list[str] = []
 
     # 1) declaration extraction ------------------------------------------
@@ -95,10 +100,22 @@ def run_downstream(
         items = finder.search_engine.items if finder is not None else []
         if requirements is None:
             requirements = load_requirements(items)
-        compliance = evaluate_compliance(product, decl, requirements, items)
+        compliance = evaluate_compliance(product, decl, requirements, items, unreadable_images)
     except Exception as exc:  # noqa: BLE001
         compliance = _review_compliance(f"Compliance evaluation failed: {exc}")
         notes.append(str(exc))
+
+    # 4) declaration completeness — detection status + whether a verified
+    #    requirement covers the field; never "legally missing" ---------------
+    standard = product.standard_number if product.status == MATCHED else None
+    try:
+        completeness = declaration_completeness(
+            decl, requirements if requirements is not None else RequirementSet((), ()),
+            standard, unreadable_images,
+        )
+    except Exception as exc:  # noqa: BLE001
+        completeness = declaration_completeness(decl, RequirementSet((), ()), None, unreadable_images)
+        notes.append(f"Completeness requirement lookup failed: {exc}")
 
     stages = PipelineStages(
         ocr="COMPLETED",
@@ -111,6 +128,7 @@ def run_downstream(
         declaration_stage=decl,
         product=product,
         compliance=compliance,
+        completeness=completeness,
         stages=stages,
         notes=notes,
     )

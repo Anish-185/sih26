@@ -292,7 +292,12 @@ identification, deterministic compliance, multi-side packages) are complete. A p
 can be photographed from several sides: every image is OCR'd on its own, region ids
 are unique per inspection (`I2-OCR-004`) and carry `image_id` + `side`, declarations
 merge across photos (DUPLICATE keeps every source, CONFLICT withholds the value), and a
-failed side is reported, never treated as absent. Compliance coverage is data:
+failed side is reported, never treated as absent. Milestone 6: every compliance check
+explains itself deterministically (rule_condition, reason_code, reason_category, package
+evidence and BIS requirement evidence), the evaluation has a counts-based `summary`, and
+`completeness` reports each declaration as DETECTED / UNCERTAIN / NOT_DETECTED plus whether
+a verified requirement covers it (`VERIFIED_REQUIREMENT` / `NOT_ESTABLISHED`). "Not
+detected" is never reported as legally missing. Compliance coverage is data:
 only standards with verified requirements in `data/inspection_requirements.json` are
 `SUPPORTED_FOR_INSPECTION` (currently IS 14543:2016 and IS 13428:2005); every other
 standard is `STANDARD_ONLY` and returns REVIEW. The remaining work is requirement
@@ -321,7 +326,9 @@ sih26/
       declarations.py  # deterministic declarations: DETECTED / UNCERTAIN / NOT_DETECTED, linked to OCR regions
       product_identification.py # product + standard candidates over the KB (retrieval engine + phrase gate)
       requirements.py  # verified inspection requirements: load, validate (quote must be in a verified record), coverage
-      compliance.py    # deterministic compliance engine: PASS / FAIL / REVIEW / NOT_SUPPORTED, no model
+      compliance.py    # deterministic compliance engine: PASS / FAIL / REVIEW / NOT_SUPPORTED, no model;
+                       #   every check carries rule_condition + reason_code/category + both evidence chains
+      completeness.py  # declaration completeness: detection status + verified-requirement coverage, never "missing"
       pipeline.py      # OCR -> declarations -> product identification -> standard candidates -> compliance
       knowledge/       # knowledge-base schema + loader
         schema.py      # KnowledgeItem pydantic model + validation rules
@@ -348,6 +355,7 @@ sih26/
       test_product_identification.py # product/standard candidates, REVIEW paths, model stubbed
       test_compliance.py   # compliance rules, aggregation policy, grounding, traceability
       test_multiside.py    # multi-side packages: per-image provenance, duplicates/conflicts, failed sides
+      test_why_completeness.py # why PASS/FAIL/REVIEW + declaration completeness, never "legally missing"
       test_pipeline.py     # OCR -> standard candidates end-to-end + stage degradation
       test_plain_runners.py # pytest bridge — runs every runner, makes pytest authoritative
       fixtures/broken_kb/  # deliberately invalid KB for the loader tests

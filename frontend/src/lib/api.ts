@@ -327,7 +327,16 @@ export interface ComplianceCheck {
   standard_number: string;
   result: CheckResult;
   reason_code: string; // machine-readable
-  reason: string;
+  reason: string; // deterministic, produced by the rule
+  reason_category:
+    | "REQUIREMENT_SATISFIED"
+    | "REQUIREMENT_NOT_SATISFIED"
+    | "EVIDENCE_NOT_DETECTED"
+    | "EVIDENCE_NOT_DETERMINABLE"
+    | "CONFLICTING_EVIDENCE"
+    | "INSUFFICIENT_EVIDENCE"
+    | "NOT_SUPPORTED";
+  rule_condition: string; // the exact deterministic condition the rule applies
   observed_value: string | null;
   expected_condition: string;
   evidence_status: "SUFFICIENT" | "INSUFFICIENT" | "NOT_DETECTED" | "NOT_APPLICABLE";
@@ -354,6 +363,37 @@ export interface ComplianceEvaluation {
   checks: ComplianceCheck[];
   policy: string;
   notes: string[];
+  summary: string[]; // deterministic overall explanation, one fact per line
+  unreadable_images: string[];
+}
+
+/** Declaration completeness: what the photos show — never "legally missing". */
+export interface CompletenessItem {
+  field: string;
+  label: string;
+  status: "DETECTED" | "UNCERTAIN" | "NOT_DETECTED"; // OCR evidence only
+  conflict: boolean;
+  value: string | null;
+  statement: string;
+  requirement_coverage: "VERIFIED_REQUIREMENT" | "NOT_ESTABLISHED";
+  requirement_ids: string[];
+  source_sides: PackageSide[];
+  source_images: string[];
+  source_regions: string[];
+  raw_text: string;
+  ocr_confidence: number | null;
+}
+
+export interface DeclarationCompleteness {
+  standard_number: string | null;
+  items: CompletenessItem[];
+  detected: number;
+  uncertain: number;
+  not_detected: number;
+  conflicts: number;
+  with_verified_requirement: number;
+  unreadable_images: string[];
+  note: string;
 }
 
 export interface PipelineStages {
@@ -446,6 +486,7 @@ export interface InspectionAnalysis {
   standards: StandardCandidate[]; // ranked, verified knowledge-base records only
   retrieval_note: string;
   compliance: ComplianceEvaluation;
+  completeness: DeclarationCompleteness;
   pipeline: PipelineStages;
   notes: string[];
 }

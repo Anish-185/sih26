@@ -58,6 +58,10 @@ BOTTOM / UNKNOWN). Each photo is OCR'd separately and every value keeps the phot
 OCR region it came from; a photo that cannot be read is reported as failed, and sides
 that were not photographed are reported as not uploaded — never as missing.
 `POST /inspection/ocr` returns the OCR regions and declarations only.
+Every compliance check explains itself deterministically — the exact rule condition, the
+observed value, a reason code, the package evidence (photo → OCR region) and the verified
+BIS requirement it comes from — and `completeness` lists each declaration as detected,
+uncertain or not detected in the uploaded photos (never "legally missing").
 `POST /inspection/analyze` (multipart, field `image`) runs everything through the
 compliance check. A standard match is retrieval evidence, not a compliance or
 certification decision. Compliance applies only requirements quoted from verified

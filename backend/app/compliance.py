@@ -25,6 +25,13 @@ Overall aggregation policy (``AGGREGATION_POLICY``), in order:
   6. all supported checks PASS, nothing unchecked -> PASS
 So "no rules available" can never become PASS, and a PASS is never claimed while
 part of a verified requirement set is unchecked.
+
+Explanations ("why did this pass / fail / need review?") are deterministic and
+come from the rule that ran — never from a model. Every check carries:
+``rule_condition`` (the exact condition the rule applies, with its thresholds),
+``reason_code`` (what happened), ``reason_category`` (one of ``REASON_CATEGORIES``),
+a factual ``reason``, the observed value and both evidence chains (package
+evidence -> OCR region -> image, and requirement -> verified BIS record).
 """
 
 from __future__ import annotations
@@ -47,6 +54,20 @@ REVIEW = "REVIEW"
 NOT_SUPPORTED_RESULT = "NOT_SUPPORTED"
 
 NO_STANDARD = "NO_STANDARD"
+
+# reason_code -> reason_category. Stable, machine-readable groups for the UI and
+# a later explanation layer; a model may reword them but never change them.
+REASON_CATEGORIES: dict[str, str] = {
+    "OBSERVED_MATCHES": "REQUIREMENT_SATISFIED",
+    "OBSERVED_DIFFERENT": "REQUIREMENT_NOT_SATISFIED",
+    "EVIDENCE_NOT_DETECTED": "EVIDENCE_NOT_DETECTED",
+    "EVIDENCE_NOT_DETECTED_UNREADABLE_IMAGES": "EVIDENCE_NOT_DETERMINABLE",
+    "EVIDENCE_CONFLICT": "CONFLICTING_EVIDENCE",
+    "EVIDENCE_UNCERTAIN": "INSUFFICIENT_EVIDENCE",
+    "EVIDENCE_LOW_CONFIDENCE": "INSUFFICIENT_EVIDENCE",
+    "NO_RELIABLE_TEXT": "INSUFFICIENT_EVIDENCE",
+    "RULE_NOT_SUPPORTED": "NOT_SUPPORTED",
+}
 
 AGGREGATION_POLICY = (
     "FAIL if any supported check fails; otherwise REVIEW if any supported check needs "
@@ -101,6 +122,8 @@ class ComplianceCheck:
     result: str  # PASS | FAIL | REVIEW | NOT_SUPPORTED
     reason_code: str  # machine-readable, for a later explanation layer
     reason: str
+    reason_category: str  # REASON_CATEGORIES value
+    rule_condition: str  # the exact deterministic condition this rule applies
     observed_value: str | None
     expected_condition: str
     evidence_status: str  # SUFFICIENT | INSUFFICIENT | NOT_DETECTED | NOT_APPLICABLE
@@ -125,6 +148,8 @@ class ComplianceEvaluation:
     not_supported: int = 0
     policy: str = AGGREGATION_POLICY
     notes: list[str] = field(default_factory=list)
+    summary: list[str] = field(default_factory=list)  # deterministic, one fact per line
+    unreadable_images: list[str] = field(default_factory=list)  # photos that gave no usable OCR
 
 
 # ------------------------------------------------------------------------ engine
@@ -135,23 +160,29 @@ def evaluate_compliance(
     declarations: DeclarationStage,
     requirements: RequirementSet,
     knowledge_items,
+    unreadable_images: list[str] | tuple = (),
 ) -> ComplianceEvaluation:
+    """``unreadable_images`` labels photos of this package that gave no usable OCR
+    (e.g. "BACK (image 2)"); evidence not found elsewhere is then undeterminable,
+    not merely undetected."""
     notes = [f"Requirement data problem: {e}" for e in requirements.errors]
+    unreadable = list(unreadable_images)
 
     if product.status != MATCHED or not product.standard_number:
+        reason = (
+            "No product and standard were identified with enough support, so no verified "
+            "requirement can be applied. Standard candidates are not used for compliance."
+        )
         return ComplianceEvaluation(
             overall_status=REVIEW, coverage_status=NO_STANDARD, reason_code="NO_STANDARD_IDENTIFIED",
-            reason=(
-                "No product and standard were identified with enough support, so no verified "
-                "requirement can be applied. Standard candidates are not used for compliance."
-            ),
-            product_name=None, standard_number=None, knowledge_id=None, checks=[], notes=notes,
+            reason=reason, product_name=None, standard_number=None, knowledge_id=None, checks=[],
+            notes=notes, summary=[reason, *_unreadable_lines(unreadable)], unreadable_images=unreadable,
         )
 
     standard = product.standard_number
     items = {i.id: i for i in knowledge_items}
     applicable = requirements.for_standard(standard)
-    checks = [_check(req, standard, declarations, items) for req in applicable]
+    checks = [_check(req, standard, declarations, items, unreadable) for req in applicable]
 
     supported = [c for c in checks if c.result != NOT_SUPPORTED_RESULT]
     counts = {
@@ -166,8 +197,35 @@ def evaluate_compliance(
     return ComplianceEvaluation(
         overall_status=status, coverage_status=coverage, reason_code=code, reason=reason,
         product_name=product.name, standard_number=standard, knowledge_id=product.knowledge_id,
-        checks=checks, notes=notes, **counts,
+        checks=checks, notes=notes, summary=_summary(reason, counts, unreadable),
+        unreadable_images=unreadable, **counts,
     )
+
+
+def _plural(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
+
+
+def _unreadable_lines(unreadable: list[str]) -> list[str]:
+    if not unreadable:
+        return []
+    return [
+        f"No usable OCR evidence from {', '.join(unreadable)}; declarations on "
+        f"{'that photo' if len(unreadable) == 1 else 'those photos'} cannot be determined."
+    ]
+
+
+def _summary(reason: str, c: dict, unreadable: list[str]) -> list[str]:
+    """One deterministic fact per line, derived only from the check counts."""
+    lines = [reason]
+    if c["supported_checks"]:
+        lines.append(_plural(c["failed"], "supported check failed.", "supported checks failed."))
+        lines.append(_plural(c["passed"], "supported check passed.", "supported checks passed."))
+        lines.append(_plural(c["review"], "supported check needs review.", "supported checks need review."))
+    if c["not_supported"]:
+        lines.append(_plural(c["not_supported"], "requirement area cannot be checked from a package image.",
+                             "requirement areas cannot be checked from a package image."))
+    return lines + _unreadable_lines(unreadable)
 
 
 def _aggregate(standard: str, coverage: str, c: dict) -> tuple[str, str, str]:
@@ -208,18 +266,20 @@ def _source(req: Requirement, items) -> RequirementSource | None:
     )
 
 
-def _check(req: Requirement, standard: str, declarations: DeclarationStage, items) -> ComplianceCheck:
+def _check(req: Requirement, standard: str, declarations: DeclarationStage, items, unreadable) -> ComplianceCheck:
     base = dict(rule_id=req.id, requirement=req.description, rule_type=req.rule_type,
                 standard_number=standard, source=_source(req, items))
     if not req.supported:
         return ComplianceCheck(
             **base, result=NOT_SUPPORTED_RESULT, reason_code="RULE_NOT_SUPPORTED",
-            reason=req.unsupported_reason, observed_value=None,
+            reason=req.unsupported_reason, reason_category=REASON_CATEGORIES["RULE_NOT_SUPPORTED"],
+            rule_condition="No deterministic rule: this verified requirement cannot be checked from package text.",
+            observed_value=None,
             expected_condition="Cannot be checked deterministically from package text.",
             evidence_status="NOT_APPLICABLE", evidence=[],
         )
     rule = _RULES[req.rule_type]
-    return rule(req, standard, declarations, base)
+    return rule(req, standard, declarations, base, unreadable)
 
 
 # ------------------------------------------------------------------------- rules
@@ -234,15 +294,22 @@ def _evidence(decl) -> CheckEvidence:
     )
 
 
-def _rule_printed_standard_number(req: Requirement, standard: str, declarations: DeclarationStage, base) -> ComplianceCheck:
+def _rule_printed_standard_number(req: Requirement, standard: str, declarations: DeclarationStage, base,
+                                  unreadable=()) -> ComplianceCheck:
     """The package prints the primary IS number of the identified standard."""
     expected = (standard_number_key(standard) or ("", ""))[0]
     expected_condition = f"The package text shows IS {expected}."
     pass_conf = req.parameters.get("min_ocr_confidence_pass", _DEFAULT_PASS_CONFIDENCE)
     fail_conf = req.parameters.get("min_ocr_confidence_fail", _DEFAULT_FAIL_CONFIDENCE)
+    rule_condition = (
+        f"PASS when the declared IS number includes IS {expected} and was read at "
+        f"≥{round(pass_conf * 100)}% OCR confidence; FAIL when it shows a different IS number read at "
+        f"≥{round(fail_conf * 100)}%; otherwise REVIEW (not detected, uncertain, conflicting or low confidence)."
+    )
 
     def result(res, code, reason, status, observed=None, evidence=()):
         return ComplianceCheck(**base, result=res, reason_code=code, reason=reason,
+                               reason_category=REASON_CATEGORIES[code], rule_condition=rule_condition,
                                observed_value=observed, expected_condition=expected_condition,
                                evidence_status=status, evidence=list(evidence))
 
@@ -252,14 +319,23 @@ def _rule_printed_standard_number(req: Requirement, standard: str, declarations:
                       "INSUFFICIENT")
 
     decl = next((d for d in declarations.fields if d.field == req.declaration_field), None)
+    if (decl is None or decl.status == NOT_DETECTED) and unreadable:
+        return result(REVIEW, "EVIDENCE_NOT_DETECTED_UNREADABLE_IMAGES",
+                      f"No IS number was detected in the readable images, and {', '.join(unreadable)} gave no "
+                      "usable OCR evidence, so whether the package shows it cannot be determined.",
+                      "NOT_DETECTED")
     if decl is None or decl.status == NOT_DETECTED:
         return result(REVIEW, "EVIDENCE_NOT_DETECTED",
                       "No IS number was detected in the OCR text of the uploaded image(s). It may be "
-                      "on a side that was not photographed, or unreadable — not detected is not the "
-                      "same as missing.",
+                      "on a side that was not photographed, or unreadable — not being detected is not "
+                      "a finding about the package.",
                       "NOT_DETECTED")
 
     ev = [_evidence(decl)]
+    if decl.consistency == "CONFLICT":
+        return result(REVIEW, "EVIDENCE_CONFLICT",
+                      f"Conflicting values were detected across the package: {decl.reason}",
+                      "INSUFFICIENT", None, ev)
     if decl.status == UNCERTAIN:
         return result(REVIEW, "EVIDENCE_UNCERTAIN",
                       f"The IS number on the package could not be read reliably: {decl.reason}",

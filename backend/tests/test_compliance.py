@@ -147,7 +147,7 @@ def test_rule_results() -> None:
     ev, _, _, _ = evaluate(water(None), SUPPORTED_ONLY)
     c = the_check(ev)
     check("3 missing evidence -> REVIEW", c.result == "REVIEW" and c.reason_code == "EVIDENCE_NOT_DETECTED", c.reason)
-    check("3 not detected is not called missing", "not the same as missing" in c.reason)
+    check("3 not detected is not called missing", "not a finding about the package" in c.reason)
     check("3 no observed value is invented", c.observed_value is None and c.evidence == [])
 
     ev, _, stage, _ = evaluate(water("IS 14543", conf=0.55), SUPPORTED_ONLY)

@@ -141,8 +141,8 @@ export function PackageImages({
           </div>
           <img src={url} alt={`${sideName(active)} photo`} className="block w-full opacity-50" />
           <p className="px-4 py-3 text-[12px] leading-relaxed text-fail">
-            {active.error} No evidence was read from this photo. That does not mean
-            anything is absent from the package.
+            {active.error} No evidence was read from this photo, so declarations on
+            this side cannot be determined.
           </p>
         </div>
       )}

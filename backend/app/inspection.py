@@ -338,7 +338,12 @@ class ComplianceCheckOut(BaseModel):
     standard_number: str
     result: str = Field(description='"PASS" | "FAIL" | "REVIEW" | "NOT_SUPPORTED"')
     reason_code: str = Field(description="Machine-readable reason, e.g. EVIDENCE_NOT_DETECTED.")
-    reason: str
+    reason: str = Field(description="Deterministic, factual explanation produced by the rule.")
+    reason_category: str = Field(
+        description='"REQUIREMENT_SATISFIED" | "REQUIREMENT_NOT_SATISFIED" | "EVIDENCE_NOT_DETECTED" | '
+        '"EVIDENCE_NOT_DETERMINABLE" | "CONFLICTING_EVIDENCE" | "INSUFFICIENT_EVIDENCE" | "NOT_SUPPORTED"'
+    )
+    rule_condition: str = Field(description="The exact deterministic condition the rule applies.")
     observed_value: str | None = None
     expected_condition: str
     evidence_status: str = Field(
@@ -372,6 +377,39 @@ class ComplianceOut(BaseModel):
     checks: list[ComplianceCheckOut]
     policy: str
     notes: list[str] = Field(default_factory=list)
+    summary: list[str] = Field(default_factory=list, description="Deterministic overall explanation, one fact per line.")
+    unreadable_images: list[str] = Field(default_factory=list)
+
+
+class CompletenessItemOut(BaseModel):
+    field: str
+    label: str
+    status: str = Field(description='"DETECTED" | "UNCERTAIN" | "NOT_DETECTED" (OCR evidence only)')
+    conflict: bool
+    value: str | None = None
+    statement: str = Field(description='Factual; "not detected" never means legally missing.')
+    requirement_coverage: str = Field(
+        description='"VERIFIED_REQUIREMENT" (a verified, checkable requirement uses this field) | '
+        '"NOT_ESTABLISHED" (MetrIQ does not know whether it is required)'
+    )
+    requirement_ids: list[str] = Field(default_factory=list)
+    source_sides: list[str] = Field(default_factory=list)
+    source_images: list[str] = Field(default_factory=list)
+    source_regions: list[str] = Field(default_factory=list)
+    raw_text: str = ""
+    ocr_confidence: float | None = None
+
+
+class CompletenessOut(BaseModel):
+    standard_number: str | None = None
+    items: list[CompletenessItemOut]
+    detected: int
+    uncertain: int
+    not_detected: int
+    conflicts: int
+    with_verified_requirement: int
+    unreadable_images: list[str] = Field(default_factory=list)
+    note: str
 
 
 class PipelineStagesOut(BaseModel):
@@ -398,6 +436,7 @@ class InspectionAnalysisOut(BaseModel):
     )
     retrieval_note: str = RETRIEVAL_NOTE
     compliance: ComplianceOut
+    completeness: CompletenessOut
     pipeline: PipelineStagesOut
     notes: list[str] = Field(default_factory=list)
 
@@ -478,8 +517,8 @@ class InspectionAnalyzer:
             label = _image_label(img) if multi else ""
             if img.status == "FAILED":
                 notes.append(
-                    f"{label}: OCR failed ({img.error}). Evidence from this image is missing — "
-                    "that does not mean anything is absent from the package."
+                    f"{label}: OCR failed ({img.error}). No evidence could be read from this image, "
+                    "so declarations on it cannot be determined."
                 )
             else:
                 notes.extend(f"{label}: {n}" if label else n for n in img.notes)
@@ -529,13 +568,22 @@ class InspectionAnalyzer:
 
         # ---- downstream pipeline (declarations -> product -> standard) ----
         # Isolated so a pipeline bug can never break the OCR response.
+        # Photos that gave no usable OCR: evidence on them cannot be determined.
+        package = evidence.package
+        gaps = package.images_failed + package.images_no_text + package.images_no_reliable_text
+        unreadable = gaps if len(evidence.images) > 1 else []
+
         try:
-            downstream = run_downstream(regions, self._llm, self._product_finder)
-            declaration_stage, product, standards, compliance, pipeline = (
+            downstream = run_downstream(regions, self._llm, self._product_finder, unreadable_images=unreadable)
+            declaration_stage, product, standards, compliance, completeness, pipeline = (
                 _declaration_stage_out(downstream.declaration_stage),
                 _product_out(downstream.product),
                 [_candidate_out(c) for c in downstream.product.candidates],
                 _compliance_out(downstream.compliance),
+                CompletenessOut(
+                    **{k: v for k, v in downstream.completeness.__dict__.items() if k != "items"},
+                    items=[CompletenessItemOut(**i.__dict__) for i in downstream.completeness.items],
+                ),
                 _pipeline_out(downstream.stages),
             )
             notes.extend(downstream.notes)
@@ -543,15 +591,17 @@ class InspectionAnalyzer:
             declaration_stage, product, standards, compliance, pipeline = _all_review(
                 f"Downstream pipeline error: {exc}"
             )
+            completeness = CompletenessOut(
+                items=[], detected=0, uncertain=0, not_detected=0, conflicts=0,
+                with_verified_requirement=0, note=f"Downstream pipeline error: {exc}",
+            )
             notes.append(f"Downstream pipeline error: {exc}")
 
         # The compliance result must say when some photos gave no usable evidence.
-        package = evidence.package
-        gaps = package.images_failed + package.images_no_text + package.images_no_reliable_text
-        if len(evidence.images) > 1 and gaps:
+        if unreadable:
             compliance.notes.append(
                 "Some images gave no usable OCR evidence (" + "; ".join(gaps) + "). Checks use the "
-                "remaining images only; missing evidence is not treated as absent."
+                "remaining images only; unread evidence is never treated as a finding about the package."
             )
 
         return InspectionAnalysisOut(
@@ -566,6 +616,7 @@ class InspectionAnalyzer:
             product=product,
             standards=standards,
             compliance=compliance,
+            completeness=completeness,
             pipeline=pipeline,
             notes=notes,
         )
@@ -893,7 +944,8 @@ def _compliance_out(ev) -> ComplianceOut:
             ComplianceCheckOut(
                 rule_id=c.rule_id, requirement=c.requirement, rule_type=c.rule_type,
                 standard_number=c.standard_number, result=c.result, reason_code=c.reason_code,
-                reason=c.reason, observed_value=c.observed_value,
+                reason=c.reason, reason_category=c.reason_category, rule_condition=c.rule_condition,
+                observed_value=c.observed_value,
                 expected_condition=c.expected_condition, evidence_status=c.evidence_status,
                 evidence=[CheckEvidenceOut(**e.__dict__) for e in c.evidence],
                 source=RequirementSourceOut(**c.source.__dict__) if c.source else None,
@@ -902,6 +954,8 @@ def _compliance_out(ev) -> ComplianceOut:
         ],
         policy=ev.policy,
         notes=list(ev.notes),
+        summary=list(ev.summary),
+        unreadable_images=list(ev.unreadable_images),
     )
 
 

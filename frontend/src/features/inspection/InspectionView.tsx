@@ -6,6 +6,7 @@ import {
   type Declaration,
   type ComplianceCheck,
   type ComplianceEvaluation,
+  type DeclarationCompleteness,
   type DeclarationStage,
   type InspectionAnalysis,
   type InstantOcr,
@@ -253,7 +254,7 @@ export function InspectionView() {
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-3">
               <p className="text-[11px] text-ink-faint">
                 Photos of different packages must be inspected separately. Sides you
-                do not photograph are reported as not uploaded — never as missing.
+                do not photograph are reported as not uploaded — never as a finding about the package.
               </p>
               <Button size="sm" onClick={runOcr}>
                 <ScanSearch className="h-3.5 w-3.5" />
@@ -532,6 +533,11 @@ function Workspace({
           />
           <CompliancePanel
             compliance={result.compliance}
+            selected={linkedRegions}
+            onSelect={selectRegions}
+          />
+          <CompletenessPanel
+            completeness={result.completeness}
             selected={linkedRegions}
             onSelect={selectRegions}
           />
@@ -1396,13 +1402,13 @@ function CompliancePanel({
   return (
     <Panel flush>
       <PanelHeader
-        title="Compliance inspection"
+        title="Inspection results"
         meta={open ? <StatusBadge status={compliance.overall_status} size="sm" /> : "separate step"}
       />
       <p className="border-b border-line px-5 py-2.5 text-[11px] leading-relaxed text-ink-faint">
         A standard match is not a compliance result. Compliance applies only verified
         requirements from the knowledge base, with fixed rules over the OCR evidence — no
-        model decides it. Where requirements or evidence are missing, the answer is REVIEW.
+        model decides it. Where requirements or evidence are insufficient, the answer is REVIEW.
       </p>
 
       {!open ? (
@@ -1417,7 +1423,13 @@ function CompliancePanel({
           <dl className="px-5 py-2">
             <DefinitionRow label="Overall">
               <StatusBadge status={compliance.overall_status} />
-              <p className="mt-1.5 text-[12px] leading-relaxed text-ink-soft">{compliance.reason}</p>
+              <ul className="mt-1.5 space-y-0.5 text-[12px] leading-relaxed text-ink-soft">
+                {compliance.summary.map((line, i) => (
+                  <li key={i} className={i === 0 ? "text-ink" : undefined}>
+                    {line}
+                  </li>
+                ))}
+              </ul>
             </DefinitionRow>
             <DefinitionRow label="Coverage">
               <span className="text-ink">{COVERAGE_LABEL[compliance.coverage_status]}</span>
@@ -1436,7 +1448,12 @@ function CompliancePanel({
           </dl>
 
           {compliance.checks.length > 0 && (
-            <ul className="border-t border-line">
+            <div className="eyebrow border-t border-line px-5 pb-0 pt-4 !text-ink-faint">
+              Why? — one deterministic check per verified requirement
+            </div>
+          )}
+          {compliance.checks.length > 0 && (
+            <ul>
               {compliance.checks.map((c, i) => (
                 <li key={c.rule_id} className={cn(i > 0 && "border-t border-line")}>
                   <ComplianceCheckRow check={c} selected={selected} onSelect={onSelect} />
@@ -1457,6 +1474,116 @@ function CompliancePanel({
           </p>
         </>
       )}
+    </Panel>
+  );
+}
+
+const REASON_LABEL: Record<ComplianceCheck["reason_category"], string> = {
+  REQUIREMENT_SATISFIED: "Requirement satisfied",
+  REQUIREMENT_NOT_SATISFIED: "Requirement not satisfied",
+  EVIDENCE_NOT_DETECTED: "Evidence not detected",
+  EVIDENCE_NOT_DETERMINABLE: "Cannot be determined — some photos unreadable",
+  CONFLICTING_EVIDENCE: "Conflicting evidence",
+  INSUFFICIENT_EVIDENCE: "Insufficient OCR evidence",
+  NOT_SUPPORTED: "Not supported by the knowledge base",
+};
+
+const COMPLETENESS_LABEL: Record<DeclarationCompleteness["items"][number]["status"], string> = {
+  DETECTED: "Detected",
+  UNCERTAIN: "Uncertain",
+  NOT_DETECTED: "Not detected",
+};
+
+/** Declaration completeness across every uploaded photo of the package. */
+function CompletenessPanel({
+  completeness,
+  selected,
+  onSelect,
+}: {
+  completeness: DeclarationCompleteness;
+  selected: string[];
+  onSelect: (ids: string[]) => void;
+}) {
+  const where = useWhere();
+  return (
+    <Panel flush>
+      <PanelHeader
+        title="Declaration completeness"
+        meta={`${completeness.detected} detected · ${completeness.uncertain} uncertain · ${completeness.not_detected} not detected`}
+      />
+      <p className="border-b border-line px-5 py-2.5 text-[11px] leading-relaxed text-ink-faint">
+        {completeness.note} “Required?” shows whether MetrIQ has a verified requirement for the
+        field{completeness.standard_number ? ` under ${completeness.standard_number}` : ""}; “not established” means
+        MetrIQ does not know.
+      </p>
+      {completeness.unreadable_images.length > 0 && (
+        <p className="border-b border-line px-5 py-2.5 text-[12px] text-review">
+          No usable OCR evidence from {completeness.unreadable_images.join(", ")} — declarations on
+          {completeness.unreadable_images.length === 1 ? " that photo" : " those photos"} cannot be determined.
+        </p>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-[12px]">
+          <thead>
+            <tr className="border-b border-line">
+              {["Declaration", "Status", "Value / source", "Required?"].map((h) => (
+                <th key={h} className="kicker px-5 py-2 font-normal">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {completeness.items.map((item) => {
+              const clickable = item.source_regions.length > 0;
+              const active =
+                clickable &&
+                item.source_regions.length === selected.length &&
+                item.source_regions.every((id, i) => selected[i] === id);
+              return (
+                <tr
+                  key={item.field}
+                  onClick={clickable ? () => onSelect(item.source_regions) : undefined}
+                  className={cn(
+                    "border-b border-line align-top last:border-b-0",
+                    clickable && "cursor-pointer hover:bg-surface",
+                    active && "bg-accent-soft",
+                  )}
+                >
+                  <td className="px-5 py-2.5 text-ink">{item.label}</td>
+                  <td className="px-5 py-2.5">
+                    <Mono
+                      className={cn(
+                        "text-[10px] uppercase tracking-[0.1em]",
+                        item.status === "DETECTED" ? "text-accent" : item.status === "UNCERTAIN" ? "text-review" : "text-ink-faint",
+                      )}
+                    >
+                      {item.conflict ? "Conflict" : COMPLETENESS_LABEL[item.status]}
+                    </Mono>
+                  </td>
+                  <td className="px-5 py-2.5">
+                    {item.value && <div className="text-ink">{item.value}</div>}
+                    {clickable && (
+                      <Mono muted className="block text-[10px]">
+                        {where(item.source_regions)}
+                        {item.ocr_confidence !== null ? ` · OCR ${Math.round(item.ocr_confidence * 100)}%` : ""}
+                      </Mono>
+                    )}
+                    <div className={cn("text-[11px] leading-snug", item.status === "DETECTED" ? "text-ink-faint" : "text-review")}>
+                      {item.status === "DETECTED" ? null : item.statement}
+                    </div>
+                  </td>
+                  <td className="px-5 py-2.5">
+                    <Mono className={cn("text-[10px]", item.requirement_coverage === "VERIFIED_REQUIREMENT" ? "text-ink" : "text-ink-faint")}>
+                      {item.requirement_coverage === "VERIFIED_REQUIREMENT" ? "Verified requirement" : "Not established"}
+                    </Mono>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </Panel>
   );
 }
@@ -1502,9 +1629,12 @@ function ComplianceCheckRow({
         <dd className={cn(check.result === "PASS" ? "text-ink-soft" : check.result === "FAIL" ? "text-fail" : "text-review")}>
           {check.reason}
           <Mono muted className="mt-0.5 block text-[10px]">
-            {check.reason_code} · evidence {check.evidence_status.toLowerCase().replace("_", " ")}
+            {REASON_LABEL[check.reason_category]} · {check.reason_code} · evidence{" "}
+            {check.evidence_status.toLowerCase().replace("_", " ")}
           </Mono>
         </dd>
+        <dt className="kicker pt-0.5">Rule</dt>
+        <dd className="text-[11px] leading-relaxed text-ink-faint">{check.rule_condition}</dd>
       </dl>
 
       {check.evidence.length > 0 && (
@@ -1518,7 +1648,10 @@ function ComplianceCheckRow({
             active ? "bg-accent-soft" : "hover:bg-surface",
           )}
         >
-          <div className="kicker">Package evidence</div>
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="kicker">Package evidence</div>
+            <Mono className="text-[10px] uppercase tracking-[0.1em] text-accent">View evidence →</Mono>
+          </div>
           {check.evidence.map((e, i) => (
             <div key={i} className="mt-1 text-[12px] text-ink">
               “{e.raw_text}”
@@ -1534,7 +1667,7 @@ function ComplianceCheckRow({
 
       {check.source && (
         <div className="mt-3 border-l-2 border-line pl-3">
-          <div className="kicker">Verified requirement source</div>
+          <div className="kicker">BIS requirement evidence</div>
           <p className="mt-1 text-[12px] italic leading-relaxed text-ink-soft">“{check.source.quote}”</p>
           <p className="mt-1 text-[11px] text-ink-faint">
             {check.source.title}
