@@ -1,0 +1,36 @@
+{
+  "_comment": "Inspection requirements used by the deterministic compliance engine (backend/app/requirements.py, backend/app/compliance.py). Every requirement must quote, word for word, a sentence from a VERIFIED record in data/knowledge/ (source_knowledge_id + source_quote) and apply only to standard numbers that exist in data/knowledge/indian_standards.json. The loader rejects anything else. rule_type is either a rule the engine implements or \"not_supported\" (a verified requirement that cannot be checked from a package image; it is shown, never scored). Do not add a requirement that is not stated in the knowledge base.",
+  "requirements": [
+    {
+      "id": "packaged-water-label-shows-is-number",
+      "applies_to": ["IS 14543:2016", "IS 13428:2005"],
+      "description": "The package shows the IS number of its Indian Standard (IS 14543 or IS 13428) with the BIS Certification Mark.",
+      "rule_type": "printed_standard_number",
+      "declaration_field": "standard_number",
+      "parameters": {
+        "min_ocr_confidence_pass": 0.8,
+        "min_ocr_confidence_fail": 0.9
+      },
+      "source_knowledge_id": "packaged-water-must-carry-bis-mark",
+      "source_quote": "A consumer should therefore expect to see the ISI Mark with the IS number (IS 14543 or IS 13428) on the bottle."
+    },
+    {
+      "id": "packaged-water-bis-certification-mark",
+      "applies_to": ["IS 14543:2016", "IS 13428:2005"],
+      "description": "The product is manufactured and sold under the BIS Certification Mark (ISI Mark).",
+      "rule_type": "not_supported",
+      "unsupported_reason": "The ISI Mark is a printed graphic, and holding a valid licence is not visible on a package. MetrIQ reads package text with OCR and does not detect marks or check licences, so this cannot be decided from the image.",
+      "source_knowledge_id": "packaged-water-must-carry-bis-mark",
+      "source_quote": "no person may manufacture or sell packaged drinking water or packaged natural mineral water in India except under the BIS Certification Mark"
+    },
+    {
+      "id": "packaged-drinking-water-quality-limits",
+      "applies_to": ["IS 14543:2016"],
+      "description": "The water meets the physical, microbiological, chemical, pesticide and radioactive residue limits of IS 14543.",
+      "rule_type": "not_supported",
+      "unsupported_reason": "These are laboratory test parameters. They cannot be observed on a package image, and the knowledge base does not hold the numeric limits.",
+      "source_knowledge_id": "is-14543-2016-packaged-drinking-water",
+      "source_quote": "the standard specifies limits for physical parameters (such as TDS and turbidity), microbiological parameters (such as E. coli, yeast and mould), chemical parameters (such as pH), and pesticide and radioactive residue levels"
+    }
+  ]
+}

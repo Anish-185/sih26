@@ -122,7 +122,8 @@ def test_no_text_returns_empty_not_fake() -> None:
     check("blank image -> no standard candidates invented", result.standards == [])
     check("blank image -> pipeline summary present, ocr COMPLETED",
           result.pipeline.ocr == "COMPLETED"
-          and result.pipeline.legal_metrology == "NEXT")
+          and result.pipeline.compliance == "REVIEW"
+          and result.compliance.coverage_status == "NO_STANDARD")
 
 
 def test_rejects_non_image_bytes() -> None:

@@ -4,6 +4,7 @@
       -> declaration extraction   (deterministic)
       -> product identification   (existing BIS retrieval engine + product phrase gate)
       -> standard candidates      (verified knowledge-base records only)
+      -> compliance               (verified requirements + deterministic rules)
 
 Each stage is isolated: a failure in one stage degrades that stage to REVIEW and
 the pipeline still returns. Nothing here fabricates a result.
@@ -13,10 +14,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.compliance import REVIEW, ComplianceEvaluation, evaluate_compliance
 from app.declarations import DeclarationStage, extract_declarations
 from app.llm import LocalLLM
 from app.product import ProductStandardFinder
 from app.product_identification import MATCHED, ProductIdentification, identify_product
+from app.requirements import RequirementSet, load_requirements
 
 
 @dataclass(frozen=True)
@@ -25,7 +28,7 @@ class PipelineStages:
     declaration_extraction: str
     product_identification: str
     standard_retrieval: str
-    legal_metrology: str = "NEXT"
+    compliance: str = REVIEW
     officer_review: str = "PENDING"
 
 
@@ -33,6 +36,7 @@ class PipelineStages:
 class DownstreamResult:
     declaration_stage: DeclarationStage
     product: ProductIdentification
+    compliance: ComplianceEvaluation
     stages: PipelineStages
     notes: list[str]
 
@@ -53,10 +57,18 @@ def _review_product(note: str) -> ProductIdentification:
     )
 
 
+def _review_compliance(note: str) -> ComplianceEvaluation:
+    return ComplianceEvaluation(
+        overall_status=REVIEW, coverage_status="NO_STANDARD", reason_code="ENGINE_ERROR",
+        reason=note, product_name=None, standard_number=None, knowledge_id=None, checks=[],
+    )
+
+
 def run_downstream(
     regions,
     llm: LocalLLM | None = None,
     finder: ProductStandardFinder | None = None,
+    requirements: RequirementSet | None = None,
 ) -> DownstreamResult:
     notes: list[str] = []
 
@@ -78,15 +90,27 @@ def run_downstream(
         product = _review_product(f"Product identification failed: {exc}")
         notes.append(str(exc))
 
+    # 3) compliance — verified requirements + deterministic rules, no model -------
+    try:
+        items = finder.search_engine.items if finder is not None else []
+        if requirements is None:
+            requirements = load_requirements(items)
+        compliance = evaluate_compliance(product, decl, requirements, items)
+    except Exception as exc:  # noqa: BLE001
+        compliance = _review_compliance(f"Compliance evaluation failed: {exc}")
+        notes.append(str(exc))
+
     stages = PipelineStages(
         ocr="COMPLETED",
         declaration_extraction=decl.status,
         product_identification=product.status,
         standard_retrieval=MATCHED if product.status == MATCHED else "REVIEW",
+        compliance=compliance.overall_status,
     )
     return DownstreamResult(
         declaration_stage=decl,
         product=product,
+        compliance=compliance,
         stages=stages,
         notes=notes,
     )

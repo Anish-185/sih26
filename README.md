@@ -46,18 +46,19 @@ flowchart LR
     OCR --> DECL[Declaration extraction<br/>deterministic regex + keywords]
     DECL --> CLS[Product identification<br/>BIS knowledge base + retrieval engine]
     CLS --> STD[Standard candidates<br/>verified records + Why this result]
-    STD --> LM[Legal-metrology rules<br/>PASS / FAIL / REVIEW]
+    STD --> LM[Compliance check<br/>verified requirements · PASS / FAIL / REVIEW]
     LM --> RPT[Officer review & report]
 
-    style LM stroke-dasharray: 4 4
     style RPT stroke-dasharray: 4 4
 ```
 
 `POST /inspection/ocr` returns the OCR regions and declarations only.
-`POST /inspection/analyze` (multipart, field `image`) runs everything up to the
-standard candidates. A standard match is retrieval evidence, not a compliance or
-certification decision. Legal-metrology PASS/FAIL and the officer report are the next
-phase — those stages report `NEXT` / `PENDING`, never a fabricated verdict.
+`POST /inspection/analyze` (multipart, field `image`) runs everything through the
+compliance check. A standard match is retrieval evidence, not a compliance or
+certification decision. Compliance applies only requirements quoted from verified
+knowledge records (`data/inspection_requirements.json`) with deterministic rules; when
+requirements or package evidence are missing the result is `REVIEW`, never a guess.
+The officer report is the next phase (`PENDING`).
 
 ### What the officer sees
 
@@ -146,7 +147,9 @@ backend/                      Python 3.14 · FastAPI
     inspection_api.py         POST /inspection/ocr, POST /inspection/analyze
     declarations.py           deterministic declarations (DETECTED / UNCERTAIN / NOT_DETECTED)
     product_identification.py product + standard candidates over the knowledge base
-    pipeline.py               OCR → declarations → product → standard candidates
+    requirements.py           verified inspection requirements: load, validate, coverage
+    compliance.py             deterministic compliance engine (PASS / FAIL / REVIEW)
+    pipeline.py               OCR → declarations → product → standards → compliance
     retrieval/                deterministic lexical search (text.py, engine.py)
     rag.py                    grounded Q&A (/ask)
     product.py                Product → Standard + "Why this result?"
@@ -156,6 +159,7 @@ backend/                      Python 3.14 · FastAPI
   tests/                      plain-Python runners, bridged to pytest
 data/
   knowledge/                  BIS knowledge base — one JSON file per category (the only source of standards)
+  inspection_requirements.json requirements quoted word for word from verified knowledge records
 samples/ocr-labels/           sample label images for the inspection pipeline
 frontend/                     React 19 · TypeScript · Vite · Tailwind v4
 ```
@@ -231,7 +235,8 @@ authoritative gate. Model-dependent tests use a stub — no LM Studio needed.
 
 Phases 1–14 are complete (see [`CLAUDE.md`](CLAUDE.md) for the full log). What remains:
 
-- [ ] **Legal-metrology rule engine** — deterministic PASS / FAIL / REVIEW over the extracted declarations against the Packaged Commodities Rules and the matched standard
+- [x] **Compliance engine** — deterministic PASS / FAIL / REVIEW over verified requirements (currently 2 of 36 standards have checkable requirements; everything else is `STANDARD_ONLY` → REVIEW)
+- [ ] **Requirement coverage** — more verified requirements; Legal Metrology (Packaged Commodities) declaration rules are not in the knowledge base yet
 - [ ] **Officer review & report** — human sign-off, PDF, inspection history (currently placeholder data)
 
 ---

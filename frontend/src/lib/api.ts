@@ -268,12 +268,74 @@ export interface StandardCandidate extends ProductStandardResult {
   evidence: ProductEvidence[];
 }
 
+/** Package evidence behind a compliance check: declaration -> OCR regions. */
+export interface CheckEvidence {
+  declaration_field: string;
+  declaration_status: string;
+  value: string | null;
+  raw_text: string;
+  source_regions: string[];
+  image_id: string | null;
+  ocr_confidence: number | null;
+  bbox: [number, number, number, number] | null;
+}
+
+/** The verified BIS knowledge record a requirement quotes. */
+export interface RequirementSource {
+  knowledge_id: string;
+  title: string;
+  quote: string; // word for word from the verified record
+  source_url: string | null;
+  document_name: string | null;
+  reference: string | null;
+  verification_status: string;
+  last_verified: string | null;
+}
+
+export type CheckResult = "PASS" | "FAIL" | "REVIEW" | "NOT_SUPPORTED";
+
+export interface ComplianceCheck {
+  rule_id: string;
+  requirement: string;
+  rule_type: string;
+  standard_number: string;
+  result: CheckResult;
+  reason_code: string; // machine-readable
+  reason: string;
+  observed_value: string | null;
+  expected_condition: string;
+  evidence_status: "SUFFICIENT" | "INSUFFICIENT" | "NOT_DETECTED" | "NOT_APPLICABLE";
+  evidence: CheckEvidence[];
+  source: RequirementSource | null;
+}
+
+/** Deterministic compliance evaluation — never decided by a model. */
+export interface ComplianceEvaluation {
+  overall_status: "PASS" | "FAIL" | "REVIEW";
+  coverage_status: "SUPPORTED_FOR_INSPECTION" | "STANDARD_ONLY" | "NO_STANDARD";
+  reason_code: string;
+  reason: string;
+  product_name: string | null;
+  standard_number: string | null;
+  knowledge_id: string | null;
+  coverage: {
+    supported_checks: number;
+    passed: number;
+    failed: number;
+    review: number;
+    not_supported: number;
+  };
+  checks: ComplianceCheck[];
+  policy: string;
+  notes: string[];
+}
+
 export interface PipelineStages {
   ocr: string;
   declaration_extraction: string;
   product_identification: string;
   standard_retrieval: string;
-  legal_metrology: string;
+  compliance: string;
   officer_review: string;
 }
 
@@ -324,6 +386,7 @@ export interface InspectionAnalysis {
   product: ProductIdentification;
   standards: StandardCandidate[]; // ranked, verified knowledge-base records only
   retrieval_note: string;
+  compliance: ComplianceEvaluation;
   pipeline: PipelineStages;
   notes: string[];
 }

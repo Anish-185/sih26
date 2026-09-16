@@ -14,7 +14,8 @@ and local OCR, then runs the downstream pipeline
 identification and ranked standard candidates from the verified BIS knowledge
 base through the existing retrieval engine (``app.product_identification``).
 
-Legal-metrology PASS/FAIL is still a later phase and is reported as ``NEXT``.
+Compliance (``app.compliance``) applies only verified requirements with
+deterministic rules; officer review is still a later phase (``PENDING``).
 Nothing here is fabricated: a stage that cannot produce a reliable result reports
 ``REVIEW``.
 """
@@ -225,12 +226,81 @@ class StandardCandidateOut(BaseModel):
     last_verified: str | None = None
 
 
+class CheckEvidenceOut(BaseModel):
+    """Package evidence behind a check: declaration -> OCR regions -> image."""
+
+    declaration_field: str
+    declaration_status: str
+    value: str | None = None
+    raw_text: str
+    source_regions: list[str]
+    image_id: str | None = None
+    ocr_confidence: float | None = None
+    bbox: list[int] | None = None
+
+
+class RequirementSourceOut(BaseModel):
+    """Knowledge evidence behind a requirement: the verified BIS record it quotes."""
+
+    knowledge_id: str
+    title: str
+    quote: str = Field(description="Word-for-word sentence from the verified record.")
+    source_url: str | None = None
+    document_name: str | None = None
+    reference: str | None = None
+    verification_status: str
+    last_verified: str | None = None
+
+
+class ComplianceCheckOut(BaseModel):
+    rule_id: str
+    requirement: str
+    rule_type: str
+    standard_number: str
+    result: str = Field(description='"PASS" | "FAIL" | "REVIEW" | "NOT_SUPPORTED"')
+    reason_code: str = Field(description="Machine-readable reason, e.g. EVIDENCE_NOT_DETECTED.")
+    reason: str
+    observed_value: str | None = None
+    expected_condition: str
+    evidence_status: str = Field(
+        description='"SUFFICIENT" | "INSUFFICIENT" | "NOT_DETECTED" | "NOT_APPLICABLE"'
+    )
+    evidence: list[CheckEvidenceOut]
+    source: RequirementSourceOut | None = None
+
+
+class ComplianceCoverageOut(BaseModel):
+    supported_checks: int
+    passed: int
+    failed: int
+    review: int
+    not_supported: int
+
+
+class ComplianceOut(BaseModel):
+    """Deterministic compliance evaluation. Never decided by a model."""
+
+    overall_status: str = Field(description='"PASS" | "FAIL" | "REVIEW"')
+    coverage_status: str = Field(
+        description='"SUPPORTED_FOR_INSPECTION" | "STANDARD_ONLY" | "NO_STANDARD"'
+    )
+    reason_code: str
+    reason: str
+    product_name: str | None = None
+    standard_number: str | None = None
+    knowledge_id: str | None = None
+    coverage: ComplianceCoverageOut
+    checks: list[ComplianceCheckOut]
+    policy: str
+    notes: list[str] = Field(default_factory=list)
+
+
 class PipelineStagesOut(BaseModel):
     ocr: str
     declaration_extraction: str
     product_identification: str
     standard_retrieval: str
-    legal_metrology: str = "NEXT"
+    compliance: str = "REVIEW"
     officer_review: str = "PENDING"
 
 
@@ -246,6 +316,7 @@ class InspectionAnalysisOut(BaseModel):
         description="Ranked verified knowledge-base standards supported by the package evidence."
     )
     retrieval_note: str = RETRIEVAL_NOTE
+    compliance: ComplianceOut
     pipeline: PipelineStagesOut
     notes: list[str] = Field(default_factory=list)
 
@@ -392,15 +463,16 @@ class InspectionAnalyzer:
         # Isolated so a pipeline bug can never break the OCR response.
         try:
             downstream = run_downstream(regions, self._llm, self._product_finder)
-            declaration_stage, product, standards, pipeline = (
+            declaration_stage, product, standards, compliance, pipeline = (
                 _declaration_stage_out(downstream.declaration_stage),
                 _product_out(downstream.product),
                 [_candidate_out(c) for c in downstream.product.candidates],
+                _compliance_out(downstream.compliance),
                 _pipeline_out(downstream.stages),
             )
             notes.extend(downstream.notes)
         except Exception as exc:  # noqa: BLE001
-            declaration_stage, product, standards, pipeline = _all_review(
+            declaration_stage, product, standards, compliance, pipeline = _all_review(
                 f"Downstream pipeline error: {exc}"
             )
             notes.append(f"Downstream pipeline error: {exc}")
@@ -414,6 +486,7 @@ class InspectionAnalyzer:
             declaration_stage=declaration_stage,
             product=product,
             standards=standards,
+            compliance=compliance,
             pipeline=pipeline,
             notes=notes,
         )
@@ -592,13 +665,42 @@ def _candidate_out(candidate) -> StandardCandidateOut:
     )
 
 
+def _compliance_out(ev) -> ComplianceOut:
+    return ComplianceOut(
+        overall_status=ev.overall_status,
+        coverage_status=ev.coverage_status,
+        reason_code=ev.reason_code,
+        reason=ev.reason,
+        product_name=ev.product_name,
+        standard_number=ev.standard_number,
+        knowledge_id=ev.knowledge_id,
+        coverage=ComplianceCoverageOut(
+            supported_checks=ev.supported_checks, passed=ev.passed, failed=ev.failed,
+            review=ev.review, not_supported=ev.not_supported,
+        ),
+        checks=[
+            ComplianceCheckOut(
+                rule_id=c.rule_id, requirement=c.requirement, rule_type=c.rule_type,
+                standard_number=c.standard_number, result=c.result, reason_code=c.reason_code,
+                reason=c.reason, observed_value=c.observed_value,
+                expected_condition=c.expected_condition, evidence_status=c.evidence_status,
+                evidence=[CheckEvidenceOut(**e.__dict__) for e in c.evidence],
+                source=RequirementSourceOut(**c.source.__dict__) if c.source else None,
+            )
+            for c in ev.checks
+        ],
+        policy=ev.policy,
+        notes=list(ev.notes),
+    )
+
+
 def _pipeline_out(stages) -> PipelineStagesOut:
     return PipelineStagesOut(
         ocr=stages.ocr,
         declaration_extraction=stages.declaration_extraction,
         product_identification=stages.product_identification,
         standard_retrieval=stages.standard_retrieval,
-        legal_metrology=stages.legal_metrology,
+        compliance=stages.compliance,
         officer_review=stages.officer_review,
     )
 
@@ -616,6 +718,12 @@ def _all_review(note: str):
             status="REVIEW", confidence="none", method="deterministic", reason=note,
         ),
         [],
+        ComplianceOut(
+            overall_status="REVIEW", coverage_status="NO_STANDARD", reason_code="ENGINE_ERROR",
+            reason=note, coverage=ComplianceCoverageOut(
+                supported_checks=0, passed=0, failed=0, review=0, not_supported=0),
+            checks=[], policy="",
+        ),
         PipelineStagesOut(
             ocr="COMPLETED",
             declaration_extraction="REVIEW",

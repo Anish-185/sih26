@@ -287,9 +287,12 @@ placeholder data (`frontend/src/mocks.tsx`) — the legal-metrology PASS/FAIL ru
 engine and the officer report are not built yet. Run: backend on :8000, then
 `cd frontend && npm install && npm run dev` (proxies `/api` -> :8000).
 
-Phases 1–14 are complete. The remaining work is the legal-metrology rule engine
-(deterministic PASS / FAIL / REVIEW over the extracted declarations + the matched
-standard) and the officer review / report surface.
+Phases 1–14 and inspection Milestones 1–4 (Instant OCR, declarations, product
+identification, deterministic compliance) are complete. Compliance coverage is data:
+only standards with verified requirements in `data/inspection_requirements.json` are
+`SUPPORTED_FOR_INSPECTION` (currently IS 14543:2016 and IS 13428:2005); every other
+standard is `STANDARD_ONLY` and returns REVIEW. The remaining work is requirement
+coverage and the officer review / report surface.
 
 Only implement the current milestone. Do not start a new phase without being asked.
 
@@ -313,7 +316,9 @@ sih26/
       inspection_api.py# POST /inspection/ocr (Instant OCR) + /inspection/analyze
       declarations.py  # deterministic declarations: DETECTED / UNCERTAIN / NOT_DETECTED, linked to OCR regions
       product_identification.py # product + standard candidates over the KB (retrieval engine + phrase gate)
-      pipeline.py      # OCR -> declarations -> product identification -> standard candidates
+      requirements.py  # verified inspection requirements: load, validate (quote must be in a verified record), coverage
+      compliance.py    # deterministic compliance engine: PASS / FAIL / REVIEW / NOT_SUPPORTED, no model
+      pipeline.py      # OCR -> declarations -> product identification -> standard candidates -> compliance
       knowledge/       # knowledge-base schema + loader
         schema.py      # KnowledgeItem pydantic model + validation rules
         loader.py      # load + validate data/knowledge/, report every problem
@@ -337,6 +342,7 @@ sih26/
       test_instant_ocr.py  # Instant OCR: /inspection/ocr evidence, stubbed engine failures, validation
       test_declarations.py # declaration extraction on controlled OCR fixtures (+ real-label regressions)
       test_product_identification.py # product/standard candidates, REVIEW paths, model stubbed
+      test_compliance.py   # compliance rules, aggregation policy, grounding, traceability
       test_pipeline.py     # OCR -> standard candidates end-to-end + stage degradation
       test_plain_runners.py # pytest bridge — runs every runner, makes pytest authoritative
       fixtures/broken_kb/  # deliberately invalid KB for the loader tests
@@ -344,6 +350,7 @@ sih26/
     .env.example
   data/
     knowledge/         # the BIS knowledge base: one JSON file per category (Q&A / retrieval)
+    inspection_requirements.json # compliance requirements, each quoting a verified knowledge record
   samples/
     ocr-labels/        # sample package images for testing /inspection/analyze
   frontend/            # React + Vite app

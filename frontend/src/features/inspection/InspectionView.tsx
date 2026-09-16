@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUpRight, RotateCcw, ScanSearch } from "lucide-react";
+import { ArrowUpRight, ClipboardCheck, RotateCcw, ScanSearch } from "lucide-react";
 import {
   ApiError,
   api,
   type Declaration,
+  type ComplianceCheck,
+  type ComplianceEvaluation,
   type DeclarationStage,
   type InspectionAnalysis,
   type InstantOcr,
@@ -26,6 +28,7 @@ import {
   Panel,
   PanelHeader,
   SectionHeading,
+  StatusBadge,
 } from "@/components/ui";
 import { Dropzone } from "@/components/Dropzone";
 import {
@@ -382,6 +385,9 @@ function Workspace({
                   {matched ? product.standard_number : "Needs review"}
                 </span>
               </DefinitionRow>
+              <DefinitionRow label="Compliance">
+                <StatusBadge status={result.compliance.overall_status} size="sm" />
+              </DefinitionRow>
             </dl>
           </Panel>
         </div>
@@ -403,6 +409,11 @@ function Workspace({
             standards={standards}
             product={product}
             note={result.retrieval_note}
+            selected={linkedRegions}
+            onSelect={selectRegions}
+          />
+          <CompliancePanel
+            compliance={result.compliance}
             selected={linkedRegions}
             onSelect={selectRegions}
           />
@@ -787,6 +798,10 @@ function stageTone(status: string): string {
     case "CLASSIFIED":
     case "MATCHED":
       return "text-accent";
+    case "PASS":
+      return "text-pass";
+    case "FAIL":
+      return "text-fail";
     case "DETECTED":
       return "text-accent";
     case "PARTIAL":
@@ -1221,6 +1236,187 @@ function StandardCandidatesPanel({
   );
 }
 
+const COVERAGE_LABEL: Record<ComplianceEvaluation["coverage_status"], string> = {
+  SUPPORTED_FOR_INSPECTION: "Supported for inspection",
+  STANDARD_ONLY: "Standard only — no checkable requirements",
+  NO_STANDARD: "No identified standard",
+};
+
+function CompliancePanel({
+  compliance,
+  selected,
+  onSelect,
+}: {
+  compliance: ComplianceEvaluation;
+  selected: string[];
+  onSelect: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const cov = compliance.coverage;
+
+  return (
+    <Panel flush>
+      <PanelHeader
+        title="Compliance inspection"
+        meta={open ? <StatusBadge status={compliance.overall_status} size="sm" /> : "separate step"}
+      />
+      <p className="border-b border-line px-5 py-2.5 text-[11px] leading-relaxed text-ink-faint">
+        A standard match is not a compliance result. Compliance applies only verified
+        requirements from the knowledge base, with fixed rules over the OCR evidence — no
+        model decides it. Where requirements or evidence are missing, the answer is REVIEW.
+      </p>
+
+      {!open ? (
+        <div className="px-5 py-4">
+          <Button size="sm" onClick={() => setOpen(true)}>
+            <ClipboardCheck className="h-3.5 w-3.5" />
+            Show compliance check
+          </Button>
+        </div>
+      ) : (
+        <>
+          <dl className="px-5 py-2">
+            <DefinitionRow label="Overall">
+              <StatusBadge status={compliance.overall_status} />
+              <p className="mt-1.5 text-[12px] leading-relaxed text-ink-soft">{compliance.reason}</p>
+            </DefinitionRow>
+            <DefinitionRow label="Coverage">
+              <span className="text-ink">{COVERAGE_LABEL[compliance.coverage_status]}</span>
+              {compliance.standard_number && (
+                <Mono muted className="mt-0.5 block text-[10px]">
+                  {compliance.standard_number}
+                </Mono>
+              )}
+            </DefinitionRow>
+            <DefinitionRow label="Checks">
+              <Mono className="text-[12px]">
+                {cov.supported_checks} supported · {cov.passed} passed · {cov.failed} failed ·{" "}
+                {cov.review} to review · {cov.not_supported} not supported
+              </Mono>
+            </DefinitionRow>
+          </dl>
+
+          {compliance.checks.length > 0 && (
+            <ul className="border-t border-line">
+              {compliance.checks.map((c, i) => (
+                <li key={c.rule_id} className={cn(i > 0 && "border-t border-line")}>
+                  <ComplianceCheckRow check={c} selected={selected} onSelect={onSelect} />
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {compliance.notes.length > 0 && (
+            <ul className="space-y-1 border-t border-line px-5 py-3 text-[12px] text-review">
+              {compliance.notes.map((n, i) => (
+                <li key={i}>· {n}</li>
+              ))}
+            </ul>
+          )}
+          <p className="border-t border-line px-5 py-3 text-[11px] leading-relaxed text-ink-faint">
+            {compliance.policy}
+          </p>
+        </>
+      )}
+    </Panel>
+  );
+}
+
+function ComplianceCheckRow({
+  check,
+  selected,
+  onSelect,
+}: {
+  check: ComplianceCheck;
+  selected: string[];
+  onSelect: (ids: string[]) => void;
+}) {
+  const ids = check.evidence.flatMap((e) => e.source_regions);
+  const active =
+    ids.length > 0 && ids.length === selected.length && ids.every((id, i) => selected[i] === id);
+  return (
+    <div className="px-5 py-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 text-[13px] font-medium text-ink">{check.requirement}</div>
+        {check.result === "NOT_SUPPORTED" ? (
+          <Mono className="shrink-0 text-[10px] uppercase tracking-[0.1em] text-ink-faint">
+            Not supported
+          </Mono>
+        ) : (
+          <StatusBadge status={check.result} size="sm" />
+        )}
+      </div>
+
+      <dl className="mt-2 grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 text-[12px]">
+        <dt className="kicker pt-0.5">Expected</dt>
+        <dd className="text-ink-soft">{check.expected_condition}</dd>
+        {check.result !== "NOT_SUPPORTED" && (
+          <>
+            <dt className="kicker pt-0.5">Observed</dt>
+            <dd className={check.observed_value ? "text-ink" : "italic text-ink-faint"}>
+              {check.observed_value ?? "nothing read from the package"}
+            </dd>
+          </>
+        )}
+        <dt className="kicker pt-0.5">Reason</dt>
+        <dd className={cn(check.result === "PASS" ? "text-ink-soft" : check.result === "FAIL" ? "text-fail" : "text-review")}>
+          {check.reason}
+          <Mono muted className="mt-0.5 block text-[10px]">
+            {check.reason_code} · evidence {check.evidence_status.toLowerCase().replace("_", " ")}
+          </Mono>
+        </dd>
+      </dl>
+
+      {check.evidence.length > 0 && (
+        <button
+          type="button"
+          onMouseEnter={() => onSelect(ids)}
+          onFocus={() => onSelect(ids)}
+          onClick={() => onSelect(ids)}
+          className={cn(
+            "mt-3 block w-full border border-line px-3 py-2 text-left transition-colors",
+            active ? "bg-accent-soft" : "hover:bg-surface",
+          )}
+        >
+          <div className="kicker">Package evidence</div>
+          {check.evidence.map((e, i) => (
+            <div key={i} className="mt-1 text-[12px] text-ink">
+              “{e.raw_text}”
+              <Mono muted className="mt-0.5 block text-[10px]">
+                {e.declaration_field} · {e.declaration_status.toLowerCase()} ·{" "}
+                {e.source_regions.join(" + ")}
+                {e.ocr_confidence !== null ? ` · OCR ${Math.round(e.ocr_confidence * 100)}%` : ""}
+              </Mono>
+            </div>
+          ))}
+        </button>
+      )}
+
+      {check.source && (
+        <div className="mt-3 border-l-2 border-line pl-3">
+          <div className="kicker">Verified requirement source</div>
+          <p className="mt-1 text-[12px] italic leading-relaxed text-ink-soft">“{check.source.quote}”</p>
+          <p className="mt-1 text-[11px] text-ink-faint">
+            {check.source.title}
+            {check.source.last_verified ? ` · verified ${check.source.last_verified}` : ""}
+          </p>
+          {check.source.source_url && (
+            <a
+              href={check.source.source_url}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-accent hover:text-accent-hover"
+            >
+              Official BIS source
+              <ArrowUpRight className="h-3 w-3" />
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DownstreamPanel({ result }: { result: InspectionAnalysis }) {
   const p = result.pipeline;
   const rows: [string, string, string][] = [
@@ -1242,7 +1438,7 @@ function DownstreamPanel({ result }: { result: InspectionAnalysis }) {
       "Verified knowledge-base records only — never generated",
       p.standard_retrieval,
     ],
-    ["Legal-metrology rules", "Deterministic PASS / FAIL / REVIEW engine", p.legal_metrology],
+    ["Compliance check", "Verified requirements + deterministic rules — no model", p.compliance],
     ["Officer review & report", "Human verification, PDF report, history", p.officer_review],
   ];
   return (
