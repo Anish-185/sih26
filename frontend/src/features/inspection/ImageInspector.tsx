@@ -17,6 +17,7 @@ export function ImageInspector({
   height,
   regions,
   selectedId,
+  linkedIds = [],
   onSelect,
 }: {
   src: string;
@@ -25,6 +26,8 @@ export function ImageInspector({
   height: number;
   regions: OcrRegion[];
   selectedId: string | null;
+  /** Extra regions to highlight, e.g. every source box of a declaration. */
+  linkedIds?: string[];
   onSelect: (id: string | null) => void;
 }) {
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -62,7 +65,8 @@ export function ImageInspector({
             const y = (y1 / safeH) * 100;
             const w = ((x2 - x1) / safeW) * 100;
             const h = ((y2 - y1) / safeH) * 100;
-            const active = r.id === activeId;
+            const active =
+              r.id === activeId || (hoverId === null && linkedIds.includes(r.id));
             return (
               <rect
                 key={r.id}

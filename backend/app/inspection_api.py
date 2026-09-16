@@ -1,22 +1,28 @@
 """HTTP layer for the inspection pipeline.
 
+    POST /inspection/ocr       multipart/form-data, field "image"
+      -> InstantOcrOut
+         (image info + quality + raw OCR regions — the evidence layer only;
+          no model, no retrieval, no rules)
+
     POST /inspection/analyze   multipart/form-data, field "image"
       -> InspectionAnalysisOut
-         (image info + quality + raw OCR regions + declarations
-          + product classification + verified Indian Standard match)
+         (the same OCR evidence + declarations + product classification
+          + verified Indian Standard match)
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.inspection import (
     MAX_BYTES,
     ImageError,
     InspectionAnalysisOut,
     InspectionAnalyzer,
+    InstantOcrOut,
 )
 from app.llm import LocalLLM
 from app.ocr import OcrError
@@ -32,11 +38,14 @@ def get_analyzer() -> InspectionAnalyzer:
     return InspectionAnalyzer(llm=LocalLLM(timeout=45.0))
 
 
-@router.post("/analyze", response_model=InspectionAnalysisOut)
-async def analyze(image: UploadFile = File(...)) -> InspectionAnalysisOut:
-    """Decode the uploaded package image, run quality checks and local OCR,
-    and return the raw OCR regions. No declaration extraction or rule checks
-    happen here — those are later phases."""
+@lru_cache(maxsize=1)
+def get_ocr_analyzer() -> InspectionAnalyzer:
+    # Instant OCR has no model at all, so it works when LM Studio is down.
+    return InspectionAnalyzer(llm=None)
+
+
+async def _read_image(image: UploadFile) -> bytes:
+    """Reject non-image uploads and oversize files before decoding."""
     content_type = (image.content_type or "").lower()
     if content_type and not content_type.startswith("image/"):
         raise HTTPException(
@@ -50,7 +59,30 @@ async def analyze(image: UploadFile = File(...)) -> InspectionAnalysisOut:
             status_code=413,
             detail=f"Image exceeds the {MAX_BYTES // (1024 * 1024)} MB limit.",
         )
+    return data
 
+
+@router.post("/ocr", response_model=InstantOcrOut)
+async def instant_ocr(
+    image: UploadFile = File(...),
+    analyzer: InspectionAnalyzer = Depends(get_ocr_analyzer),
+) -> InstantOcrOut:
+    """Instant OCR: decode the uploaded image, run quality checks and local
+    OCR, and return the raw OCR regions. Nothing is interpreted."""
+    data = await _read_image(image)
+    try:
+        return analyzer.ocr(data, image.filename or "upload")
+    except ImageError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OcrError as exc:
+        raise HTTPException(status_code=503, detail=f"OCR unavailable: {exc}") from exc
+
+
+@router.post("/analyze", response_model=InspectionAnalysisOut)
+async def analyze(image: UploadFile = File(...)) -> InspectionAnalysisOut:
+    """Smart Inspection: the same OCR step, then declaration extraction,
+    product classification and the verified Indian Standard lookup."""
+    data = await _read_image(image)
     try:
         return get_analyzer().analyze(data, image.filename or "upload")
     except ImageError as exc:

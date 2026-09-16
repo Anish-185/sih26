@@ -112,10 +112,11 @@ def test_no_text_returns_empty_not_fake() -> None:
         any("no legible text" in n.lower() for n in result.notes),
     )
     # Phase 14: downstream stages must degrade to REVIEW, never fabricate.
-    check("blank image -> declaration stage REVIEW",
-          result.declaration_stage.status == "REVIEW")
+    check("blank image -> declaration stage NO_RELIABLE_TEXT",
+          result.declaration_stage.status == "NO_RELIABLE_TEXT")
     check("blank image -> no declarations invented",
-          result.declaration_stage.declarations == [])
+          all(f.status == "NOT_DETECTED" and f.value is None
+              for f in result.declaration_stage.fields))
     check("blank image -> classification REVIEW",
           result.classification.status == "REVIEW")
     check("blank image -> no normalized product invented",

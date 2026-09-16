@@ -41,10 +41,8 @@ class DownstreamResult:
 def _review_declarations(note: str) -> DeclarationStage:
     return DeclarationStage(
         status="REVIEW",
-        declarations=[],
+        fields=[],
         principal_display_panel=False,
-        found_fields=[],
-        missing_fields=[],
         notes=[note],
     )
 

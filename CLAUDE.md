@@ -308,8 +308,8 @@ sih26/
       laboratory.py    # Phase 7: BIS-recognized laboratory search
       ocr.py           # Phase 13: local OCR engine wrapper (rapidocr-onnxruntime)
       inspection.py    # Phase 13/14: InspectionAnalyzer + response models
-      inspection_api.py# POST /inspection/analyze
-      declarations.py  # Phase 14: deterministic declaration extraction
+      inspection_api.py# POST /inspection/ocr (Instant OCR) + /inspection/analyze
+      declarations.py  # deterministic declarations: DETECTED / UNCERTAIN / NOT_DETECTED, linked to OCR regions
       classification.py# Phase 14: product classification (rules, else Qwen3-4B)
       standards_registry.py # Phase 14: verified Indian Standard registry + lookup
       pipeline.py      # Phase 14: OCR -> declarations -> product -> standard
@@ -333,7 +333,8 @@ sih26/
       test_api_contract.py # real ASGI app via TestClient: shapes, 422, 404, 503
       test_llm_adapter.py  # app/llm.py: healthy parse + clean LLMError on every failure
       test_inspection_ocr.py # Phase 13: real OCR engine on synthesised labels + HTTP contract
-      test_declarations.py # Phase 14: deterministic declaration extraction
+      test_instant_ocr.py  # Instant OCR: /inspection/ocr evidence, stubbed engine failures, validation
+      test_declarations.py # declaration extraction on controlled OCR fixtures (+ real-label regressions)
       test_standards_registry.py # Phase 14: verified-only registry + lookup, never guesses
       test_classification.py # Phase 14: product classification (model stubbed)
       test_pipeline.py     # Phase 14: OCR -> standard end-to-end + stage degradation

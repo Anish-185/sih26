@@ -113,7 +113,8 @@ def test_one_failed_stage_does_not_crash_the_rest() -> None:
 
 def test_no_regions_all_review() -> None:
     res = run_downstream([], "", llm=None)
-    check("no regions -> declaration REVIEW", res.declaration_stage.status == "REVIEW")
+    check("no regions -> declaration NO_RELIABLE_TEXT",
+          res.declaration_stage.status == "NO_RELIABLE_TEXT")
     check("no regions -> classification REVIEW", res.classification.status == "REVIEW")
     check("no regions -> standard REVIEW", res.standard_match.status == "REVIEW")
 
@@ -151,7 +152,7 @@ def test_http_contract_runs_pipeline() -> None:
         check(f"response has '{key}'", key in body)
     check("pipeline.ocr COMPLETED", body["pipeline"]["ocr"] == "COMPLETED")
     check("declaration_extraction is a known state",
-          body["pipeline"]["declaration_extraction"] in {"COMPLETED", "PARTIAL", "REVIEW"})
+          body["pipeline"]["declaration_extraction"] in {"COMPLETED", "PARTIAL", "REVIEW", "NO_RELIABLE_TEXT"})
     check("standard_lookup is a known state",
           body["pipeline"]["standard_lookup"] in {"MATCHED", "REVIEW"})
     # never fabricated
@@ -162,8 +163,13 @@ def test_http_contract_runs_pipeline() -> None:
         check("MATCHED standard_match carries a verified BIS standard",
               sm["standard"] and sm["standard"]["source"] == "BIS"
               and sm["standard"]["number"].startswith("IS "))
-    check("declarations that exist keep a source_region_id",
-          all(d.get("source_region_id") for d in body["declaration_stage"]["declarations"]))
+    fields = body["declaration_stage"]["fields"]
+    check("declarations with evidence keep their source regions",
+          all(d["source_regions"] and d["source_region_id"] == d["source_regions"][0]
+              for d in fields if d["status"] != "NOT_DETECTED"))
+    check("NOT_DETECTED fields carry no value or evidence",
+          all(d["value"] is None and d["source_regions"] == []
+              for d in fields if d["status"] == "NOT_DETECTED"))
 
 
 def main() -> int:

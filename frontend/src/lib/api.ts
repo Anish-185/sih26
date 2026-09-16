@@ -11,6 +11,8 @@
     POST /certification-guidance
     POST /laboratory-search
     POST /ask                (grounded BIS Q&A — used by the Hallmarking view)
+    POST /inspection/ocr     (Instant OCR — raw evidence only)
+    POST /inspection/analyze (Smart Inspection — OCR + downstream pipeline)
 */
 
 const API_BASE = (import.meta.env.VITE_API_BASE ?? "/api").replace(/\/$/, "");
@@ -174,37 +176,46 @@ export interface AskResponse {
   sources: EvidenceSource[];
 }
 
-/* ---- inspection: real IMAGE -> OCR pipeline (POST /inspection/analyze) --- */
+/* ---- inspection: IMAGE -> OCR (/inspection/ocr) -> pipeline (/analyze) --- */
 
 export interface OcrRegion {
   id: string;
+  image_id: string; // the image this region was read from
   text: string;
   confidence: number; // 0–1
   bbox: [number, number, number, number]; // [x1,y1,x2,y2] in source pixels
   polygon: number[][]; // [[x,y] x4]
 }
 
-/** One structured declaration read off the label, with its OCR evidence. */
+/**
+ * One declaration field read off the label, with its OCR evidence.
+ * NOT_DETECTED only means the OCR text did not contain it — never "legally missing".
+ */
+export type DeclarationStatus = "DETECTED" | "UNCERTAIN" | "NOT_DETECTED";
+
 export interface Declaration {
   field: string;
   label: string;
-  value: string;
+  status: DeclarationStatus;
+  value: string | null;
   unit: string | null;
   numeric_value: number | null;
-  raw_text: string;
-  source_region_id: string | null;
-  bbox: [number, number, number, number] | null;
-  ocr_confidence: number;
+  raw_text: string; // OCR text of the source regions, verbatim
+  source_regions: string[]; // OCR region ids
+  source_region_id: string | null; // first source region
+  bbox: [number, number, number, number] | null; // union of the source boxes
+  image_id: string | null;
+  ocr_confidence: number | null; // how sure OCR was reading the text — not correctness
   method: "regex" | "keyword" | "heuristic";
+  extraction_method: "deterministic";
   note: string;
+  reason: string; // why UNCERTAIN / NOT_DETECTED
 }
 
 export interface DeclarationStage {
-  status: "COMPLETED" | "PARTIAL" | "REVIEW";
-  declarations: Declaration[];
+  status: "COMPLETED" | "PARTIAL" | "REVIEW" | "NO_RELIABLE_TEXT";
+  fields: Declaration[]; // every searched field exactly once
   principal_display_panel: boolean;
-  found_fields: string[];
-  missing_fields: string[];
   notes: string[];
 }
 
@@ -247,31 +258,49 @@ export interface PipelineStages {
   officer_review: string;
 }
 
+export interface InspectionImage {
+  image_id: string; // content hash — same image, same id
+  filename: string;
+  format: string;
+  width: number;
+  height: number;
+  bytes: number;
+}
+
+export interface ImageQuality {
+  blur_score: number;
+  brightness: number;
+  contrast: number;
+  is_low_quality: boolean;
+  notes: string[];
+}
+
+export interface OcrResult {
+  engine: string;
+  text: string;
+  region_count: number;
+  mean_confidence: number;
+  duration_ms: number;
+  regions: OcrRegion[];
+}
+
+/** Instant OCR — raw OCR evidence plus the declarations read from it. */
+export interface InstantOcr {
+  status: "COMPLETED" | "NO_TEXT";
+  created_at: string;
+  image: InspectionImage;
+  quality: ImageQuality;
+  ocr: OcrResult;
+  declaration_stage: DeclarationStage;
+  notes: string[];
+}
+
 export interface InspectionAnalysis {
   inspection_id: string;
   created_at: string;
-  image: {
-    filename: string;
-    format: string;
-    width: number;
-    height: number;
-    bytes: number;
-  };
-  quality: {
-    blur_score: number;
-    brightness: number;
-    contrast: number;
-    is_low_quality: boolean;
-    notes: string[];
-  };
-  ocr: {
-    engine: string;
-    text: string;
-    region_count: number;
-    mean_confidence: number;
-    duration_ms: number;
-    regions: OcrRegion[];
-  };
+  image: InspectionImage;
+  quality: ImageQuality;
+  ocr: OcrResult;
   // Phase 14 — real downstream pipeline.
   declaration_stage: DeclarationStage;
   classification: ProductClassification;
@@ -313,7 +342,19 @@ export const api = {
       120_000,
     ),
 
-  // Inspection: send the package image, get real OCR back.
+  // Instant OCR: send the package image, get the raw OCR regions and the
+  // declarations read from them back.
+  instantOcr: (file: File) => {
+    const form = new FormData();
+    form.append("image", file);
+    return request<InstantOcr>(
+      "/inspection/ocr",
+      { method: "POST", body: form },
+      120_000,
+    );
+  },
+
+  // Smart Inspection: OCR + declarations + product + verified standard.
   analyzeInspection: (file: File) => {
     const form = new FormData();
     form.append("image", file);
