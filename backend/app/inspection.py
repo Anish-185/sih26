@@ -10,8 +10,9 @@ Two entry points share one OCR path:
 
 ``analyze`` decodes the uploaded package image, runs lightweight quality checks
 and local OCR, then runs the downstream pipeline
-(``app.pipeline``): deterministic declaration extraction, product classification
-(deterministic, else local Qwen3-4B), and a verified Indian Standard lookup.
+(``app.pipeline``): deterministic declaration extraction, then product
+identification and ranked standard candidates from the verified BIS knowledge
+base through the existing retrieval engine (``app.product_identification``).
 
 Legal-metrology PASS/FAIL is still a later phase and is reported as ``NEXT``.
 Nothing here is fabricated: a stage that cannot produce a reliable result reports
@@ -30,8 +31,11 @@ import numpy as np
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
+from app.api import ReasonOut, WhyOut
 from app.declarations import extract_declarations
 from app.llm import LocalLLM
+from app.product import ProductStandardFinder
+from app.product_identification import RETRIEVAL_NOTE, product_name_of
 from app.ocr import OCR_ENGINE, OcrError, RawRegion, run_ocr
 from app.pipeline import run_downstream
 
@@ -149,41 +153,83 @@ class InstantOcrOut(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
-class ClassificationOut(BaseModel):
-    status: str = Field(description='"CLASSIFIED" | "REVIEW"')
-    product_name: str | None = None
-    normalized_product: str | None = None
-    category: str | None = None
-    subcategory: str | None = None
-    confidence: float
-    method: str = Field(description='"deterministic" | "llm"')
-    reason: str
-    source_declarations: list[str] = Field(default_factory=list)
+class ProductClueOut(BaseModel):
+    """One piece of package text used to identify the product."""
+
+    kind: str = Field(
+        description='"product_name" | "product_description" | "brand" | '
+        '"standard_number" | "ocr_text" | "model_hint"'
+    )
+    text: str = Field(description="The package text exactly as OCR/declarations read it.")
+    search_text: str = Field(
+        default="",
+        description="What was searched when OCR ran words together; empty when identical.",
+    )
+    declaration_field: str | None = None
+    declaration_status: str | None = None
+    source_regions: list[str] = Field(default_factory=list, description="OCR region ids.")
+    image_id: str | None = None
+    ocr_confidence: float | None = None
 
 
-class StandardOut(BaseModel):
-    number: str
-    title: str
-    source: str
-    source_url: str
-    reference: str = ""
-    status: str = "verified"
+class ProductEvidenceOut(BaseModel):
+    """Why one package clue supports one knowledge-base standard."""
+
+    clue: ProductClueOut
+    match: str = Field(description='"product" | "alias" | "category" | "standard_number"')
+    matched_phrase: str
+    retrieval_confidence: str
+    retrieval_score: float
 
 
-class StandardMatchOut(BaseModel):
+class ProductIdentificationOut(BaseModel):
     status: str = Field(description='"MATCHED" | "REVIEW"')
-    normalized_product: str | None = None
-    standard: StandardOut | None = None
-    confidence: float
-    matched_keywords: list[str] = Field(default_factory=list)
-    reason: str = ""
+    name: str | None = Field(
+        default=None, description="BIS product description from the knowledge base."
+    )
+    knowledge_id: str | None = None
+    standard_number: str | None = None
+    confidence: str = Field(
+        description="Retrieval confidence (high | medium | low | none) — not compliance."
+    )
+    method: str = Field(description='"deterministic" | "model_assisted"')
+    reason: str
+    evidence: list[ProductEvidenceOut] = Field(default_factory=list)
+    unverified_standard_numbers: list[str] = Field(
+        default_factory=list,
+        description="IS numbers printed on the label with no verified knowledge-base record.",
+    )
+    notes: list[str] = Field(default_factory=list)
+
+
+class StandardCandidateOut(BaseModel):
+    """A verified knowledge-base standard supported by the package evidence."""
+
+    id: str
+    standard_number: str
+    title: str
+    product: str = Field(description="BIS product description from the knowledge base.")
+    tier: str = Field(description='"product" | "alias" | "category" | "standard_number"')
+    printed_on_label: bool
+    score: float
+    confidence: str = Field(description="Retrieval confidence — not compliance or certification.")
+    matched_terms: list[str]
+    reasons: list[ReasonOut]
+    why: WhyOut
+    evidence: list[ProductEvidenceOut]
+    source_organization: str
+    source_url: str | None = None
+    document_name: str | None = None
+    reference: str | None = None
+    verification_status: str
+    last_verified: str | None = None
 
 
 class PipelineStagesOut(BaseModel):
     ocr: str
     declaration_extraction: str
-    product_classification: str
-    standard_lookup: str
+    product_identification: str
+    standard_retrieval: str
     legal_metrology: str = "NEXT"
     officer_review: str = "PENDING"
 
@@ -194,10 +240,12 @@ class InspectionAnalysisOut(BaseModel):
     image: ImageInfoOut
     quality: QualityOut
     ocr: OcrOut
-    # Phase 14 — real downstream pipeline.
     declaration_stage: DeclarationStageOut
-    classification: ClassificationOut
-    standard_match: StandardMatchOut
+    product: ProductIdentificationOut
+    standards: list[StandardCandidateOut] = Field(
+        description="Ranked verified knowledge-base standards supported by the package evidence."
+    )
+    retrieval_note: str = RETRIEVAL_NOTE
     pipeline: PipelineStagesOut
     notes: list[str] = Field(default_factory=list)
 
@@ -213,8 +261,9 @@ class InspectionAnalyzer:
     """Decode -> quality -> OCR [-> declarations -> product -> standard].
 
     Stateless; safe to reuse. ``llm`` is optional: when it is ``None`` (or the
-    server is unreachable) the pipeline uses deterministic classification only
-    and degrades unresolved stages to ``REVIEW``. Instant OCR never uses it.
+    server is unreachable) product identification is deterministic only and
+    unresolved stages report ``REVIEW``. Instant OCR never uses it.
+    ``product_finder`` defaults to the API's shared knowledge-base finder.
 
     ``ocr_engine`` defaults to the real local engine (``app.ocr.run_ocr``);
     tests pass a stand-in to exercise failure handling without the model.
@@ -224,14 +273,17 @@ class InspectionAnalyzer:
         self,
         llm: LocalLLM | None = None,
         ocr_engine: OcrEngine = run_ocr,
+        product_finder: ProductStandardFinder | None = None,
     ) -> None:
         self._llm = llm
         self._ocr_engine = ocr_engine
+        self._product_finder = product_finder
 
     def ocr(self, data: bytes, filename: str) -> InstantOcrOut:
         """Instant OCR: validate the image, measure quality, run OCR and return
-        the raw regions. No declaration extraction, classification, standard
-        lookup, model call or rule check happens here."""
+        the raw regions plus deterministic declarations. No product
+        identification, standard retrieval, model call or rule check happens
+        here."""
         if not data:
             raise ImageError("Empty upload.")
         if len(data) > MAX_BYTES:
@@ -339,16 +391,16 @@ class InspectionAnalyzer:
         # ---- downstream pipeline (declarations -> product -> standard) ----
         # Isolated so a pipeline bug can never break the OCR response.
         try:
-            downstream = run_downstream(regions, evidence.ocr.text, self._llm)
-            declaration_stage, classification, standard_match, pipeline = (
+            downstream = run_downstream(regions, self._llm, self._product_finder)
+            declaration_stage, product, standards, pipeline = (
                 _declaration_stage_out(downstream.declaration_stage),
-                _classification_out(downstream.classification),
-                _standard_match_out(downstream.standard_match),
+                _product_out(downstream.product),
+                [_candidate_out(c) for c in downstream.product.candidates],
                 _pipeline_out(downstream.stages),
             )
             notes.extend(downstream.notes)
         except Exception as exc:  # noqa: BLE001
-            declaration_stage, classification, standard_match, pipeline = _all_review(
+            declaration_stage, product, standards, pipeline = _all_review(
                 f"Downstream pipeline error: {exc}"
             )
             notes.append(f"Downstream pipeline error: {exc}")
@@ -360,8 +412,8 @@ class InspectionAnalyzer:
             quality=evidence.quality,
             ocr=evidence.ocr,
             declaration_stage=declaration_stage,
-            classification=classification,
-            standard_match=standard_match,
+            product=product,
+            standards=standards,
             pipeline=pipeline,
             notes=notes,
         )
@@ -470,38 +522,73 @@ def _declaration_stage_out(stage) -> DeclarationStageOut:
     )
 
 
-def _classification_out(cls) -> ClassificationOut:
-    return ClassificationOut(
-        status=cls.status,
-        product_name=cls.product_name,
-        normalized_product=cls.normalized_product,
-        category=cls.category,
-        subcategory=cls.subcategory,
-        confidence=cls.confidence,
-        method=cls.method,
-        reason=cls.reason,
-        source_declarations=list(cls.source_declarations),
+def _clue_out(clue) -> ProductClueOut:
+    return ProductClueOut(
+        kind=clue.kind,
+        text=clue.text,
+        search_text=clue.search_text,
+        declaration_field=clue.declaration_field,
+        declaration_status=clue.declaration_status,
+        source_regions=list(clue.source_regions),
+        image_id=clue.image_id,
+        ocr_confidence=clue.ocr_confidence,
     )
 
 
-def _standard_match_out(match) -> StandardMatchOut:
-    std = None
-    if match.standard is not None:
-        std = StandardOut(
-            number=match.standard.standard_number,
-            title=match.standard.title,
-            source=match.standard.source,
-            source_url=match.standard.source_url,
-            reference=match.standard.reference,
-            status=match.standard.status,
-        )
-    return StandardMatchOut(
-        status=match.status,
-        normalized_product=match.normalized_product or None,
-        standard=std,
-        confidence=match.confidence,
-        matched_keywords=list(match.matched_keywords),
-        reason=match.reason,
+def _evidence_out(ev) -> ProductEvidenceOut:
+    return ProductEvidenceOut(
+        clue=_clue_out(ev.clue),
+        match=ev.match,
+        matched_phrase=ev.matched_phrase,
+        retrieval_confidence=ev.retrieval_confidence,
+        retrieval_score=ev.retrieval_score,
+    )
+
+
+def _product_out(product) -> ProductIdentificationOut:
+    return ProductIdentificationOut(
+        status=product.status,
+        name=product.name,
+        knowledge_id=product.knowledge_id,
+        standard_number=product.standard_number,
+        confidence=product.confidence,
+        method=product.method,
+        reason=product.reason,
+        evidence=[_evidence_out(ev) for ev in product.evidence],
+        unverified_standard_numbers=list(product.unverified_standard_numbers),
+        notes=list(product.notes),
+    )
+
+
+def _candidate_out(candidate) -> StandardCandidateOut:
+    result, item, why = candidate.result, candidate.result.item, candidate.why
+    return StandardCandidateOut(
+        id=item.id,
+        standard_number=item.standard_number or "",
+        title=item.title,
+        product=product_name_of(item),
+        tier=candidate.tier,
+        printed_on_label=candidate.printed_on_label,
+        score=result.score,
+        confidence=result.confidence,
+        matched_terms=list(result.matched_terms),
+        reasons=[
+            ReasonOut(field=r.field, term=r.term, weight=r.weight, detail=r.detail)
+            for r in result.reasons
+        ],
+        why=WhyOut(
+            standard_number=why.standard_number,
+            strength=why.strength,
+            signals=list(why.signals),
+            summary=why.summary,
+        ),
+        evidence=[_evidence_out(ev) for ev in candidate.evidence],
+        source_organization=item.source_organization,
+        source_url=item.source_url,
+        document_name=item.document_name,
+        reference=item.reference,
+        verification_status=item.verification_status,
+        last_verified=item.last_verified.isoformat() if item.last_verified else None,
     )
 
 
@@ -509,15 +596,15 @@ def _pipeline_out(stages) -> PipelineStagesOut:
     return PipelineStagesOut(
         ocr=stages.ocr,
         declaration_extraction=stages.declaration_extraction,
-        product_classification=stages.product_classification,
-        standard_lookup=stages.standard_lookup,
+        product_identification=stages.product_identification,
+        standard_retrieval=stages.standard_retrieval,
         legal_metrology=stages.legal_metrology,
         officer_review=stages.officer_review,
     )
 
 
 def _all_review(note: str):
-    """Fallback quartet when the whole downstream pipeline raised."""
+    """Fallback when the whole downstream pipeline raised."""
     return (
         DeclarationStageOut(
             status="REVIEW",
@@ -525,17 +612,14 @@ def _all_review(note: str):
             principal_display_panel=False,
             notes=[note],
         ),
-        ClassificationOut(
-            status="REVIEW",
-            confidence=0.0,
-            method="deterministic",
-            reason=note,
+        ProductIdentificationOut(
+            status="REVIEW", confidence="none", method="deterministic", reason=note,
         ),
-        StandardMatchOut(status="REVIEW", confidence=0.0, reason=note),
+        [],
         PipelineStagesOut(
             ocr="COMPLETED",
             declaration_extraction="REVIEW",
-            product_classification="REVIEW",
-            standard_lookup="REVIEW",
+            product_identification="REVIEW",
+            standard_retrieval="REVIEW",
         ),
     )

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { RotateCcw, ScanSearch } from "lucide-react";
+import { ArrowUpRight, RotateCcw, ScanSearch } from "lucide-react";
 import {
   ApiError,
   api,
@@ -8,12 +8,17 @@ import {
   type InspectionAnalysis,
   type InstantOcr,
   type OcrRegion,
+  type ProductEvidence,
+  type ProductIdentification,
+  type StandardCandidate,
 } from "@/lib/api";
+import { standardTitle } from "@/lib/format";
 import { useAsyncTask } from "@/lib/hooks";
 import { cn } from "@/lib/cn";
 import {
   Button,
   Callout,
+  ConfidenceMeter,
   DefinitionRow,
   InlineLoading,
   Mono,
@@ -296,19 +301,10 @@ function Workspace({
   selectRegions: (ids: string[]) => void;
   onReset: () => void;
 }) {
-  const { image, quality, ocr, declaration_stage, classification, standard_match } =
-    result;
+  const { image, quality, ocr, declaration_stage, product, standards } = result;
   const region = ocr.regions.find((r) => r.id === selectedRegion) ?? null;
   const declForRegion = declarationFor(declaration_stage, selectedRegion);
-
-  const productLabel =
-    classification.status === "CLASSIFIED" && classification.normalized_product
-      ? classification.normalized_product
-      : "Needs review";
-  const standardLabel =
-    standard_match.status === "MATCHED" && standard_match.standard
-      ? standard_match.standard.number
-      : "Needs review";
+  const matched = product.status === "MATCHED";
 
   return (
     <div className="space-y-6">
@@ -326,10 +322,11 @@ function Workspace({
 
       <Callout>
         <span className="font-medium">Live pipeline.</span> Local OCR, then
-        deterministic declaration extraction, product classification and a
-        lookup against a verified Indian Standards registry. Every value traces
-        back to the OCR region it came from. The legal-metrology PASS/FAIL rule
-        engine is the next phase; unresolved stages read “review”, never a guess.
+        deterministic declaration extraction, then product identification and
+        standard candidates retrieved from the verified BIS knowledge base. Every
+        value traces back to the OCR region it came from. A standard match is not
+        a compliance or certification decision — the legal-metrology rule engine
+        is the next phase, and unresolved stages read “review”, never a guess.
       </Callout>
 
       {result.notes.length > 0 && (
@@ -376,23 +373,13 @@ function Workspace({
                 <Mono muted>{ocr.duration_ms} ms</Mono>
               </DefinitionRow>
               <DefinitionRow label="Product">
-                <span
-                  className={cn(
-                    classification.status === "CLASSIFIED"
-                      ? "text-ink"
-                      : "text-review",
-                  )}
-                >
-                  {productLabel}
+                <span className={matched ? "text-ink" : "text-review"}>
+                  {matched ? product.name : "Needs review"}
                 </span>
               </DefinitionRow>
-              <DefinitionRow label="Standard">
-                <span
-                  className={cn(
-                    standard_match.status === "MATCHED" ? "text-ink" : "text-review",
-                  )}
-                >
-                  {standardLabel}
+              <DefinitionRow label="Best-supported standard">
+                <span className={matched ? "text-ink" : "text-review"}>
+                  {matched ? product.standard_number : "Needs review"}
                 </span>
               </DefinitionRow>
             </dl>
@@ -407,9 +394,17 @@ function Workspace({
             selected={linkedRegions}
             onSelect={selectRegions}
           />
-          <StandardPanel
-            match={standard_match}
-            classification={classification}
+          <ProductPanel
+            product={product}
+            selected={linkedRegions}
+            onSelect={selectRegions}
+          />
+          <StandardCandidatesPanel
+            standards={standards}
+            product={product}
+            note={result.retrieval_note}
+            selected={linkedRegions}
+            onSelect={selectRegions}
           />
           <RegionsPanel
             regions={ocr.regions}
@@ -947,75 +942,280 @@ function DeclarationsPanel({
   );
 }
 
-function StandardPanel({
-  match,
-  classification,
-}: {
-  match: InspectionAnalysis["standard_match"];
-  classification: InspectionAnalysis["classification"];
-}) {
-  const matched = match.status === "MATCHED" && match.standard;
+const CLUE_LABEL: Record<ProductEvidence["clue"]["kind"], string> = {
+  product_name: "Product name",
+  product_description: "Product description",
+  brand: "Brand",
+  standard_number: "Printed standard number",
+  ocr_text: "Label text",
+  model_hint: "Local model suggestion",
+};
 
+const MATCH_LABEL: Record<ProductEvidence["match"], string> = {
+  product: "matches the BIS product description",
+  alias: "matches a knowledge-base keyword",
+  category: "matches a category shared by several standards",
+  standard_number: "number found in the verified knowledge base",
+};
+
+/** One piece of package evidence; selecting it lights up its OCR boxes. */
+function EvidenceRow({
+  evidence,
+  selected,
+  onSelect,
+  divider,
+}: {
+  evidence: ProductEvidence;
+  selected: string[];
+  onSelect: (ids: string[]) => void;
+  divider: boolean;
+}) {
+  const { clue } = evidence;
+  const ids = clue.source_regions;
+  const active =
+    ids.length > 0 &&
+    ids.length === selected.length &&
+    ids.every((id, i) => selected[i] === id);
+  const body = (
+    <>
+      <div className="kicker">{CLUE_LABEL[clue.kind]}</div>
+      <div className="mt-1 text-[13px] text-ink">“{clue.text}”</div>
+      {clue.search_text && (
+        <Mono muted className="mt-0.5 block text-[10px]">
+          OCR ran words together · searched as “{clue.search_text}”
+        </Mono>
+      )}
+      <Mono muted className="mt-0.5 block text-[10px]">
+        {ids.length ? ids.join(" + ") : "not read from the label"}
+        {clue.declaration_status ? ` · declaration ${clue.declaration_status.toLowerCase()}` : ""}
+        {clue.ocr_confidence !== null ? ` · OCR ${Math.round(clue.ocr_confidence * 100)}%` : ""}
+      </Mono>
+      <p className="mt-1 text-[11px] leading-snug text-ink-soft">
+        {MATCH_LABEL[evidence.match]}
+        {evidence.match !== "standard_number" && evidence.matched_phrase
+          ? ` (“${evidence.matched_phrase}”)`
+          : ""}
+      </p>
+    </>
+  );
+  const cls = cn(
+    "block w-full px-5 py-3 text-left transition-colors",
+    divider && "border-t border-line",
+    active ? "bg-accent-soft" : ids.length ? "hover:bg-surface" : "",
+  );
+  if (!ids.length) return <div className={cls}>{body}</div>;
+  return (
+    <button
+      type="button"
+      onMouseEnter={() => onSelect(ids)}
+      onFocus={() => onSelect(ids)}
+      onClick={() => onSelect(ids)}
+      className={cls}
+    >
+      {body}
+    </button>
+  );
+}
+
+function ProductPanel({
+  product,
+  selected,
+  onSelect,
+}: {
+  product: ProductIdentification;
+  selected: string[];
+  onSelect: (ids: string[]) => void;
+}) {
+  const matched = product.status === "MATCHED";
   return (
     <Panel flush>
       <PanelHeader
-        title="Applicable Indian Standard"
-        meta={
-          <span className={stageTone(match.status)}>{match.status}</span>
-        }
+        title="Product identification"
+        meta={<span className={stageTone(product.status)}>{product.status}</span>}
       />
       {matched ? (
         <dl className="px-5 py-2">
-          <DefinitionRow label="Standard">
-            <Mono className="text-[13px] font-semibold text-ink">
-              {match.standard!.number}
-            </Mono>
-          </DefinitionRow>
-          <DefinitionRow label="Title">
-            <span className="text-ink">{match.standard!.title}</span>
-          </DefinitionRow>
-          <DefinitionRow label="Source">
-            <a
-              href={match.standard!.source_url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent"
-            >
-              {match.standard!.source}
-            </a>
-            {match.standard!.reference ? (
-              <Mono muted className="mt-0.5 block text-[10px]">
-                {match.standard!.reference}
-              </Mono>
-            ) : null}
-          </DefinitionRow>
-          <DefinitionRow label="Confidence">
-            <Mono>{Math.round(match.confidence * 100)}%</Mono>
-          </DefinitionRow>
-          <DefinitionRow label="Normalized product">
-            <span className="text-ink">{classification.normalized_product}</span>
+          <DefinitionRow label="Product">
+            <span className="text-ink">{product.name}</span>
             <Mono muted className="mt-0.5 block text-[10px] uppercase tracking-[0.1em]">
-              {classification.method} · {Math.round(classification.confidence * 100)}%
+              BIS product description · knowledge base
             </Mono>
           </DefinitionRow>
-          <DefinitionRow label="Why this match">
-            <span className="text-ink-soft">{match.reason}</span>
+          <DefinitionRow label="Retrieval confidence">
+            <ConfidenceMeter confidence={product.confidence} />
           </DefinitionRow>
         </dl>
       ) : (
-        <div className="px-5 py-4">
-          <p className="text-[13px] text-review">
-            No verified Indian Standard was matched with enough confidence — sent
-            for officer review.
-          </p>
-          <p className="mt-2 text-[12px] text-ink-faint">
-            {match.reason || classification.reason}
-          </p>
-          <p className="mt-2 text-[11px] text-ink-faint">
-            MetrIQ only cites standards from its verified registry. It never
-            generates an IS number.
-          </p>
+        <p className="px-5 py-4 text-[13px] leading-relaxed text-review">
+          {product.reason}
+        </p>
+      )}
+
+      {product.evidence.length > 0 && (
+        <div className="border-t border-line">
+          <div className="kicker px-5 pt-3">Evidence from the package</div>
+          <ul>
+            {product.evidence.map((ev, i) => (
+              <li key={`${ev.clue.kind}-${ev.clue.text}-${i}`}>
+                <EvidenceRow evidence={ev} selected={selected} onSelect={onSelect} divider={i > 0} />
+              </li>
+            ))}
+          </ul>
         </div>
+      )}
+
+      {product.notes.length > 0 && (
+        <ul className="space-y-1 border-t border-line px-5 py-3 text-[12px] text-review">
+          {product.notes.map((n, i) => (
+            <li key={i}>· {n}</li>
+          ))}
+        </ul>
+      )}
+      <p className="border-t border-line px-5 py-3 text-[11px] leading-relaxed text-ink-faint">
+        {matched
+          ? "The best-supported product in the verified knowledge base — not a compliance, certification or conformity decision."
+          : "MetrIQ only names products that exist in its verified BIS knowledge base. It never guesses one."}
+      </p>
+    </Panel>
+  );
+}
+
+const TIER_LABEL: Record<StandardCandidate["tier"], string> = {
+  product: "Product match",
+  alias: "Keyword only",
+  category: "Category only",
+  standard_number: "Printed number only",
+};
+
+function StandardCandidatesPanel({
+  standards,
+  product,
+  note,
+  selected,
+  onSelect,
+}: {
+  standards: StandardCandidate[];
+  product: ProductIdentification;
+  note: string;
+  selected: string[];
+  onSelect: (ids: string[]) => void;
+}) {
+  return (
+    <Panel flush>
+      <PanelHeader
+        title="BIS standard candidates"
+        meta={`${standards.length} ${standards.length === 1 ? "candidate" : "candidates"}`}
+      />
+      <p className="border-b border-line px-5 py-2.5 text-[11px] leading-relaxed text-ink-faint">
+        {note}
+      </p>
+
+      {product.unverified_standard_numbers.length > 0 && (
+        <p className="border-b border-line px-5 py-3 text-[12px] text-review">
+          Printed on the package but not in the verified knowledge base, so not
+          shown as a standard: {product.unverified_standard_numbers.join(", ")}
+        </p>
+      )}
+
+      {standards.length === 0 ? (
+        <p className="px-5 py-4 text-[13px] text-ink-soft">
+          No verified standard in the knowledge base is supported by this label.
+          MetrIQ never generates an IS number.
+        </p>
+      ) : (
+        <ol>
+          {standards.map((c, i) => {
+            const best =
+              product.status === "MATCHED" && c.standard_number === product.standard_number;
+            const topReasons = [...c.reasons].sort((a, b) => b.weight - a.weight).slice(0, 4);
+            return (
+              <li key={c.id} className={cn("relative", i > 0 && "border-t border-line")}>
+                {best && <span className="absolute inset-y-0 left-0 w-[2px] bg-accent" aria-hidden />}
+                <div className="flex flex-wrap items-start justify-between gap-3 px-5 pt-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-3">
+                      <Mono muted className="text-[11px] tabular-nums">
+                        {String(i + 1).padStart(2, "0")}
+                      </Mono>
+                      <Mono className="text-[14px] font-semibold text-accent">
+                        {c.standard_number}
+                      </Mono>
+                      <Mono
+                        className={cn(
+                          "text-[10px] uppercase tracking-[0.1em]",
+                          best ? "text-accent" : c.tier === "product" ? "text-ink-soft" : "text-review",
+                        )}
+                      >
+                        {best ? "Best-supported candidate" : TIER_LABEL[c.tier]}
+                        {c.printed_on_label ? " · printed on label" : ""}
+                      </Mono>
+                    </div>
+                    <div className="mt-1.5 text-[14px] font-medium text-ink">
+                      {standardTitle(c.title)}
+                    </div>
+                    <p className="mt-1 text-[11px] text-ink-faint">
+                      {c.source_organization}
+                      {c.document_name ? ` · ${c.document_name}` : ""}
+                      {c.last_verified ? ` · verified ${c.last_verified}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <ConfidenceMeter confidence={c.confidence} />
+                    <Mono muted className="text-[10px]">
+                      retrieval · score {c.score.toFixed(1)}
+                    </Mono>
+                  </div>
+                </div>
+
+                <ul className="mt-3 border-t border-line">
+                  {c.evidence.map((ev, j) => (
+                    <li key={`${ev.clue.text}-${j}`}>
+                      <EvidenceRow evidence={ev} selected={selected} onSelect={onSelect} divider={j > 0} />
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="border-t border-line bg-surface px-5 py-4">
+                  <div className="eyebrow mb-2 !text-ink-faint">Why this result</div>
+                  <p className="text-[13px] leading-relaxed text-ink">{c.why.summary}</p>
+                  {topReasons.length > 0 && (
+                    <>
+                      <div className="kicker mb-2 mt-3">Retrieval signals</div>
+                      <ul className="divide-y divide-line border-y border-line">
+                        {topReasons.map((reason, k) => (
+                          <li
+                            key={`${reason.field}-${reason.term}-${k}`}
+                            className="flex items-baseline gap-3 py-2 text-[12px] text-ink-soft"
+                          >
+                            <Mono muted className="w-24 shrink-0 text-[10px] uppercase tracking-[0.1em]">
+                              {reason.field}
+                            </Mono>
+                            <span className="min-w-0 flex-1">
+                              term <Mono>{reason.term}</Mono>
+                              {reason.detail ? ` — ${reason.detail}` : ""}
+                            </span>
+                            <Mono className="shrink-0 text-[11px] text-accent">+{reason.weight}</Mono>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                  {c.source_url && (
+                    <a
+                      href={c.source_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="group/src mt-3 inline-flex items-center gap-1.5 text-[12px] font-medium text-accent hover:text-accent-hover"
+                    >
+                      Official BIS source
+                      <ArrowUpRight className="h-3.5 w-3.5 transition-transform group-hover/src:translate-x-0.5" />
+                    </a>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
       )}
     </Panel>
   );
@@ -1031,16 +1231,16 @@ function DownstreamPanel({ result }: { result: InspectionAnalysis }) {
       p.declaration_extraction,
     ],
     [
-      "Product classification",
-      result.classification.method === "llm"
-        ? "Local Qwen3-4B, strict JSON"
-        : "Deterministic product rules",
-      p.product_classification,
+      "Product identification",
+      result.product.method === "model_assisted"
+        ? "Knowledge-base retrieval; search term suggested by the local model"
+        : "Deterministic retrieval over the verified BIS knowledge base",
+      p.product_identification,
     ],
     [
-      "Indian Standard lookup",
-      "Verified standards registry — never generated",
-      p.standard_lookup,
+      "Standard candidates",
+      "Verified knowledge-base records only — never generated",
+      p.standard_retrieval,
     ],
     ["Legal-metrology rules", "Deterministic PASS / FAIL / REVIEW engine", p.legal_metrology],
     ["Officer review & report", "Human verification, PDF report, history", p.officer_review],

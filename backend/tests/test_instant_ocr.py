@@ -41,7 +41,7 @@ FAIL = 0
 
 SAMPLES = Path(__file__).resolve().parents[2] / "samples" / "ocr-labels"
 # Instant OCR may carry deterministic declarations, but never these:
-DOWNSTREAM_KEYS = {"classification", "standard_match", "pipeline"}
+DOWNSTREAM_KEYS = {"product", "standards", "pipeline"}
 
 
 def check(name: str, condition: bool, detail: str = "") -> None:

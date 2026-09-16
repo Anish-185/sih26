@@ -33,7 +33,7 @@ and shows nothing rather than guess. Every screen and every endpoint follows thi
 
 | | |
 |---|---|
-| **① The inspection pipeline** | An uploaded label image → local OCR → deterministic declaration extraction → product classification → a verified Indian Standard. |
+| **① The inspection pipeline** | An uploaded label image → local OCR → deterministic declaration extraction → product identification → verified Indian Standard candidates from the BIS knowledge base. |
 | **② The BIS knowledge surfaces** | Natural-language Product → Standard discovery, certification guidance, recognised-lab directories, and hallmarking / HUID information — deterministic retrieval, with a local model that only *explains* what retrieval already found. |
 
 ---
@@ -44,8 +44,8 @@ and shows nothing rather than guess. Every screen and every endpoint follows thi
 flowchart LR
     IMG[Package image] --> OCR[Local OCR<br/>PP-OCRv3 / ONNX]
     OCR --> DECL[Declaration extraction<br/>deterministic regex + keywords]
-    DECL --> CLS[Product classification<br/>rules, else local Qwen3-4B]
-    CLS --> STD[Indian Standard lookup<br/>verified registry only]
+    DECL --> CLS[Product identification<br/>BIS knowledge base + retrieval engine]
+    CLS --> STD[Standard candidates<br/>verified records + Why this result]
     STD --> LM[Legal-metrology rules<br/>PASS / FAIL / REVIEW]
     LM --> RPT[Officer review & report]
 
@@ -53,8 +53,10 @@ flowchart LR
     style RPT stroke-dasharray: 4 4
 ```
 
+`POST /inspection/ocr` returns the OCR regions and declarations only.
 `POST /inspection/analyze` (multipart, field `image`) runs everything up to the
-Indian Standard. Legal-metrology PASS/FAIL and the officer report are the next
+standard candidates. A standard match is retrieval evidence, not a compliance or
+certification decision. Legal-metrology PASS/FAIL and the officer report are the next
 phase — those stages report `NEXT` / `PENDING`, never a fabricated verdict.
 
 ### What the officer sees
@@ -75,30 +77,32 @@ phase — those stages report `NEXT` / `PENDING`, never a fabricated verdict.
 ### Evidence traceability
 
 ```
-IMAGE  →  OCR REGION  →  DECLARATION  →  PRODUCT CLASSIFICATION  →  INDIAN STANDARD
-        (id + bbox +      (field, value,   ("Roasted Bengal Gram",   (IS 18140:2023,
-         confidence)       method)          deterministic / 94%)      verified, 97%)
+IMAGE → OCR REGION → DECLARATION → PRODUCT CLUE → PRODUCT     → STANDARD CANDIDATE → BIS SOURCE
+       (id, bbox,    (field, value, (text + its   (KB product   (IS 18140:2023,       (verified
+        confidence)   status)        OCR regions)  description)  why this result)      record)
 ```
 
-The label may print its own `BIS CRS Reg. No.` or `ISI CM/L` licence — MetrIQ does
-**not** read the standard off the label. It classifies the product and matches the
-standard from its own verified registry (`data/standards_registry.json`).
+Products and standards come only from `data/knowledge/` through the same
+deterministic retrieval engine as Product → Standard. A result counts as a product
+match only when the label text contains a product phrase of that record; an IS
+number printed on the label is one more signal, checked against the knowledge
+base — never proof on its own. Anything weaker is `REVIEW`, with the reason.
 
 ### Try it
 
 Sample label images live in [`samples/ocr-labels/`](samples/ocr-labels/):
 
-| Image | Classified as | → Standard |
+| Image | Identified as | → Standard candidate |
 |---|---|---|
 | `synth_clean-declaration.png` | Roasted Bengal Gram | **IS 18140:2023** |
-| `synth_led-lamp.png` | Self-Ballasted LED Lamp | **IS 16102 (Part 1):2026** |
-| `synth_electric-kettle.png` | Electric Kettle | **IS 367:1993** |
+| `synth_led-lamp.png` | Self-ballasted LED lamps | **IS 16102 (Part 1)** |
+| `synth_electric-kettle.png` | Electric Kettles and Jugs | **IS 367:1993** |
 | `synth_low-light-blurry.jpg` | (same, quality flagged low) | still matched |
 | `real_*` (Wikimedia Commons) | real-world label photos, incl. hard cases | OCR stress tests |
 
 ```bash
 curl -s -F "image=@samples/ocr-labels/synth_led-lamp.png" \
-  http://127.0.0.1:8000/inspection/analyze | jq '.classification, .standard_match.standard'
+  http://127.0.0.1:8000/inspection/analyze | jq '.product, [.standards[].standard_number]'
 ```
 
 ---
@@ -139,11 +143,10 @@ backend/                      Python 3.14 · FastAPI
   app/
     ocr.py                    local OCR wrapper (rapidocr-onnxruntime, PP-OCRv3 weights)
     inspection.py             InspectionAnalyzer + response models
-    inspection_api.py         POST /inspection/analyze
-    declarations.py           deterministic declaration extraction (14 fields)
-    classification.py         product classification (rules → local Qwen3-4B)
-    standards_registry.py     verified Indian Standard registry + lookup
-    pipeline.py               OCR → declarations → product → standard
+    inspection_api.py         POST /inspection/ocr, POST /inspection/analyze
+    declarations.py           deterministic declarations (DETECTED / UNCERTAIN / NOT_DETECTED)
+    product_identification.py product + standard candidates over the knowledge base
+    pipeline.py               OCR → declarations → product → standard candidates
     retrieval/                deterministic lexical search (text.py, engine.py)
     rag.py                    grounded Q&A (/ask)
     product.py                Product → Standard + "Why this result?"
@@ -152,8 +155,7 @@ backend/                      Python 3.14 · FastAPI
     api.py / main.py          router / app
   tests/                      plain-Python runners, bridged to pytest
 data/
-  knowledge/                  BIS knowledge base — one JSON file per category (Q&A / retrieval)
-  standards_registry.json     hand-verified Indian Standards for Product → Standard
+  knowledge/                  BIS knowledge base — one JSON file per category (the only source of standards)
 samples/ocr-labels/           sample label images for the inspection pipeline
 frontend/                     React 19 · TypeScript · Vite · Tailwind v4
 ```
@@ -201,8 +203,9 @@ export LM_STUDIO_MODEL=qwen/qwen3-4b                  # default (LLM_MODEL also 
 ```
 
 > **Demoing tip.** The fastest, model-free paths are **Product → Standard** and an
-> inspection of a known product (deterministic classification, ~3 s). Unknown
-> products fall back to the local model, which can take ~25 s on first call.
+> inspection of a known product (deterministic identification, ~3 s). When the
+> label names nothing in the knowledge base, the local model is asked for a search
+> term (never a verdict), which can take ~25 s on first call.
 
 ---
 
@@ -210,7 +213,7 @@ export LM_STUDIO_MODEL=qwen/qwen3-4b                  # default (LLM_MODEL also 
 
 ```bash
 cd backend
-./.venv/bin/python -m pytest -q                 # 110 checks, all suites
+./.venv/bin/python -m pytest -q                 # all suites
 ./.venv/bin/python scripts/check_knowledge.py   # knowledge-base validation
 
 cd ../frontend
@@ -245,7 +248,8 @@ reference `1`, buried content mention `1`.
 confidence is capped at `low`. When nothing matches: `confidence: "none"`,
 `abstained: true`, empty `results` — the system never invents a result.
 
-**Standards registry** ([`app/standards_registry.py`](backend/app/standards_registry.py)):
-a match needs a keyword-phrase score ≥ 0.75 **and** a matched phrase of at least two
-words, so a single generic word ("water", "gram") can never pull in a standard.
-Below threshold → `REVIEW`.
+**Inspection product identification** ([`app/product_identification.py`](backend/app/product_identification.py)):
+retrieval results are kept only when the label contains a multi-word product
+phrase of the record, so a single generic word ("water", "gram") can never pull in
+a standard. Phrases shared by several standards are category-level; keyword
+aliases need corroboration; otherwise → `REVIEW`.

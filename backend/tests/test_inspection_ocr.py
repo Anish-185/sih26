@@ -117,14 +117,9 @@ def test_no_text_returns_empty_not_fake() -> None:
     check("blank image -> no declarations invented",
           all(f.status == "NOT_DETECTED" and f.value is None
               for f in result.declaration_stage.fields))
-    check("blank image -> classification REVIEW",
-          result.classification.status == "REVIEW")
-    check("blank image -> no normalized product invented",
-          result.classification.normalized_product is None)
-    check("blank image -> standard match REVIEW",
-          result.standard_match.status == "REVIEW")
-    check("blank image -> no standard invented",
-          result.standard_match.standard is None)
+    check("blank image -> product REVIEW", result.product.status == "REVIEW")
+    check("blank image -> no product invented", result.product.name is None)
+    check("blank image -> no standard candidates invented", result.standards == [])
     check("blank image -> pipeline summary present, ocr COMPLETED",
           result.pipeline.ocr == "COMPLETED"
           and result.pipeline.legal_metrology == "NEXT")

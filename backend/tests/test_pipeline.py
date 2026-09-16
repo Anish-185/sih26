@@ -65,58 +65,77 @@ CHANA = [
 
 
 def test_chana_end_to_end_deterministic() -> None:
-    text = "\n".join(r.text for r in CHANA)
-    res = run_downstream(CHANA, text, llm=None)
+    res = run_downstream(CHANA, llm=None)
 
     check("declaration stage COMPLETED", res.declaration_stage.status == "COMPLETED",
           res.declaration_stage.status)
-    check("classification CLASSIFIED", res.classification.status == "CLASSIFIED")
-    check("normalized product is Roasted Bengal Gram",
-          res.classification.normalized_product == "Roasted Bengal Gram")
-    check("standard MATCHED", res.standard_match.status == "MATCHED", res.standard_match.status)
-    check("matched standard is IS 18140:2023",
-          res.standard_match.standard is not None
-          and res.standard_match.standard.standard_number == "IS 18140:2023")
-    check("standard confidence is a real score",
-          0.0 < res.standard_match.confidence <= 1.0, str(res.standard_match.confidence))
+    check("product MATCHED", res.product.status == "MATCHED", res.product.reason)
+    check("product name comes from the knowledge base",
+          res.product.name == "Roasted Bengal Gram", str(res.product.name))
+    check("matched standard is IS 18140:2023", res.product.standard_number == "IS 18140:2023")
+    check("top candidate is the matched standard",
+          res.product.candidates and res.product.candidates[0].standard_number == "IS 18140:2023")
+    check("retrieval confidence is a retrieval level", res.product.confidence in {"high", "medium", "low"})
 
     st = res.stages
     check("stage summary: ocr COMPLETED", st.ocr == "COMPLETED")
     check("stage summary: declaration_extraction COMPLETED", st.declaration_extraction == "COMPLETED")
-    check("stage summary: product_classification CLASSIFIED", st.product_classification == "CLASSIFIED")
-    check("stage summary: standard_lookup MATCHED", st.standard_lookup == "MATCHED")
+    check("stage summary: product_identification MATCHED", st.product_identification == "MATCHED")
+    check("stage summary: standard_retrieval MATCHED", st.standard_retrieval == "MATCHED")
     check("stage summary: legal_metrology NEXT", st.legal_metrology == "NEXT")
     check("stage summary: officer_review PENDING", st.officer_review == "PENDING")
 
-    # evidence traceability: image -> ocr region -> declaration
+    # evidence traceability: OCR region -> declaration -> product clue -> standard
     nq = next((d for d in res.declaration_stage.declarations if d.field == "net_quantity"), None)
     check("net_quantity declaration links back to its OCR region",
           nq is not None and nq.source_region_id == "OCR-004" and nq.bbox == [10, 130, 240, 160])
+    desc = next((ev for ev in res.product.evidence if ev.clue.kind == "product_description"), None)
+    check("product evidence keeps the declaration field and its OCR region",
+          desc is not None and desc.clue.declaration_field == "product_description"
+          and desc.clue.source_regions == ["OCR-003"])
+
+
+class _BrokenFinder:
+    def __init__(self):
+        self.search_engine = self
+
+    @property
+    def items(self):
+        raise RuntimeError("knowledge base unavailable")
+
+    def find(self, *args, **kwargs):
+        raise RuntimeError("knowledge base unavailable")
 
 
 def test_one_failed_stage_does_not_crash_the_rest() -> None:
-    # OCR text present but not a classifiable product and no model available:
-    # declarations still parse, classification + standard degrade to REVIEW.
+    # Not a product in the knowledge base, no model: declarations still parse,
+    # product identification degrades to REVIEW and invents nothing.
     regions = [
         Region("OCR-001", "WIDGET PACK", 0.9, [0, 0, 1, 1]),
         Region("OCR-002", "Net Quantity: 12 pcs", 0.8, [0, 2, 1, 3]),
         Region("OCR-003", "M.R.P. Rs. 300", 0.8, [0, 4, 1, 5]),
         Region("OCR-004", "Packed by: ACME WIDGETS PVT LTD", 0.8, [0, 6, 1, 7]),
     ]
-    res = run_downstream(regions, "\n".join(r.text for r in regions), llm=None)
+    res = run_downstream(regions, llm=None)
     check("declarations still parsed", res.declaration_stage.status in {"COMPLETED", "PARTIAL"},
           res.declaration_stage.status)
-    check("classification REVIEW (no rule, no model)", res.classification.status == "REVIEW")
-    check("standard REVIEW", res.standard_match.status == "REVIEW")
-    check("standard REVIEW -> no standard invented", res.standard_match.standard is None)
+    check("unknown product -> REVIEW", res.product.status == "REVIEW")
+    check("REVIEW -> no product or standard invented",
+          res.product.name is None and res.product.standard_number is None and res.product.candidates == [])
+
+    broken = run_downstream(CHANA, llm=None, finder=_BrokenFinder())
+    check("retrieval failure -> product REVIEW with reason",
+          broken.product.status == "REVIEW" and "knowledge base unavailable" in broken.product.reason)
+    check("retrieval failure -> declarations still returned",
+          broken.declaration_stage.status == "COMPLETED")
 
 
 def test_no_regions_all_review() -> None:
-    res = run_downstream([], "", llm=None)
+    res = run_downstream([], llm=None)
     check("no regions -> declaration NO_RELIABLE_TEXT",
           res.declaration_stage.status == "NO_RELIABLE_TEXT")
-    check("no regions -> classification REVIEW", res.classification.status == "REVIEW")
-    check("no regions -> standard REVIEW", res.standard_match.status == "REVIEW")
+    check("no regions -> product REVIEW", res.product.status == "REVIEW")
+    check("no regions -> no standard candidates", res.product.candidates == [])
 
 
 def _chana_label_png() -> bytes:
@@ -148,21 +167,29 @@ def test_http_contract_runs_pipeline() -> None:
     )
     check("POST /inspection/analyze -> 200", resp.status_code == 200, resp.text[:200])
     body = resp.json()
-    for key in ("declaration_stage", "classification", "standard_match", "pipeline"):
+    for key in ("declaration_stage", "product", "standards", "retrieval_note", "pipeline"):
         check(f"response has '{key}'", key in body)
+    check("old Phase 14 keys are gone",
+          "classification" not in body and "standard_match" not in body)
     check("pipeline.ocr COMPLETED", body["pipeline"]["ocr"] == "COMPLETED")
     check("declaration_extraction is a known state",
           body["pipeline"]["declaration_extraction"] in {"COMPLETED", "PARTIAL", "REVIEW", "NO_RELIABLE_TEXT"})
-    check("standard_lookup is a known state",
-          body["pipeline"]["standard_lookup"] in {"MATCHED", "REVIEW"})
+    check("standard_retrieval is a known state",
+          body["pipeline"]["standard_retrieval"] in {"MATCHED", "REVIEW"})
+    check("retrieval note says it is not a compliance decision",
+          "not a compliance" in body["retrieval_note"])
     # never fabricated
-    sm = body["standard_match"]
-    if sm["status"] == "REVIEW":
-        check("REVIEW standard_match carries no standard", sm["standard"] is None)
+    product = body["product"]
+    if product["status"] == "REVIEW":
+        check("REVIEW product carries no name or standard",
+              product["name"] is None and product["standard_number"] is None)
     else:
-        check("MATCHED standard_match carries a verified BIS standard",
-              sm["standard"] and sm["standard"]["source"] == "BIS"
-              and sm["standard"]["number"].startswith("IS "))
+        check("MATCHED product's standard is the top verified candidate",
+              body["standards"] and body["standards"][0]["standard_number"] == product["standard_number"]
+              and body["standards"][0]["verification_status"] == "verified")
+    for cand in body["standards"]:
+        check(f"{cand['standard_number']} keeps why + reasons + source",
+              cand["why"]["summary"] and cand["reasons"] and cand["source_url"])
     fields = body["declaration_stage"]["fields"]
     check("declarations with evidence keep their source regions",
           all(d["source_regions"] and d["source_region_id"] == d["source_regions"][0]

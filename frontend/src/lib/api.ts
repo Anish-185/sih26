@@ -219,41 +219,60 @@ export interface DeclarationStage {
   notes: string[];
 }
 
-export interface ProductClassification {
-  status: "CLASSIFIED" | "REVIEW";
-  product_name: string | null;
-  normalized_product: string | null;
-  category: string | null;
-  subcategory: string | null;
-  confidence: number;
-  method: "deterministic" | "llm";
-  reason: string;
-  source_declarations: string[];
+/** One piece of package text used to identify the product. */
+export interface ProductClue {
+  kind:
+    | "product_name"
+    | "product_description"
+    | "brand"
+    | "standard_number"
+    | "ocr_text"
+    | "model_hint";
+  text: string; // exactly as OCR / declarations read it
+  search_text: string; // what was searched when OCR ran words together ("" if same)
+  declaration_field: string | null;
+  declaration_status: string | null;
+  source_regions: string[]; // OCR region ids
+  image_id: string | null;
+  ocr_confidence: number | null;
 }
 
-export interface VerifiedStandard {
-  number: string;
-  title: string;
-  source: string;
-  source_url: string;
-  reference: string;
-  status: string;
+/** Why one package clue supports one knowledge-base standard. */
+export interface ProductEvidence {
+  clue: ProductClue;
+  match: "product" | "alias" | "category" | "standard_number";
+  matched_phrase: string;
+  retrieval_confidence: string;
+  retrieval_score: number;
 }
 
-export interface StandardMatch {
+/** Product identification — retrieval over the verified BIS knowledge base, not compliance. */
+export interface ProductIdentification {
   status: "MATCHED" | "REVIEW";
-  normalized_product: string | null;
-  standard: VerifiedStandard | null;
-  confidence: number;
-  matched_keywords: string[];
+  name: string | null; // BIS product description from the knowledge base
+  knowledge_id: string | null;
+  standard_number: string | null;
+  confidence: string; // retrieval confidence: high | medium | low | none
+  method: "deterministic" | "model_assisted";
   reason: string;
+  evidence: ProductEvidence[];
+  unverified_standard_numbers: string[];
+  notes: string[];
+}
+
+/** A verified knowledge-base standard supported by the package evidence. */
+export interface StandardCandidate extends ProductStandardResult {
+  product: string;
+  tier: "product" | "alias" | "category" | "standard_number";
+  printed_on_label: boolean;
+  evidence: ProductEvidence[];
 }
 
 export interface PipelineStages {
   ocr: string;
   declaration_extraction: string;
-  product_classification: string;
-  standard_lookup: string;
+  product_identification: string;
+  standard_retrieval: string;
   legal_metrology: string;
   officer_review: string;
 }
@@ -301,10 +320,10 @@ export interface InspectionAnalysis {
   image: InspectionImage;
   quality: ImageQuality;
   ocr: OcrResult;
-  // Phase 14 — real downstream pipeline.
   declaration_stage: DeclarationStage;
-  classification: ProductClassification;
-  standard_match: StandardMatch;
+  product: ProductIdentification;
+  standards: StandardCandidate[]; // ranked, verified knowledge-base records only
+  retrieval_note: string;
   pipeline: PipelineStages;
   notes: string[];
 }

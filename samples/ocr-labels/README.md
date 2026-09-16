@@ -2,7 +2,7 @@
 
 Drop these into the **Inspection** tab (or `curl -F image=@<file> http://127.0.0.1:8000/inspection/analyze`)
 to exercise the pipeline: local OCR (`rapidocr-onnxruntime`, PP-OCRv3 weights) →
-declaration extraction → product classification → verified Indian Standard lookup.
+declaration extraction → product identification → verified Indian Standard candidates.
 
 Nothing here is production data. The `synth_*` labels are generated locally by
 `make_synth_labels.py` (in this folder) with **fictional** company / address /

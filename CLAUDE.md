@@ -279,8 +279,10 @@ Frontend (MetrIQ): `frontend/` — React + TS + Vite + Tailwind v4. The product
 is presented as "MetrIQ — AI-Assisted Legal Metrology Inspection". Standards,
 Certification, Laboratories, Hallmarking and the header health dot call the real
 API. The Inspection tab is real end to end through Phase 14: upload ->
-`/inspection/analyze` -> OCR + declarations + product classification + verified
-Indian Standard. History / Review / Dashboard still run on clearly labelled
+`/inspection/analyze` -> OCR + declarations + product identification + verified
+Indian Standard candidates from `data/knowledge/` (the Phase 14 classification rules
+and separate standards registry were retired; IS 18140:2023 and IS 367:1993 moved
+into the knowledge base). History / Review / Dashboard still run on clearly labelled
 placeholder data (`frontend/src/mocks.tsx`) — the legal-metrology PASS/FAIL rule
 engine and the officer report are not built yet. Run: backend on :8000, then
 `cd frontend && npm install && npm run dev` (proxies `/api` -> :8000).
@@ -307,12 +309,11 @@ sih26/
       certification.py # Phase 6: BIS certification guidance
       laboratory.py    # Phase 7: BIS-recognized laboratory search
       ocr.py           # Phase 13: local OCR engine wrapper (rapidocr-onnxruntime)
-      inspection.py    # Phase 13/14: InspectionAnalyzer + response models
+      inspection.py    # InspectionAnalyzer + response models (ocr / analyze)
       inspection_api.py# POST /inspection/ocr (Instant OCR) + /inspection/analyze
       declarations.py  # deterministic declarations: DETECTED / UNCERTAIN / NOT_DETECTED, linked to OCR regions
-      classification.py# Phase 14: product classification (rules, else Qwen3-4B)
-      standards_registry.py # Phase 14: verified Indian Standard registry + lookup
-      pipeline.py      # Phase 14: OCR -> declarations -> product -> standard
+      product_identification.py # product + standard candidates over the KB (retrieval engine + phrase gate)
+      pipeline.py      # OCR -> declarations -> product identification -> standard candidates
       knowledge/       # knowledge-base schema + loader
         schema.py      # KnowledgeItem pydantic model + validation rules
         loader.py      # load + validate data/knowledge/, report every problem
@@ -335,16 +336,14 @@ sih26/
       test_inspection_ocr.py # Phase 13: real OCR engine on synthesised labels + HTTP contract
       test_instant_ocr.py  # Instant OCR: /inspection/ocr evidence, stubbed engine failures, validation
       test_declarations.py # declaration extraction on controlled OCR fixtures (+ real-label regressions)
-      test_standards_registry.py # Phase 14: verified-only registry + lookup, never guesses
-      test_classification.py # Phase 14: product classification (model stubbed)
-      test_pipeline.py     # Phase 14: OCR -> standard end-to-end + stage degradation
+      test_product_identification.py # product/standard candidates, REVIEW paths, model stubbed
+      test_pipeline.py     # OCR -> standard candidates end-to-end + stage degradation
       test_plain_runners.py # pytest bridge — runs every runner, makes pytest authoritative
       fixtures/broken_kb/  # deliberately invalid KB for the loader tests
     requirements.txt
     .env.example
   data/
     knowledge/         # the BIS knowledge base: one JSON file per category (Q&A / retrieval)
-    standards_registry.json # Phase 14: hand-verified Indian Standards for Product -> Standard
   samples/
     ocr-labels/        # sample package images for testing /inspection/analyze
   frontend/            # React + Vite app

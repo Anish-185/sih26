@@ -467,5 +467,33 @@
     "document_name": "BIS: Ensure Safe Drinking Water — Verify Potable Water Bottles (BIS advisory)",
     "verification_status": "verified",
     "last_verified": "2026-09-08"
+  },
+  {
+    "id": "is-18140-2023-roasted-bengal-gram",
+    "title": "IS 18140:2023 — Roasted Bengal Gram — Specification",
+    "category": "indian_standards",
+    "content": "Indian Standard specification for roasted Bengal gram (roasted chana). BIS lists IS 18140:2023 as an active standard under committee FAD 16 (Foodgrains, Starches and Ready to Eat Foods). BIS titles the standard \"Roasted Bengal Gram — Specification\". Moved from the Phase 14 verified standards registry; the technical requirements of the standard were not read from the standard itself.",
+    "keywords": ["roasted bengal gram", "roasted gram", "roasted chana", "roasted split bengal gram", "bhuna chana", "roasted masala chana", "masala chana", "food"],
+    "standard_number": "IS 18140:2023",
+    "source_organization": "Bureau of Indian Standards (BIS)",
+    "source_url": "https://www.services.bis.gov.in/php/BIS_2.0/bisconnect/knowyourstandards",
+    "document_name": "BIS: Know Your Standards",
+    "reference": "BIS committee FAD 16 (Foodgrains, Starches and Ready to Eat Foods); IS 18140:2023, active",
+    "verification_status": "verified",
+    "last_verified": "2026-09-08"
+  },
+  {
+    "id": "is-367-1993-electric-kettles-and-jugs",
+    "title": "IS 367:1993 — Electric Kettles and Jugs for Household and Similar Use — Specification",
+    "category": "indian_standards",
+    "content": "Indian Standard specification for electric kettles and jugs for household and similar use. BIS lists household electrical appliances of this kind under compulsory certification (ISI Mark, Scheme I). BIS titles the standard \"Electric Kettles and Jugs for Household and Similar Use — Specification\". Moved from the Phase 14 verified standards registry; the full technical scope was not read from the standard itself.",
+    "keywords": ["electric kettle", "electric jug", "cordless kettle", "electric kettles and jugs", "electrical appliance", "household", "compulsory certification"],
+    "standard_number": "IS 367:1993",
+    "source_organization": "Bureau of Indian Standards (BIS)",
+    "source_url": "https://www.bis.gov.in/product-certification/products-under-compulsory-certification/scheme-i-mark-scheme/?lang=en",
+    "document_name": "BIS: Products under Compulsory Certification (Scheme I)",
+    "reference": "BIS: Products under Compulsory Certification (Scheme I / ISI Mark); household electrical appliances",
+    "verification_status": "verified",
+    "last_verified": "2026-09-08"
   }
 ]

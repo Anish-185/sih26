@@ -1,9 +1,9 @@
-"""Downstream inspection pipeline (Phase 14).
+"""Downstream inspection pipeline.
 
     OCR regions
       -> declaration extraction   (deterministic)
-      -> product classification   (deterministic, else local Qwen3-4B)
-      -> Indian Standard lookup    (verified registry only)
+      -> product identification   (existing BIS retrieval engine + product phrase gate)
+      -> standard candidates      (verified knowledge-base records only)
 
 Each stage is isolated: a failure in one stage degrades that stage to REVIEW and
 the pipeline still returns. Nothing here fabricates a result.
@@ -13,18 +13,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.classification import ProductClassification, classify_product
 from app.declarations import DeclarationStage, extract_declarations
 from app.llm import LocalLLM
-from app.standards_registry import StandardMatch, lookup_standard
+from app.product import ProductStandardFinder
+from app.product_identification import MATCHED, ProductIdentification, identify_product
 
 
 @dataclass(frozen=True)
 class PipelineStages:
     ocr: str
     declaration_extraction: str
-    product_classification: str
-    standard_lookup: str
+    product_identification: str
+    standard_retrieval: str
     legal_metrology: str = "NEXT"
     officer_review: str = "PENDING"
 
@@ -32,8 +32,7 @@ class PipelineStages:
 @dataclass(frozen=True)
 class DownstreamResult:
     declaration_stage: DeclarationStage
-    classification: ProductClassification
-    standard_match: StandardMatch
+    product: ProductIdentification
     stages: PipelineStages
     notes: list[str]
 
@@ -47,33 +46,17 @@ def _review_declarations(note: str) -> DeclarationStage:
     )
 
 
-def _review_classification(note: str) -> ProductClassification:
-    return ProductClassification(
-        status="REVIEW",
-        product_name=None,
-        normalized_product=None,
-        category=None,
-        subcategory=None,
-        confidence=0.0,
-        method="deterministic",
-        reason=note,
-    )
-
-
-def _review_match(note: str) -> StandardMatch:
-    return StandardMatch(
-        status="REVIEW",
-        normalized_product="",
-        standard=None,
-        confidence=0.0,
-        reason=note,
+def _review_product(note: str) -> ProductIdentification:
+    return ProductIdentification(
+        status="REVIEW", name=None, knowledge_id=None, standard_number=None,
+        confidence="none", method="deterministic", reason=note, evidence=[], candidates=[],
     )
 
 
 def run_downstream(
     regions,
-    ocr_text: str,
     llm: LocalLLM | None = None,
+    finder: ProductStandardFinder | None = None,
 ) -> DownstreamResult:
     notes: list[str] = []
 
@@ -84,39 +67,26 @@ def run_downstream(
         decl = _review_declarations(f"Declaration extraction failed: {exc}")
         notes.append(str(exc))
 
-    # 2) product classification ----------------------------------------
+    # 2) product identification + standard candidates -------------------
     try:
-        cls = classify_product(decl, ocr_text, llm=llm)
-    except Exception as exc:  # noqa: BLE001
-        cls = _review_classification(f"Product classification failed: {exc}")
-        notes.append(str(exc))
+        if finder is None:
+            from app.api import get_product_finder  # shared, already-loaded knowledge base
 
-    # 3) Indian Standard lookup ----------------------------------------
-    try:
-        if cls.status == "CLASSIFIED" and cls.normalized_product:
-            extra = " ".join(
-                d.value for d in decl.declarations
-                if d.field in ("product_name", "product_description")
-            )
-            match = lookup_standard(cls.normalized_product, extra_terms=extra)
-        else:
-            match = _review_match(
-                "Product was not classified, so no standard lookup was attempted."
-            )
+            finder = get_product_finder()
+        product = identify_product(decl, regions, finder, llm=llm)
     except Exception as exc:  # noqa: BLE001
-        match = _review_match(f"Standard lookup failed: {exc}")
+        product = _review_product(f"Product identification failed: {exc}")
         notes.append(str(exc))
 
     stages = PipelineStages(
         ocr="COMPLETED",
         declaration_extraction=decl.status,
-        product_classification=cls.status,
-        standard_lookup=match.status,
+        product_identification=product.status,
+        standard_retrieval=MATCHED if product.status == MATCHED else "REVIEW",
     )
     return DownstreamResult(
         declaration_stage=decl,
-        classification=cls,
-        standard_match=match,
+        product=product,
         stages=stages,
         notes=notes,
     )

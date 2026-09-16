@@ -7,8 +7,8 @@
 
     POST /inspection/analyze   multipart/form-data, field "image"
       -> InspectionAnalysisOut
-         (the same OCR evidence + declarations + product classification
-          + verified Indian Standard match)
+         (the same OCR evidence + declarations + product identification
+          + ranked verified Indian Standard candidates)
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from app.inspection import (
     InspectionAnalyzer,
     InstantOcrOut,
 )
+from app.api import get_product_finder
 from app.llm import LocalLLM
 from app.ocr import OcrError
 
@@ -32,10 +33,11 @@ router = APIRouter(prefix="/inspection", tags=["inspection"])
 
 @lru_cache(maxsize=1)
 def get_analyzer() -> InspectionAnalyzer:
-    # A short timeout: product classification only calls the model when the
-    # deterministic rules miss, and the analyze request must stay responsive.
-    # If LM Studio is down the pipeline falls back to REVIEW, it does not error.
-    return InspectionAnalyzer(llm=LocalLLM(timeout=45.0))
+    # Product identification uses the shared knowledge base and retrieval engine.
+    # The model is only asked for a search term when the package text identified
+    # nothing; a short timeout keeps the request responsive, and if LM Studio is
+    # down identification is simply deterministic-only.
+    return InspectionAnalyzer(llm=LocalLLM(timeout=45.0), product_finder=get_product_finder())
 
 
 @lru_cache(maxsize=1)
@@ -81,7 +83,7 @@ async def instant_ocr(
 @router.post("/analyze", response_model=InspectionAnalysisOut)
 async def analyze(image: UploadFile = File(...)) -> InspectionAnalysisOut:
     """Smart Inspection: the same OCR step, then declaration extraction,
-    product classification and the verified Indian Standard lookup."""
+    product identification and verified Indian Standard candidates."""
     data = await _read_image(image)
     try:
         return get_analyzer().analyze(data, image.filename or "upload")

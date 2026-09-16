@@ -206,6 +206,11 @@ class SearchEngine:
     def size(self) -> int:
         return len(self._index)
 
+    @property
+    def items(self) -> list[KnowledgeItem]:
+        """Every loaded knowledge item, in load order (read-only use)."""
+        return [indexed.item for indexed in self._index]
+
     # ------------------------------------------------------------------ scoring
 
     def _score_item(
