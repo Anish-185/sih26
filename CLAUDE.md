@@ -294,7 +294,7 @@ Only implement the current milestone. Do not start a new phase without being ask
 ## Repository layout
 
 ```
-sih26107/
+sih26/
   CLAUDE.md            # this file — project rules
   README.md            # setup & run instructions
   backend/             # Python + FastAPI service
