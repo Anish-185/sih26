@@ -403,6 +403,27 @@ review"; queue "Why escalated" column; History "Escalation" column; Dashboard "R
 With the current verified data every real inspection escalates (no standard has every requirement
 checkable). Tests: `test_escalation.py` (27), `test_inspection_records.py` (77, incl. 0002 backfill).
 
+Milestone 11 (evidence-backed inspection reports): `app/report.py` renders a PDF (ReportLab platypus,
+new dependency `reportlab`) from the persisted record only — `build_story(record_json, images, generated_at)`
+returns the flowables, `render_report` builds the PDF with "page X / Y" chrome. No DB writes, no
+recomputation, no model. Fonts: Noto Sans Regular/Medium/Bold + Noto Sans Mono in `app/report_fonts/`
+(SIL OFL 1.1, `OFL.txt`) — they cover the rupee sign. Sections: header (ID, saved / generated in IST,
+status) · 02 summary (product or "Not identified", brand, manufacturer/packer/importer, category or "Not
+established", sides, SYSTEM RESULT and OFFICER FINAL DECISION boxes side by side) · 03 stored photos with
+OCR boxes drawn on an in-memory copy (only sides that exist) · 04 OCR evidence (field | value | confidence |
+side + region + raw text, region table capped at 60) · 05 declarations with stored statuses (NOT_DETECTED is
+not "legally missing") · 06 BIS standard evidence (identified / candidate, why this result, source) or
+"No verified BIS standard was identified by the automated retrieval process." · 07 Legal Metrology
+requirements (checkable vs not checkable from an image, status, source + URL per requirement) · 08
+compliance table (NOT_SUPPORTED shown as UNSUPPORTED, never PASS) · 09 automated system result with
+escalation reasons, uncertain / conflicting declarations, unsupported checks · 10 officer review (never an
+officer identity) · 11 final outcome (system result and officer decision both shown) · 12 only the sources
+stored with the evidence. All stored text is XML-escaped. Endpoint `GET /inspections/{id}/report.pdf`
+(422 malformed id, 404 unknown, 503 database down; session rolled back, never committed). Frontend:
+"View report" (ReviewView header) — `LinkButton external` to the PDF URL. Tests: `test_report.py` (36:
+PASS / FAIL / REVIEW, officer states, honesty, multi-side, escaping, stored-only URLs, endpoint read-only
+with no LLM / recompute calls).
+
 Only implement the current milestone. Do not start a new phase without being asked.
 
 ## Repository layout
@@ -436,6 +457,8 @@ sih26/
       records.py       # Milestone 9: saved inspections + officer review models and workflow
       records_api.py   # Milestone 9: /inspections save, list, stats, detail, stored photos, review
       escalation.py    # Milestone 10: deterministic resolve-or-escalate decision + evidence-linked reasons
+      report.py        # Milestone 11: evidence-backed PDF report from the stored record (read-only)
+      report_fonts/    # Noto Sans TTFs (SIL OFL 1.1) used by the PDF report
       knowledge/       # knowledge-base schema + loader
         schema.py      # KnowledgeItem pydantic model + validation rules
         loader.py      # load + validate data/knowledge/, report every problem
@@ -469,6 +492,7 @@ sih26/
       test_legal_metrology.py # Milestone 8: Legal Metrology sources, rules, applicability, BIS separation, UI contract
       test_inspection_records.py # Milestone 9/10: migrations, persistence, escalation states, officer review, stats (PostgreSQL)
       test_escalation.py   # Milestone 10: every escalation reason, resolve-or-escalate decision, determinism
+      test_report.py       # Milestone 11: PDF report content, honesty, escaping, read-only endpoint (PostgreSQL)
       test_pipeline.py     # OCR -> standard candidates end-to-end + stage degradation
       test_plain_runners.py # pytest bridge — runs every runner, makes pytest authoritative
       fixtures/broken_kb/  # deliberately invalid KB for the loader tests

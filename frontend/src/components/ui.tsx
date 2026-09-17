@@ -78,14 +78,29 @@ export function LinkButton({
   variant = "primary",
   size = "md",
   className,
+  external = false,
 }: {
   to: string;
   children: ReactNode;
   variant?: ButtonVariant;
   size?: ButtonSize;
   className?: string;
+  external?: boolean; // a non-app URL (e.g. an API PDF), opened in a new tab
 }) {
   const brackets = variant === "secondary" || (size === "lg" && variant !== "primary");
+  if (external) {
+    return (
+      <a
+        href={to}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={cn(buttonBase, buttonVariants[variant], buttonSizes[size], className)}
+      >
+        {brackets && <ButtonBrackets />}
+        {children}
+      </a>
+    );
+  }
   return (
     <Link
       to={to}

@@ -9,6 +9,7 @@
                                             review states counted separately)
     GET  /inspections/{inspection_id}       the full record: system result + analysis + officer review
     GET  /inspections/{inspection_id}/images/{index}   a stored package photo (1-based upload order)
+    GET  /inspections/{inspection_id}/report.pdf       evidence-backed PDF report of the saved record (read-only)
     POST /inspections/{inspection_id}/review           JSON: {"action": "START"} or
                                             {"action": "COMPLETE", "decision": ..., "officer_result": ..., "note": ...}
 
@@ -19,7 +20,7 @@ refuses changes to the system columns as well.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, Request, Response, UploadFile
@@ -28,6 +29,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db import get_session
+from app.report import render_report
 from app.inspection import EscalationReasonOut, InspectionAnalysisOut, InspectionAnalyzer
 from app.inspection_api import _package, _run, get_analyzer
 from app.records import (
@@ -263,6 +265,29 @@ def stored_image(inspection_id: str, index: int = Path(ge=1), session: Session =
         raise HTTPException(status_code=404, detail=f"Inspection {inspection_id} has no stored image {index}.")
     return Response(content=img.data, media_type=img.content_type,
                     headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.get("/{inspection_id}/report.pdf", response_class=Response,
+            responses={200: {"content": {"application/pdf": {}}}})
+def report(inspection_id: str, session: Session = Depends(get_session)) -> Response:
+    """The evidence-backed inspection report, built from the stored record and photos.
+    Read-only: nothing is recomputed, no model is called, the session is never committed."""
+    _checked_id(inspection_id)
+    try:
+        record = get_inspection(session, inspection_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"Inspection {inspection_id} was not found.")
+        data = _record_out(record).model_dump(mode="json")
+        images = {i.position: i.data for i in record.images}
+    except SQLAlchemyError as exc:
+        raise _db_error(session, exc) from exc
+    finally:
+        session.rollback()  # read-only: never persist anything from report generation
+    pdf = render_report(data, images, datetime.now(timezone.utc))
+    return Response(content=pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'inline; filename="metriq-report-{inspection_id}.pdf"',
+        "Cache-Control": "no-store",
+    })
 
 
 @router.post("/{inspection_id}/review", response_model=InspectionRecordOut)

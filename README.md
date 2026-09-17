@@ -112,6 +112,13 @@ and a required note), or **Manual review** (note required).
 - **History** (`/history`) — every saved inspection: date, product, BIS standard, system result,
   officer status, final decision. `/history/:id` reopens it with the stored photos, OCR boxes,
   declarations, BIS and Legal Metrology checks, evidence and the review panel.
+- **Report** — "View report" on a saved inspection opens a PDF built from the stored record (ReportLab,
+  bundled Noto Sans fonts): summary, stored photos with OCR boxes, OCR evidence, declarations with their
+  stored statuses, BIS standard evidence (or an explicit "no verified standard"), Legal Metrology
+  requirements (checkable vs not checkable), compliance results from the deterministic rules, the
+  automated system result with escalation reasons, officer review, a final outcome that keeps the system
+  result and the officer's decision side by side, and only the sources stored with the evidence. No officer
+  identity is shown (there are no officer accounts).
 - **Dashboard** — counts from the database, with system results (PASS / FAIL / REVIEW) and officer
   review states (pending / in review / completed) shown separately.
 
@@ -121,6 +128,7 @@ and a required note), or **Manual review** (note required).
 | `GET /inspections` | newest first; `?officer_status=PENDING&officer_status=IN_REVIEW` |
 | `GET /inspections/stats` | database counts |
 | `GET /inspections/{id}` · `GET /inspections/{id}/images/{index}` | saved record · stored photo |
+| `GET /inspections/{id}/report.pdf` | evidence-backed PDF report of the saved record — read-only, nothing recomputed, no model |
 | `POST /inspections/{id}/review` | `{"action":"START"}` or `{"action":"COMPLETE","decision":…,"officer_result":…,"note":…}`; unknown fields (e.g. `system_result`) → 422, wrong state or not escalated → 409, unknown id → 404, database down → 503 |
 
 ### What the officer sees
@@ -325,7 +333,7 @@ Phases 1–14 are complete (see [`CLAUDE.md`](CLAUDE.md) for the full log). What
 - [ ] **Requirement coverage** — more verified BIS requirements (still 1 checkable BIS rule)
 - [x] **Officer review & inspection history** — saved inspections in PostgreSQL, immutable system result, officer accept / override / manual review with notes, real History, Review queue and Dashboard
 - [x] **Escalation** — deterministic resolve-or-escalate decision with evidence-linked reasons; officer review only for cases the system cannot resolve
-- [ ] **Officer report** — PDF export of a reviewed inspection
+- [x] **Inspection report** — evidence-backed PDF audit trail of any saved inspection
 
 ---
 

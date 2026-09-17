@@ -628,6 +628,9 @@ export type ReviewInput =
   | { action: "START" }
   | { action: "COMPLETE"; decision: OfficerDecision; officer_result?: SystemResult; note?: string };
 
+/** The evidence-backed PDF report of a saved inspection — generated on request from the stored record (read-only). */
+export const inspectionReportUrl = (id: string) => `${API_BASE}/inspections/${encodeURIComponent(id)}/report.pdf`;
+
 /** Absolute URL of a stored package photo (the API returns a path). */
 export const inspectionImageUrl = (path: string) => `${API_BASE}${path}`;
 
