@@ -11,6 +11,11 @@ Plain Python, no test framework (matches the other runners). Run:
 
 Exit 0 = all checks passed, 1 = something failed.
 
+Milestone 10 adds escalation: an inspection the system resolved is saved as
+NOT_REQUIRED (never queued, no review possible); every other one goes to the
+officer queue as PENDING. Migration 0002 is tested by backfilling rows saved
+under migration 0001.
+
 Package photos are analysed by the real pipeline; most use a stubbed OCR engine
 (controlled text) so results are deterministic, and one uses the real local OCR
 engine on a sample label. No LM Studio / OpenRouter.
@@ -18,7 +23,9 @@ engine on a sample label. No LM Studio / OpenRouter.
 
 from __future__ import annotations
 
+import copy
 import io
+import json
 import os
 import sys
 import warnings
@@ -40,7 +47,8 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from app.api import get_product_finder  # noqa: E402
 from app.db import get_engine, get_session  # noqa: E402
-from app.inspection import InspectionAnalyzer  # noqa: E402
+from app.escalation import assess  # noqa: E402
+from app.inspection import EscalationOut, InspectionAnalysisOut, InspectionAnalyzer  # noqa: E402
 from app.inspection_api import get_analyzer  # noqa: E402
 from app.main import app  # noqa: E402
 from app.ocr import RawRegion  # noqa: E402
@@ -104,6 +112,28 @@ STUB = InspectionAnalyzer(
 )
 
 
+def resolved(data: dict, bis="PASS", lm="PASS") -> dict:
+    """A real analysis with its results set to a fully resolved state. The verified data has no
+    standard whose every requirement is checkable, so this is the only way to show a resolved case."""
+    d = copy.deepcopy(data)
+    d["compliance"].update(overall_status=bis, coverage_status="INSPECTION_SUPPORTED", reason_code="ALL_CHECKS_PASSED")
+    d["package_label"].update(overall_status=lm, reason_code="ALL_CHECKS_PASSED")
+    d["package_label"]["checks"] = [c for c in d["package_label"]["checks"] if c["result"] != "NOT_SUPPORTED"]
+    for img in d["images"]:
+        if img.get("quality"):
+            img["quality"].update(is_low_quality=False, notes=[])
+    d["escalation"] = assess(d)
+    return d
+
+
+class ResolvedAnalyzer:
+    """The real stubbed pipeline, with its results set to a state the system can resolve."""
+
+    def analyze_package(self, uploads):
+        data = resolved(STUB.analyze_package(uploads).model_dump(mode="json"))
+        return InspectionAnalysisOut.model_validate(data)
+
+
 def save(*widths_sides, extra: dict | None = None):
     files = [("images", (f"{side.lower()}.png", png(w), "image/png")) for w, side in widths_sides]
     data = {"sides": [side for _, side in widths_sides], **(extra or {})}
@@ -134,11 +164,59 @@ def reset_database() -> None:
     command.downgrade(cfg, "base")
     tables = set(inspect(get_engine()).get_table_names())
     check("migration: downgrade to base removes the tables", not {"inspections", "inspection_images"} & tables)
+    migrate_existing_rows(cfg)
+    command.downgrade(cfg, "base")
     command.upgrade(cfg, "head")
     get_engine().dispose()
     tables = set(inspect(get_engine()).get_table_names())
     check("migration: a fresh database is created from the migration",
           {"inspections", "inspection_images", "alembic_version"} <= tables, str(tables))
+
+
+def migrate_existing_rows(cfg) -> None:
+    """Rows saved under migration 0001 are assessed and given an escalation by 0002."""
+    print("\nmigration 0002 backfills existing inspections")
+    command.upgrade(cfg, "0001_inspection_records")
+    from PIL import Image as _Image  # noqa: F401 — photos are not needed for these rows
+    escalated = STUB.analyze_package([_upload(W_REVIEW)]).model_dump(mode="json")
+    escalated.pop("escalation", None)
+    clean = resolved(escalated)
+    clean.pop("escalation")
+    rows = [("INS-20000101-0000A1", clean, "PENDING"), ("INS-20000101-0000A2", escalated, "PENDING"),
+            ("INS-20000101-0000A3", clean, "COMPLETED")]
+    with get_engine().begin() as conn:
+        for iid, analysis, status in rows:
+            done = status == "COMPLETED"
+            conn.execute(text(
+                "INSERT INTO inspections (inspection_id, product_status, bis_result, legal_metrology_result, "
+                "system_result, system_reasons, sides, analysis, officer_status, officer_decision, review_started_at, "
+                "review_completed_at) VALUES (:i, 'MATCHED', :b, :l, :s, '[]', '[\"FRONT\"]', CAST(:a AS jsonb), "
+                ":st, :d, CASE WHEN :done THEN now() END, CASE WHEN :done THEN now() END)"),
+                {"i": iid, "b": analysis["compliance"]["overall_status"], "l": analysis["package_label"]["overall_status"],
+                 "s": assess(analysis)["system_result"], "a": json.dumps(analysis), "st": status,
+                 "d": "ACCEPT_SYSTEM_RESULT" if done else None, "done": done})
+    command.upgrade(cfg, "head")
+    get_engine().dispose()
+    with get_engine().connect() as conn:
+        got = {r[0]: r[1:] for r in conn.execute(text(
+            "SELECT inspection_id, officer_status, escalation_required, escalation_reasons FROM inspections"))}
+    check("0002: an unreviewed inspection the system can resolve becomes NOT_REQUIRED",
+          got["INS-20000101-0000A1"][:2] == ("NOT_REQUIRED", False) and got["INS-20000101-0000A1"][2] == [], str(got.get("INS-20000101-0000A1")))
+    check("0002: an unresolved inspection stays PENDING with its reasons",
+          got["INS-20000101-0000A2"][:2] == ("PENDING", True) and got["INS-20000101-0000A2"][2] == assess(escalated)["reasons"])
+    check("0002: an inspection an officer already reviewed keeps its review",
+          got["INS-20000101-0000A3"][0] == "COMPLETED")
+    command.downgrade(cfg, "0001_inspection_records")
+    with get_engine().connect() as conn:
+        statuses = {r[0] for r in conn.execute(text("SELECT officer_status FROM inspections"))}
+    check("0002 downgrade: NOT_REQUIRED returns to PENDING and the escalation columns are removed",
+          "NOT_REQUIRED" not in statuses and "escalation_required" not in
+          {c["name"] for c in inspect(get_engine()).get_columns("inspections")})
+
+
+def _upload(width):
+    from app.inspection import PackageUpload
+    return PackageUpload(png(width), "front.png", "FRONT")
 
 
 def step_empty() -> None:
@@ -161,6 +239,10 @@ def step_create_and_read() -> dict:
     rec = r.json()
     check("the backend computed the result: BIS REVIEW, Legal Metrology REVIEW -> system REVIEW",
           (rec["bis_result"], rec["legal_metrology_result"], rec["system_result"]) == ("REVIEW", "REVIEW", "REVIEW"))
+    check("an unresolved inspection is escalated with its reasons",
+          rec["escalation_required"] is True and rec["escalation_reasons"]
+          and rec["escalation_reasons"] == rec["analysis"]["escalation"]["reasons"]
+          and "REQUIREMENT_NOT_CHECKABLE" in {x["code"] for x in rec["escalation_reasons"]})
     check("new inspection is PENDING with no decision",
           rec["officer_status"] == "PENDING" and rec["officer_decision"] is None and rec["final_result"] is None
           and rec["review_started_at"] is None)
@@ -308,6 +390,45 @@ def step_security() -> None:
     check("officer columns remain writable (the trigger protects only system columns)", True)
 
 
+def step_not_required() -> None:
+    print("\nresolved by the system: no officer review")
+    app.dependency_overrides[get_analyzer] = lambda: ResolvedAnalyzer()
+    r = save((W_REVIEW, "FRONT"))
+    rec = r.json()
+    iid = rec["inspection_id"]
+    app.dependency_overrides[get_analyzer] = lambda: STUB
+    check("a resolved inspection is saved as NOT_REQUIRED with no escalation reasons",
+          r.status_code == 201 and rec["system_result"] == "PASS" and rec["escalation_required"] is False
+          and rec["escalation_reasons"] == [] and rec["officer_status"] == "NOT_REQUIRED", r.text[:300])
+    check("its final result is the system result", rec["final_result"] == "PASS" and rec["officer_decision"] is None)
+    queue = client.get("/inspections", params={"officer_status": ["PENDING", "IN_REVIEW"]}).json()
+    check("a resolved inspection never enters the officer queue", iid not in {i["inspection_id"] for i in queue["items"]})
+    history = client.get("/inspections").json()
+    check("a resolved inspection is in history", iid in {i["inspection_id"] for i in history["items"]})
+    r = review(iid, action="START")
+    check("starting a review of a resolved inspection -> 409", r.status_code == 409 and "not escalated" in r.text, r.text)
+    check("recording a decision on a resolved inspection -> 409",
+          review(iid, action="COMPLETE", decision="OVERRIDE", officer_result="FAIL", note="x").status_code == 409)
+    Session = sessionmaker(bind=get_engine())
+    for sql, name in (("UPDATE inspections SET officer_status = 'PENDING' WHERE inspection_id = :i",
+                       "the database refuses to move a resolved inspection into the queue"),
+                      ("UPDATE inspections SET escalation_required = true WHERE inspection_id = :i",
+                       "the database refuses to change a saved escalation decision"),
+                      ("UPDATE inspections SET escalation_reasons = '[]' WHERE inspection_id = :i",
+                       "the database refuses to change saved escalation reasons")):
+        with Session() as sess:
+            try:
+                target = iid if "escalation_reasons" not in sql else client.get("/inspections").json()["items"][-1]["inspection_id"]
+                sess.execute(text(sql), {"i": target})
+                sess.commit()
+                blocked = False
+            except DBAPIError:
+                sess.rollback()
+                blocked = True
+        check(name, blocked)
+    check("the resolved inspection is unchanged", client.get(f"/inspections/{iid}").json()["officer_status"] == "NOT_REQUIRED")
+
+
 def step_errors() -> None:
     print("\nerrors")
     check("17 malformed inspection id -> 422", client.get("/inspections/not-an-id").status_code == 422)
@@ -348,7 +469,10 @@ def step_stats() -> None:
         total = conn.execute(text("SELECT count(*) FROM inspections")).scalar()
     check("20 statistics equal the database counts",
           s["total"] == total and all(s["system"][k] == system.get(k, 0) for k in ("PASS", "FAIL", "REVIEW"))
-          and all(s["officer"][k] == officer.get(k, 0) for k in ("PENDING", "IN_REVIEW", "COMPLETED")), str(s))
+          and all(s["officer"][k] == officer.get(k, 0) for k in ("NOT_REQUIRED", "PENDING", "IN_REVIEW", "COMPLETED")),
+          str(s))
+    check("escalated counts every inspection the system could not resolve",
+          s["escalated"] == s["total"] - s["officer"]["NOT_REQUIRED"] and s["officer"]["NOT_REQUIRED"] == 1)
     check("system results and officer states are counted separately",
           sum(s["system"].values()) == s["total"] == sum(s["officer"].values())
           and s["officer"]["COMPLETED"] == 2 and s["decisions"]["OVERRIDE"] == 1
@@ -378,6 +502,7 @@ def main() -> int:
     step_review_accept(rec)
     step_review_override()
     step_security()
+    step_not_required()
     step_errors()
     step_stats()
     step_real_ocr()

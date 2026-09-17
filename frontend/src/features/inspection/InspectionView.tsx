@@ -46,6 +46,7 @@ import {
   Ticks,
 } from "@/components/decor";
 import { PackageImages, RegionSides, regionSides, useWhere } from "./PackageImages";
+import { EscalationPanel } from "../records";
 
 // upload (stage photos) -> ocr (Instant OCR running) -> evidence (raw OCR shown)
 //        -> workspace (after the user runs Smart Inspection)
@@ -409,7 +410,11 @@ export function InspectionView() {
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={saveForReview} disabled={saveTask.loading}>
               <Save className="h-3.5 w-3.5" />
-              {saveTask.loading ? "Saving…" : "Save for officer review"}
+              {saveTask.loading
+                ? "Saving…"
+                : result.escalation?.required === false
+                  ? "Save final result"
+                  : "Save and send to officer review"}
             </Button>
             <Button variant="secondary" size="sm" onClick={reset}>
               <RotateCcw className="h-3.5 w-3.5" />
@@ -441,6 +446,7 @@ export function Workspace({
   selectRegions,
   actions,
   intro,
+  hideEscalation,
 }: {
   result: InspectionAnalysis;
   urls: string[];
@@ -452,6 +458,7 @@ export function Workspace({
   selectRegions: (ids: string[]) => void;
   actions?: ReactNode;
   intro?: ReactNode; // replaces the live-pipeline callout, e.g. for a saved inspection
+  hideEscalation?: boolean; // a saved inspection shows its stored escalation instead
 }) {
   const { image, quality, ocr, declaration_stage, product, standards, images } = result;
   const activeImage = images.find((i) => i.image_id === activeImageId);
@@ -480,6 +487,16 @@ export function Workspace({
         applies only verified requirements, and unresolved stages read “review”,
         never a guess.
       </Callout>}
+
+      {result.escalation && !hideEscalation && (
+        <EscalationPanel
+          required={result.escalation.required}
+          systemResult={result.escalation.system_result}
+          reasons={result.escalation.reasons}
+          selected={linkedRegions}
+          onSelect={selectRegions}
+        />
+      )}
 
       {result.notes.length > 0 && (
         <Callout tone="abstain" title={images.length > 1 ? "Notes on the images" : "Notes on this image"}>

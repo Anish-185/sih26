@@ -21,7 +21,7 @@ export function HistoryView() {
         <PageHeader
           eyebrow="History"
           title="Inspection history"
-          lead="Every saved inspection: the result MetrIQ's deterministic checks produced, and the officer's review of it — kept separately."
+          lead="Every saved inspection: the result MetrIQ's deterministic checks produced, whether it needed an officer, and the officer's decision — kept separately."
         />
       </div>
 
@@ -50,7 +50,7 @@ export function HistoryView() {
           <table className="w-full min-w-[860px] border-collapse text-left">
             <thead>
               <tr className="border-b border-line bg-surface">
-                {["Inspection", "Date", "Product", "BIS standard", "System result", "Officer status", "Final decision"].map(
+                {["Inspection", "Date", "Product", "BIS standard", "System result", "Escalation", "Final decision"].map(
                   (h) => (
                     <th key={h} className="kicker px-4 py-3 font-normal first:pl-5 last:pr-5">
                       {h}

@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 
 from app.api import ReasonOut, WhyOut
 from app.declarations import extract_declarations, has_reliable_text
+from app.escalation import assess as assess_escalation
 from app.llm import LocalLLM
 from app.product import ProductStandardFinder
 from app.product_identification import RETRIEVAL_NOTE, product_name_of
@@ -581,6 +582,23 @@ class PipelineStagesOut(BaseModel):
     package_label: str = "REVIEW"
 
 
+class EscalationReasonOut(BaseModel):
+    code: str = Field(description="app.escalation.REASONS key, e.g. PRODUCT_NOT_IDENTIFIED.")
+    label: str
+    source: str = Field(description='"OCR" | "PRODUCT" | "BIS" | "LEGAL_METROLOGY" | "PIPELINE"')
+    message: str
+    source_regions: list[str] = Field(default_factory=list)
+    checks: list[str] = Field(default_factory=list, description="rule_id of the checks behind this reason.")
+
+
+class EscalationOut(BaseModel):
+    """Can the automated system confidently resolve this inspection? Deterministic; changes no result."""
+
+    required: bool = Field(description="True -> officer review queue; False -> the system result is final.")
+    system_result: str = Field(description='Combined result: "PASS" | "FAIL" | "REVIEW".')
+    reasons: list[EscalationReasonOut] = Field(default_factory=list)
+
+
 class InspectionAnalysisOut(BaseModel):
     inspection_id: str
     created_at: str
@@ -600,6 +618,10 @@ class InspectionAnalysisOut(BaseModel):
     completeness: CompletenessOut
     pipeline: PipelineStagesOut
     notes: list[str] = Field(default_factory=list)
+    escalation: EscalationOut | None = Field(
+        default=None, description="Whether this inspection needs officer review, and why (null only for records "
+        "saved before escalation existed)."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -772,7 +794,7 @@ class InspectionAnalyzer:
             compliance.notes.append(gap_note)
             package_label.notes.append(gap_note)
 
-        return InspectionAnalysisOut(
+        analysis = InspectionAnalysisOut(
             inspection_id=evidence.inspection_id,
             created_at=evidence.created_at,
             image=evidence.image,
@@ -789,6 +811,15 @@ class InspectionAnalyzer:
             pipeline=pipeline,
             notes=notes,
         )
+        # Escalation reads the finished analysis, so it can never disagree with what is shown.
+        try:
+            analysis.escalation = EscalationOut(**assess_escalation(analysis.model_dump(mode="json")))
+        except Exception as exc:  # noqa: BLE001 — an assessment bug must escalate, never resolve silently
+            analysis.escalation = EscalationOut(required=True, system_result="REVIEW", reasons=[EscalationReasonOut(
+                code="PIPELINE_ERROR", label="Pipeline error", source="PIPELINE",
+                message=f"The escalation assessment failed ({exc.__class__.__name__}); officer review is required.",
+            )])
+        return analysis
 
     @staticmethod
     def _validate_package(uploads: list[PackageUpload]) -> list[str]:

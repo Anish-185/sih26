@@ -27,7 +27,7 @@ import {
 import { useAsyncTask } from "@/lib/hooks";
 import { formatDateTime } from "@/lib/format";
 import { Workspace } from "./inspection/InspectionView";
-import { DECISION_LABEL, OFFICER_STATUS_LABEL, OfficerStatusMark, productLabel } from "./records";
+import { DECISION_LABEL, EscalationPanel, OFFICER_STATUS_LABEL, OfficerStatusMark, productLabel } from "./records";
 
 const NOTE_MAX = 2000;
 const AUTHORITY: Record<string, string> = { BIS: "BIS compliance", LEGAL_METROLOGY: "Legal Metrology package label" };
@@ -105,6 +105,15 @@ export function ReviewView() {
         }
       />
 
+      <EscalationPanel
+        required={record.escalation_required}
+        systemResult={record.system_result}
+        reasons={record.escalation_reasons}
+        officerStatus={record.officer_status}
+        selected={selection}
+        onSelect={selectRegions}
+      />
+
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
         <SystemResultPanel record={record} />
         <OfficerReviewPanel record={record} onSaved={setRecord} />
@@ -119,6 +128,7 @@ export function ReviewView() {
         setSelectedRegion={(id) => selectRegions(id ? [id] : [])}
         linkedRegions={selection}
         selectRegions={selectRegions}
+        hideEscalation
         intro={
           <Callout>
             <span className="font-medium">Saved evidence.</span> Everything below is the deterministic
@@ -159,7 +169,7 @@ function SystemResultPanel({ record }: { record: InspectionRecord }) {
           </DefinitionRow>
         ))}
       </dl>
-      {record.system_result === "REVIEW" && (
+      {record.system_result === "REVIEW" && record.escalation_required && (
         <p className="border-t border-line px-5 py-3 text-[12px] leading-relaxed text-ink-soft">
           REVIEW is not a failure. It means the photos could not establish every applicable requirement
           {lmNotCheckable ? " — some Legal Metrology requirement areas cannot be checked from an image at all" : ""}.
@@ -232,6 +242,19 @@ function OfficerReviewPanel({
           </>
         )}
       </dl>
+
+      {record.officer_status === "NOT_REQUIRED" && (
+        <div className="border-t border-line px-5 py-4 text-[12px] leading-relaxed text-ink-soft">
+          <p>
+            <span className="font-medium text-ink">No officer review required.</span> The system resolved this
+            inspection on clear evidence, so it was never sent to the officer queue. The final result is the
+            system result:
+          </p>
+          <div className="mt-2">
+            <StatusBadge status={record.system_result} size="sm" />
+          </div>
+        </div>
+      )}
 
       {record.officer_status === "PENDING" && (
         <div className="border-t border-line px-5 py-4">

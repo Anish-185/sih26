@@ -540,6 +540,23 @@ export interface InstantOcr {
   notes: string[];
 }
 
+/** One reason the automated system could not resolve an inspection by itself. */
+export interface EscalationReason {
+  code: string; // e.g. PRODUCT_NOT_IDENTIFIED, CONFLICTING_DECLARATIONS
+  label: string;
+  source: "OCR" | "PRODUCT" | "BIS" | "LEGAL_METROLOGY" | "PIPELINE";
+  message: string;
+  source_regions: string[];
+  checks: string[];
+}
+
+/** Can the system confidently resolve this inspection? Deterministic; changes no result. */
+export interface Escalation {
+  required: boolean; // true -> officer review queue; false -> the system result is final
+  system_result: "PASS" | "FAIL" | "REVIEW";
+  reasons: EscalationReason[];
+}
+
 export interface InspectionAnalysis {
   inspection_id: string;
   created_at: string;
@@ -557,12 +574,14 @@ export interface InspectionAnalysis {
   completeness: DeclarationCompleteness;
   pipeline: PipelineStages;
   notes: string[];
+  escalation: Escalation | null; // null only for inspections saved before escalation existed
 }
 
 /* ------------------------------------------------ saved inspections --- */
 
 export type SystemResult = "PASS" | "FAIL" | "REVIEW";
-export type OfficerStatus = "PENDING" | "IN_REVIEW" | "COMPLETED";
+/** NOT_REQUIRED: resolved by the system, never queued. PENDING: waiting in the officer queue. */
+export type OfficerStatus = "NOT_REQUIRED" | "PENDING" | "IN_REVIEW" | "COMPLETED";
 export type OfficerDecision = "ACCEPT_SYSTEM_RESULT" | "OVERRIDE" | "MANUAL_REVIEW";
 
 /** One saved inspection in a list. `system_result` is fixed when saved; the officer fields come later. */
@@ -576,10 +595,12 @@ export interface InspectionSummary {
   bis_result: SystemResult;
   legal_metrology_result: SystemResult;
   system_result: SystemResult; // never changed by a review
+  escalation_required: boolean;
+  escalation_reasons: EscalationReason[];
   officer_status: OfficerStatus;
   officer_decision: OfficerDecision | null;
   officer_result: SystemResult | null; // only for an OVERRIDE
-  final_result: SystemResult | "MANUAL_REVIEW" | null; // null until the review is completed
+  final_result: SystemResult | "MANUAL_REVIEW" | null; // system result if not escalated; null until a review completes
   review_started_at: string | null;
   review_completed_at: string | null;
   image_count: number;
@@ -598,6 +619,7 @@ export interface InspectionStats {
   system: Record<SystemResult, number>;
   bis: Record<SystemResult, number>;
   legal_metrology: Record<SystemResult, number>;
+  escalated: number; // sent to the officer queue
   officer: Record<OfficerStatus, number>;
   decisions: Record<OfficerDecision, number>;
 }

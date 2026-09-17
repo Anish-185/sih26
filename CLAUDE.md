@@ -381,6 +381,28 @@ separate. `frontend/src/mocks.tsx` is gone — no placeholder data remains. Test
 `test_inspection_records.py` (61 checks; needs the `metriq_test` database, refuses any database not
 named `*_test`). Full suite 169 passed.
 
+Milestone 10 (final officer escalation): `app/escalation.py` `assess(analysis_json)` decides
+deterministically whether the system can resolve an inspection or it goes to an officer, from the
+finished analysis only (no model, changes no result). Reasons, each with `code` / `label` / `source`
+(OCR, PRODUCT, BIS, LEGAL_METROLOGY, PIPELINE) / `message` / `source_regions` / `checks`:
+PIPELINE_ERROR, IMAGES_UNREADABLE, IMAGE_QUALITY_LOW, PRODUCT_NOT_IDENTIFIED, MULTIPLE_CANDIDATES,
+PRODUCT_NOT_CONFIRMED, NO_VERIFIED_STANDARD, HALLMARK_NOT_VERIFIABLE (HUID / hallmark text or a
+hallmarking standard — never verified), CONFLICTING_DECLARATIONS, OCR_UNCERTAIN, MISSING_EVIDENCE,
+REQUIREMENT_NOT_CHECKABLE, PACKAGE_SCOPE_EXCLUSION, SYSTEM_RESULT_REVIEW. REQUIREMENT_NOT_CHECKABLE does
+not block a FAIL (it cannot overturn clear evidence); every other reason escalates. An assessment error
+escalates. `InspectionAnalysisOut.escalation` carries it (`/inspection/analyze`). Saved inspections:
+migration `0002_escalation` adds `escalation_required` + `escalation_reasons` (protected by the
+immutability trigger) and the officer status `NOT_REQUIRED` (resolved by the system — final, never
+queued, cannot be reviewed: 409; the trigger refuses moving it into the queue); unresolved inspections
+start PENDING. Existing rows are backfilled with the same `assess`. `final_result` of a NOT_REQUIRED
+inspection is its system result; stats gain `escalated` and `officer.NOT_REQUIRED`. Frontend:
+`EscalationPanel` (records.tsx) — the path system result → can the system resolve it? → final system
+result | officer queue → decision → final record, with clickable evidence-linked reasons — in the live
+workspace and the saved inspection; save button "Save final result" / "Save and send to officer
+review"; queue "Why escalated" column; History "Escalation" column; Dashboard "Resolved by system".
+With the current verified data every real inspection escalates (no standard has every requirement
+checkable). Tests: `test_escalation.py` (27), `test_inspection_records.py` (77, incl. 0002 backfill).
+
 Only implement the current milestone. Do not start a new phase without being asked.
 
 ## Repository layout
@@ -413,6 +435,7 @@ sih26/
       db.py            # Milestone 9: PostgreSQL engine/session (DATABASE_URL)
       records.py       # Milestone 9: saved inspections + officer review models and workflow
       records_api.py   # Milestone 9: /inspections save, list, stats, detail, stored photos, review
+      escalation.py    # Milestone 10: deterministic resolve-or-escalate decision + evidence-linked reasons
       knowledge/       # knowledge-base schema + loader
         schema.py      # KnowledgeItem pydantic model + validation rules
         loader.py      # load + validate data/knowledge/, report every problem
@@ -420,7 +443,7 @@ sih26/
         text.py        # normalize / tokenize / parse standard numbers
         engine.py      # SearchEngine, scoring, ranking, confidence, abstention
     alembic.ini            # Alembic config (URL from DATABASE_URL)
-    migrations/            # Alembic migrations (0001_inspection_records)
+    migrations/            # Alembic migrations (0001_inspection_records, 0002_escalation)
     scripts/
       check_knowledge.py   # CLI: validate the knowledge base
     tests/                 # plain-Python runners: `./.venv/bin/python tests/<file>`
@@ -444,7 +467,8 @@ sih26/
       test_coverage.py     # Milestone 7: product applicability, coverage matrix, junk-name rejection, real labels
       test_hardening.py    # Milestone 7 hardening: coverage classes, domains, IS/email normalization, brand != product
       test_legal_metrology.py # Milestone 8: Legal Metrology sources, rules, applicability, BIS separation, UI contract
-      test_inspection_records.py # Milestone 9: migration, persistence, officer review, immutability, stats (PostgreSQL)
+      test_inspection_records.py # Milestone 9/10: migrations, persistence, escalation states, officer review, stats (PostgreSQL)
+      test_escalation.py   # Milestone 10: every escalation reason, resolve-or-escalate decision, determinism
       test_pipeline.py     # OCR -> standard candidates end-to-end + stage degradation
       test_plain_runners.py # pytest bridge — runs every runner, makes pytest authoritative
       fixtures/broken_kb/  # deliberately invalid KB for the loader tests

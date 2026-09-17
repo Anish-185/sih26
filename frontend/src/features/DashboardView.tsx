@@ -115,11 +115,12 @@ export function DashboardView() {
                 </div>
               ))}
             </dl>
-            <div className="kicker mb-3 mt-6">Officer review</div>
+            <div className="kicker mb-3 mt-6">Escalation · officer review</div>
             <dl className="flex flex-wrap gap-x-10 gap-y-4">
               {(
                 [
-                  ["Pending", s?.officer.PENDING],
+                  ["Resolved by system", s?.officer.NOT_REQUIRED],
+                  ["Pending officer", s?.officer.PENDING],
                   ["In review", s?.officer.IN_REVIEW],
                   ["Completed", s?.officer.COMPLETED],
                 ] as [string, number | undefined][]

@@ -68,6 +68,28 @@ certification decision. Compliance applies only requirements quoted from verifie
 knowledge records (`data/inspection_requirements.json`) with deterministic rules; when
 requirements or package evidence are missing the result is `REVIEW`, never a guess.
 
+### Escalation — officer review is the final step
+
+```
+image → OCR → declarations → product → BIS + Legal Metrology evidence → deterministic rules
+      → SYSTEM RESULT (PASS / FAIL / REVIEW)
+      → can the system confidently resolve this case?
+            yes → final system result            (officer_status NOT_REQUIRED, never queued)
+            no  → officer review queue → officer decision → final record
+```
+
+`app/escalation.py` decides this deterministically from the finished analysis — no model, and it
+changes no result. Every inspection that cannot be resolved lists why, each reason with its
+evidence system and the OCR regions / checks behind it: pipeline error, unreadable photos, low
+image quality, product not identified, several plausible products or standards, product not
+confirmed, no verified BIS standard, hallmark / HUID information (MetrIQ never verifies a HUID),
+conflicting declarations (including across sides), uncertain OCR evidence, evidence not found,
+requirements not checkable from an image, a Legal Metrology scope exclusion, and a REVIEW result.
+Requirement areas that cannot be checked block a PASS (they could overturn it) but not a FAIL that
+clear evidence established; every other reason always escalates. With today's verified data every
+real inspection escalates — no standard has every requirement checkable — and that is shown, not
+hidden.
+
 ### Officer review and inspection history
 
 **Save for officer review** sends the same photos to `POST /inspections`: the backend runs
@@ -77,7 +99,8 @@ come from the browser. Every saved inspection keeps two things apart:
 | | Written by | Changes later? |
 |---|---|---|
 | **System result** — BIS result, Legal Metrology result, combined `system_result`, reasons, full analysis (declarations, OCR regions, checks, evidence, sources) | the deterministic pipeline, once | never — a database trigger rejects any update |
-| **Officer review** — `officer_status`, `officer_decision`, `officer_result` (override only), `officer_note`, review timestamps | the officer | once: `PENDING → IN_REVIEW → COMPLETED`, and a completed review is final |
+| **Escalation** — `escalation_required`, `escalation_reasons` | the escalation assessment, once | never |
+| **Officer review** — `officer_status`, `officer_decision`, `officer_result` (override only), `officer_note`, review timestamps | the officer | `NOT_REQUIRED` is final; otherwise once: `PENDING → IN_REVIEW → COMPLETED`, and a completed review is final |
 
 Combined system result: FAIL if BIS or Legal Metrology FAILs, PASS only if both PASS, otherwise
 REVIEW. REVIEW is expected and not hidden: a label can pass every checkable Legal Metrology rule
@@ -85,7 +108,7 @@ while other requirement areas cannot be established from a photo — that is wha
 review is for. Decisions: **Accept** the system result, **Override** it (with the officer's result
 and a required note), or **Manual review** (note required).
 
-- **Review** (`/review`) — inspections that are PENDING or IN_REVIEW.
+- **Review** (`/review`) — only escalated inspections (PENDING or IN_REVIEW), with why each was escalated.
 - **History** (`/history`) — every saved inspection: date, product, BIS standard, system result,
   officer status, final decision. `/history/:id` reopens it with the stored photos, OCR boxes,
   declarations, BIS and Legal Metrology checks, evidence and the review panel.
@@ -98,7 +121,7 @@ and a required note), or **Manual review** (note required).
 | `GET /inspections` | newest first; `?officer_status=PENDING&officer_status=IN_REVIEW` |
 | `GET /inspections/stats` | database counts |
 | `GET /inspections/{id}` · `GET /inspections/{id}/images/{index}` | saved record · stored photo |
-| `POST /inspections/{id}/review` | `{"action":"START"}` or `{"action":"COMPLETE","decision":…,"officer_result":…,"note":…}`; unknown fields (e.g. `system_result`) → 422, wrong state → 409, unknown id → 404, database down → 503 |
+| `POST /inspections/{id}/review` | `{"action":"START"}` or `{"action":"COMPLETE","decision":…,"officer_result":…,"note":…}`; unknown fields (e.g. `system_result`) → 422, wrong state or not escalated → 409, unknown id → 404, database down → 503 |
 
 ### What the officer sees
 
@@ -301,6 +324,7 @@ Phases 1–14 are complete (see [`CLAUDE.md`](CLAUDE.md) for the full log). What
 - [x] **Legal Metrology package-label requirements** — 11 requirements from the Legal Metrology (Packaged Commodities) Rules, 2011 and amendments (official Department of Consumer Affairs PDFs); 6 are checked deterministically (MRP, net quantity, manufacturer name + address, commodity name, month and year of manufacture, consumer-care phone + e-mail), 5 cannot be checked from a photo. Reported separately from BIS compliance.
 - [ ] **Requirement coverage** — more verified BIS requirements (still 1 checkable BIS rule)
 - [x] **Officer review & inspection history** — saved inspections in PostgreSQL, immutable system result, officer accept / override / manual review with notes, real History, Review queue and Dashboard
+- [x] **Escalation** — deterministic resolve-or-escalate decision with evidence-linked reasons; officer review only for cases the system cannot resolve
 - [ ] **Officer report** — PDF export of a reviewed inspection
 
 ---

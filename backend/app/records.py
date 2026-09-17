@@ -8,6 +8,9 @@ Two things are stored side by side and never mixed:
   full analysis (declarations, OCR regions, evidence, sources). Written once, by
   the backend, from its own analysis. A database trigger (see the migration)
   rejects any later change to these columns.
+* the ESCALATION — whether the system could resolve the inspection itself
+  (``escalation_required``) and every reason it could not (``escalation_reasons``,
+  from ``app.escalation``). Also written once, with the system result.
 * the OFFICER REVIEW — a human decision recorded later: ``officer_status``,
   ``officer_decision``, ``officer_result`` (only for an override), ``officer_note``
   and the review timestamps.
@@ -16,9 +19,10 @@ Combined system result (``combine_results``): FAIL if the BIS or the Legal
 Metrology result is FAIL; PASS only if both are PASS; otherwise REVIEW. Both
 underlying results are kept, so the combination never hides which one decided.
 
-Review workflow (``OFFICER_TRANSITIONS``):
+Escalation and review workflow (``OFFICER_TRANSITIONS``):
 
-    PENDING --START--> IN_REVIEW --COMPLETE--> COMPLETED
+    system resolved the case     -> NOT_REQUIRED  (final; the system result is the final result)
+    system could not resolve it  -> PENDING --START--> IN_REVIEW --COMPLETE--> COMPLETED
 
 COMPLETE records one decision:
     ACCEPT_SYSTEM_RESULT  the officer agrees; the final result is the system result
@@ -35,6 +39,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -50,9 +55,10 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from app.db import Base
+from app.escalation import assess as assess_escalation
 
 RESULTS = ("PASS", "FAIL", "REVIEW")
-OFFICER_STATUSES = ("PENDING", "IN_REVIEW", "COMPLETED")
+OFFICER_STATUSES = ("NOT_REQUIRED", "PENDING", "IN_REVIEW", "COMPLETED")
 OFFICER_DECISIONS = ("ACCEPT_SYSTEM_RESULT", "OVERRIDE", "MANUAL_REVIEW")
 OFFICER_TRANSITIONS = {"START": ("PENDING", "IN_REVIEW"), "COMPLETE": ("IN_REVIEW", "COMPLETED")}
 NOTE_MAX = 2000
@@ -81,8 +87,11 @@ class InspectionRecord(Base):
         # A decision exists exactly when the review is completed.
         CheckConstraint("(officer_status = 'COMPLETED') = (officer_decision IS NOT NULL "
                         "AND review_completed_at IS NOT NULL)", name="ck_inspections_completed_has_decision"),
-        CheckConstraint("officer_status = 'PENDING' OR review_started_at IS NOT NULL",
+        CheckConstraint("officer_status IN ('NOT_REQUIRED', 'PENDING') OR review_started_at IS NOT NULL",
                         name="ck_inspections_review_started"),
+        # A case the system resolved is never in the officer queue, and carries no review.
+        CheckConstraint("officer_status <> 'NOT_REQUIRED' OR (NOT escalation_required AND review_started_at IS NULL "
+                        "AND officer_note IS NULL)", name="ck_inspections_not_required"),
         # Only an override carries its own result, and it must differ from the system result.
         CheckConstraint("(officer_decision = 'OVERRIDE') = (officer_result IS NOT NULL) "
                         "AND (officer_result IS NULL OR officer_result <> system_result)",
@@ -104,6 +113,8 @@ class InspectionRecord(Base):
     system_reasons: Mapped[list] = mapped_column(JSONB, nullable=False)
     sides: Mapped[list] = mapped_column(JSONB, nullable=False)
     analysis: Mapped[dict] = mapped_column(JSONB, nullable=False)  # the full InspectionAnalysisOut
+    escalation_required: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    escalation_reasons: Mapped[list] = mapped_column(JSONB, nullable=False)
 
     # --- officer review: a separate, later human decision ---
     officer_status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="PENDING")
@@ -160,6 +171,9 @@ def create_inspection(session: Session, analysis, uploads) -> InspectionRecord:
     """Persist a backend-produced ``InspectionAnalysisOut`` and the photos it was computed from."""
     bis, lm = analysis.compliance.overall_status, analysis.package_label.overall_status
     product = analysis.product
+    data = analysis.model_dump(mode="json")
+    # Re-assessed from the analysis being stored, so the saved escalation always matches it.
+    escalation = assess_escalation(data)
     record = InspectionRecord(
         inspection_id=analysis.inspection_id,
         product_status=product.status,
@@ -171,7 +185,10 @@ def create_inspection(session: Session, analysis, uploads) -> InspectionRecord:
         system_result=combine_results(bis, lm),
         system_reasons=system_reasons(analysis),
         sides=[img.side for img in analysis.images],
-        analysis=analysis.model_dump(mode="json"),
+        analysis=data,
+        escalation_required=escalation["required"],
+        escalation_reasons=escalation["reasons"],
+        officer_status="PENDING" if escalation["required"] else "NOT_REQUIRED",
     )
     for img, upload in zip(analysis.images, uploads):
         record.images.append(InspectionImage(
@@ -225,6 +242,8 @@ def statistics(session: Session) -> dict:
         "bis": counts(InspectionRecord.bis_result, RESULTS),
         "legal_metrology": counts(InspectionRecord.legal_metrology_result, RESULTS),
         "officer": counts(InspectionRecord.officer_status, OFFICER_STATUSES),
+        "escalated": int(session.scalar(select(func.count()).select_from(InspectionRecord)
+                                        .where(InspectionRecord.escalation_required)) or 0),
         "decisions": counts(InspectionRecord.officer_decision, OFFICER_DECISIONS),
     }
 
@@ -256,6 +275,10 @@ def apply_review(session: Session, inspection_id: str, act: ReviewAction) -> Ins
     if record is None:
         session.rollback()
         raise ReviewError(404, f"Inspection {inspection_id} was not found.")
+    if record.officer_status == "NOT_REQUIRED":
+        session.rollback()
+        raise ReviewError(409, f"Inspection {inspection_id} was resolved by the system and was not escalated; "
+                               "there is no officer review to record.")
 
     required, target = OFFICER_TRANSITIONS[act.action]
     if record.officer_status != required:
@@ -308,6 +331,8 @@ def _decision_problem(record: InspectionRecord, decision, officer_result, note) 
 
 def final_result(record: InspectionRecord) -> str | None:
     """What the completed review concluded — never replaces ``system_result``."""
+    if record.officer_status == "NOT_REQUIRED":
+        return record.system_result  # resolved by the system: its result is final
     if record.officer_status != "COMPLETED":
         return None
     if record.officer_decision == "ACCEPT_SYSTEM_RESULT":

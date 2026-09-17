@@ -3,7 +3,7 @@ import { HeaderMotif } from "@/components/decor";
 import { ApiError, api } from "@/lib/api";
 import { useOnMount } from "@/lib/hooks";
 import { formatDateTime } from "@/lib/format";
-import { OfficerStatusMark, productLabel } from "./records";
+import { OfficerStatusMark, productLabel, reasonLabels } from "./records";
 
 // Stable reference: useOnMount re-runs when its task changes.
 const loadQueue = () => api.listInspections(["PENDING", "IN_REVIEW"]);
@@ -20,7 +20,7 @@ export function ReviewQueueView() {
         <PageHeader
           eyebrow="Officer review"
           title="Pending reviews"
-          lead="Saved inspections that need an officer's decision. The system result is shown as MetrIQ produced it; the review records a separate human decision."
+          lead="Officer review is the final escalation step. Only inspections the automated checks could not confidently resolve are sent here; the system result is shown as MetrIQ produced it, and the officer records a separate, final decision."
         />
       </div>
 
@@ -35,16 +35,16 @@ export function ReviewQueueView() {
       {data && rows.length === 0 && (
         <EmptyState
           title="No inspections awaiting officer review."
-          description="Saved inspections appear here until an officer completes their review."
+          description="Inspections the system cannot resolve by itself appear here until an officer completes their review. Inspections the system resolved go straight to history."
         />
       )}
 
       {rows.length > 0 && (
         <div className="overflow-x-auto border border-line">
-          <table className="w-full min-w-[760px] border-collapse text-left">
+          <table className="w-full min-w-[960px] border-collapse text-left">
             <thead>
               <tr className="border-b border-line bg-surface">
-                {["Inspection", "Product", "System result", "Created", "Status", "Action"].map((h) => (
+                {["Inspection", "Product", "System result", "Why escalated", "Created", "Status", "Action"].map((h) => (
                   <th key={h} className="kicker px-4 py-3 font-normal first:pl-5 last:pr-5">
                     {h}
                   </th>
@@ -62,6 +62,9 @@ export function ReviewQueueView() {
                   </td>
                   <td className="px-4 py-3.5">
                     <StatusBadge status={ins.system_result} size="sm" />
+                  </td>
+                  <td className="max-w-[18rem] px-4 py-3.5 text-[12px] leading-snug text-ink-soft">
+                    {reasonLabels(ins.escalation_reasons).join(" · ") || "—"}
                   </td>
                   <td className="px-4 py-3.5 text-[12px] text-ink-soft">{formatDateTime(ins.created_at)}</td>
                   <td className="px-4 py-3.5">

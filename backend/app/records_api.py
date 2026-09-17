@@ -4,6 +4,7 @@
                                             (image | images + sides). The backend runs the analysis
                                             itself and saves it — a client never sends a result.
     GET  /inspections                       newest first; ?officer_status=PENDING&officer_status=IN_REVIEW
+                                            (officer_status NOT_REQUIRED = resolved by the system, never queued)
     GET  /inspections/stats                 counts from the database (system results and officer
                                             review states counted separately)
     GET  /inspections/{inspection_id}       the full record: system result + analysis + officer review
@@ -27,7 +28,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.inspection import InspectionAnalysisOut, InspectionAnalyzer
+from app.inspection import EscalationReasonOut, InspectionAnalysisOut, InspectionAnalyzer
 from app.inspection_api import _package, _run, get_analyzer
 from app.records import (
     INSPECTION_ID_PATTERN,
@@ -47,6 +48,7 @@ from app.records import (
 router = APIRouter(prefix="/inspections", tags=["inspections"])
 
 ResultLiteral = Literal["PASS", "FAIL", "REVIEW"]
+OfficerStatusLiteral = Literal["NOT_REQUIRED", "PENDING", "IN_REVIEW", "COMPLETED"]
 _PACKAGE_FIELDS = {"image", "side", "images", "sides"}
 _DB_UNAVAILABLE = "The inspection database is unavailable. Check that PostgreSQL is running and migrated."
 
@@ -80,11 +82,16 @@ class InspectionSummaryOut(BaseModel):
     bis_result: ResultLiteral
     legal_metrology_result: ResultLiteral
     system_result: ResultLiteral = Field(description="Deterministic result when saved. Never changed by a review.")
-    officer_status: Literal["PENDING", "IN_REVIEW", "COMPLETED"]
+    escalation_required: bool = Field(description="False: the system resolved the case and its result is final.")
+    escalation_reasons: list[EscalationReasonOut] = Field(description="Why the system could not resolve it.")
+    officer_status: OfficerStatusLiteral = Field(
+        description="NOT_REQUIRED (resolved by the system) | PENDING (in the officer queue) | IN_REVIEW | COMPLETED"
+    )
     officer_decision: Literal["ACCEPT_SYSTEM_RESULT", "OVERRIDE", "MANUAL_REVIEW"] | None
     officer_result: ResultLiteral | None = Field(description="Set only by an OVERRIDE.")
     final_result: Literal["PASS", "FAIL", "REVIEW", "MANUAL_REVIEW"] | None = Field(
-        description="What the completed officer review concluded; null until the review is completed."
+        description="The system result when no review was required; otherwise what the completed officer "
+        "review concluded, null until it is completed."
     )
     review_started_at: datetime | None
     review_completed_at: datetime | None
@@ -111,6 +118,7 @@ class CountsOut(BaseModel):
 
 
 class OfficerCountsOut(BaseModel):
+    NOT_REQUIRED: int
     PENDING: int
     IN_REVIEW: int
     COMPLETED: int
@@ -127,6 +135,7 @@ class InspectionStatsOut(BaseModel):
     system: CountsOut
     bis: CountsOut
     legal_metrology: CountsOut
+    escalated: int = Field(description="Inspections the system could not resolve (sent to the officer queue).")
     officer: OfficerCountsOut
     decisions: DecisionCountsOut
 
@@ -150,6 +159,7 @@ def _summary_fields(r: InspectionRecord) -> dict:
         inspection_id=r.inspection_id, created_at=r.created_at, product_status=r.product_status,
         product_name=r.product_name, product_category=r.product_category, standard_number=r.standard_number,
         bis_result=r.bis_result, legal_metrology_result=r.legal_metrology_result, system_result=r.system_result,
+        escalation_required=r.escalation_required, escalation_reasons=r.escalation_reasons,
         officer_status=r.officer_status, officer_decision=r.officer_decision, officer_result=r.officer_result,
         final_result=final_result(r), review_started_at=r.review_started_at,
         review_completed_at=r.review_completed_at, image_count=len(r.sides), sides=list(r.sides),
@@ -210,7 +220,7 @@ async def create(
 
 @router.get("", response_model=InspectionListOut)
 def index(
-    officer_status: list[Literal["PENDING", "IN_REVIEW", "COMPLETED"]] = Query(default=[]),
+    officer_status: list[OfficerStatusLiteral] = Query(default=[]),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
