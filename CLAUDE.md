@@ -299,7 +299,7 @@ evidence and BIS requirement evidence), the evaluation has a counts-based `summa
 a verified requirement covers it (`VERIFIED_REQUIREMENT` / `NOT_ESTABLISHED`). "Not
 detected" is never reported as legally missing. Compliance coverage is data:
 only standards with verified requirements in `data/inspection_requirements.json` are
-`SUPPORTED_FOR_INSPECTION` (currently IS 14543:2016 and IS 13428:2005); every other
+`INSPECTION_SUPPORTED` (currently IS 14543:2016 and IS 13428:2005); every other
 standard is `STANDARD_ONLY` and returns REVIEW. Milestone 7 (knowledge + rule coverage
 foundation): coverage is PRODUCT -> STANDARD -> REQUIREMENT -> RULE -> EVIDENCE.
 `data/inspection_requirements.json` gains a `products` list (each product -> standard link
@@ -313,8 +313,22 @@ knowledge base still supports exactly ONE checkable rule (printed IS number, pac
 LED lamps have one verified but uncheckable requirement (CRS registration); every other
 standard has no requirement data. Declaration extraction rejects QR / barcode / website /
 placeholder text as names (UNCERTAIN, value withheld, OCR evidence kept). The frontend adds
-an "Inspection coverage" panel and "Declaration observations" wording. The remaining work is
-verified requirement data and the officer review / report surface.
+an "Inspection coverage" panel and "Declaration observations" wording. Milestone 7 hardening:
+coverage classes are `INSPECTION_SUPPORTED` (renamed from SUPPORTED_FOR_INSPECTION) /
+`STANDARD_ONLY` / `UNSUPPORTED`, each standard with a data-derived reason and its KB-stated
+certification route (reported, never a rule) — currently 2 / 30 / 4 of 36. Requirements carry a
+`domain` (`PACKAGE_LABEL` | `JEWELLERY_HALLMARKING` | `GENERAL_BIS_INFORMATION`); package
+inspection applies only PACKAGE_LABEL, and the loader rejects package-label requirements or
+product links that use hallmarking records, hallmarking standards or hallmark/HUID quotes;
+a hallmarking standard in package inspection is `UNSUPPORTED`. Extraction normalizes corrupted
+OCR without guessing (`extraction_method: deterministic_normalization`, `raw_text` keeps the
+original): non-canonical IS references ("ISTIS 14543", "IS No. 14543") are recovered only when
+the number is a verified KB standard, otherwise UNCERTAIN with no value; a normalized IS number
+may PASS but never FAIL (REVIEW, `EVIDENCE_NORMALIZED`). Emails with one OCR-inserted space are
+repaired only with a contact cue. The most prominent line is only the product name when it
+contains KB product vocabulary or the label says "Product name:"; a brand-like line is never the
+product name. The remaining work is verified requirement data and the officer review / report
+surface.
 
 Only implement the current milestone. Do not start a new phase without being asked.
 
@@ -371,6 +385,7 @@ sih26/
       test_multiside.py    # multi-side packages: per-image provenance, duplicates/conflicts, failed sides
       test_why_completeness.py # why PASS/FAIL/REVIEW + declaration completeness, never "legally missing"
       test_coverage.py     # Milestone 7: product applicability, coverage matrix, junk-name rejection, real labels
+      test_hardening.py    # Milestone 7 hardening: coverage classes, domains, IS/email normalization, brand != product
       test_pipeline.py     # OCR -> standard candidates end-to-end + stage degradation
       test_plain_runners.py # pytest bridge — runs every runner, makes pytest authoritative
       fixtures/broken_kb/  # deliberately invalid KB for the loader tests

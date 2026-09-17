@@ -29,6 +29,15 @@ products with ``applies_to_products``; without it, it applies to every product
 under its standards. A standard with no product record is still usable at the
 standard level.
 
+Domains. Knowledge is not interchangeable across inspection contexts. Every
+requirement declares a ``domain`` (``PACKAGE_LABEL`` by default); package
+inspection only ever applies ``PACKAGE_LABEL`` requirements. A knowledge record
+is ``JEWELLERY_HALLMARKING`` when it is in the hallmarking category or its title
+is about hallmarks / HUID / jewellery (``knowledge_domain``). A PACKAGE_LABEL
+requirement or product link may not rely on such a record or standard, and its
+quote may not be about hallmarks or HUID — jewellery facts can never become
+package-label rules by accident.
+
 ``coverage_matrix`` turns all of this into rows
 (standard | product | requirement | rule | evidence | status) so MetrIQ can say
 exactly what it can and cannot inspect — derived from the data, never kept by hand.
@@ -56,9 +65,17 @@ RULE_TYPES: dict[str, dict[str, tuple[float, float]]] = {
     },
 }
 
-# Coverage of an identified standard.
-SUPPORTED_FOR_INSPECTION = "SUPPORTED_FOR_INSPECTION"  # at least one checkable requirement
-STANDARD_ONLY = "STANDARD_ONLY"  # known standard, no checkable requirement
+# Coverage of an identified standard (package inspection).
+INSPECTION_SUPPORTED = "INSPECTION_SUPPORTED"  # at least one verified, image-checkable package-label requirement
+STANDARD_ONLY = "STANDARD_ONLY"  # verified and retrievable, but no image-checkable requirement data (not a failure)
+UNSUPPORTED = "UNSUPPORTED"  # cannot currently be mapped to package-label inspection at all
+
+# Evidence / requirement domains.
+PACKAGE_LABEL = "PACKAGE_LABEL"
+JEWELLERY_HALLMARKING = "JEWELLERY_HALLMARKING"
+GENERAL_BIS_INFORMATION = "GENERAL_BIS_INFORMATION"
+DOMAINS = (PACKAGE_LABEL, JEWELLERY_HALLMARKING, GENERAL_BIS_INFORMATION)
+_RE_HALLMARK = re.compile(r"hallmark|\bhuid\b|jewell", re.IGNORECASE)
 
 # A product -> standard link is only usable when it is verified.
 APPLICABILITY_VERIFIED = "VERIFIED"
@@ -83,6 +100,7 @@ class Requirement:
     parameters: dict = field(default_factory=dict)
     unsupported_reason: str = ""
     applies_to_products: tuple[str, ...] = ()  # empty = every product under its standards
+    domain: str = PACKAGE_LABEL
 
     @property
     def supported(self) -> bool:
@@ -118,10 +136,11 @@ class RequirementSet:
     products: tuple[InspectionProduct, ...] = ()
 
     def for_standard(self, standard_number: str | None) -> list[Requirement]:
-        """Every requirement for the standard, whichever product it is limited to."""
+        """Every package-label requirement for the standard, whichever product it is limited to.
+        Requirements of any other domain are never used by package inspection."""
         if not standard_number:
             return []
-        return [r for r in self.requirements if standard_number in r.applies_to]
+        return [r for r in self.requirements if standard_number in r.applies_to and r.domain == PACKAGE_LABEL]
 
     def products_for_standard(self, standard_number: str | None) -> list[InspectionProduct]:
         return [p for p in self.products if p.link(standard_number)]
@@ -138,7 +157,7 @@ class RequirementSet:
 
     def coverage(self, standard_number: str | None, product_id: str | None = None) -> str:
         return (
-            SUPPORTED_FOR_INSPECTION
+            INSPECTION_SUPPORTED
             if any(r.supported for r in self.for_product(standard_number, product_id))
             else STANDARD_ONLY
         )
@@ -199,7 +218,7 @@ def load_requirements(knowledge_items, path: Path | str | None = None) -> Requir
     accepted: list[Requirement] = []
     seen: set[str] = set()
     for index, row in enumerate(rows):
-        problems = _validate(row, items, standards, seen, products)
+        problems = _validate(row, items, standards, seen, products, standard_items)
         where = f"{p.name}[{index}]" + (f" (id={row.get('id')})" if isinstance(row, dict) and row.get("id") else "")
         if problems:
             errors.extend(f"{where}: {msg}" for msg in problems)
@@ -216,8 +235,17 @@ def load_requirements(knowledge_items, path: Path | str | None = None) -> Requir
             parameters=dict(row.get("parameters") or {}),
             unsupported_reason=(row.get("unsupported_reason") or "").strip(),
             applies_to_products=tuple(row.get("applies_to_products") or ()),
+            domain=row.get("domain", PACKAGE_LABEL),
         ))
     return RequirementSet(tuple(accepted), tuple(errors), tuple(products.values()))
+
+
+def knowledge_domain(item) -> str:
+    """JEWELLERY_HALLMARKING for hallmarking records and standards, else GENERAL_BIS_INFORMATION.
+    Deterministic, from the record's category and title only."""
+    if item.category == "hallmarking" or _RE_HALLMARK.search(item.title):
+        return JEWELLERY_HALLMARKING
+    return GENERAL_BIS_INFORMATION
 
 
 def _quote_problems(knowledge_id, quote, items) -> list[str]:
@@ -262,6 +290,8 @@ def _validate_product(row, items, standard_items, products) -> list[str]:
         if item is None:
             problems.append(f"standard '{number}' is not a verified standard in the knowledge base")
             continue
+        if knowledge_domain(item) == JEWELLERY_HALLMARKING:
+            problems.append(f"standard '{number}' is a jewellery hallmarking standard, not a package-label product")
         if link.get("applicability_status") != APPLICABILITY_VERIFIED:
             problems.append(f"applicability_status for '{number}' must be {APPLICABILITY_VERIFIED}")
         problems.extend(f"link to '{number}': {m}" for m in
@@ -274,7 +304,7 @@ def _validate_product(row, items, standard_items, products) -> list[str]:
     return problems
 
 
-def _validate(row, items, standards, seen, products=None) -> list[str]:
+def _validate(row, items, standards, seen, products=None, standards_by_number=None) -> list[str]:
     if not isinstance(row, dict):
         return ["requirement must be an object"]
     problems: list[str] = []
@@ -297,6 +327,21 @@ def _validate(row, items, standards, seen, products=None) -> list[str]:
                 problems.append(f"applies_to '{number}' is not a verified standard in the knowledge base")
 
     problems.extend(_quote_problems(row.get("source_knowledge_id"), row.get("source_quote"), items))
+
+    domain = row.get("domain", PACKAGE_LABEL)
+    if domain not in DOMAINS:
+        problems.append(f"domain '{domain}' must be one of {', '.join(DOMAINS)}")
+    elif domain == PACKAGE_LABEL:
+        # Jewellery hallmark / HUID facts must never become package-label rules.
+        source = items.get(row.get("source_knowledge_id"))
+        if source is not None and knowledge_domain(source) == JEWELLERY_HALLMARKING:
+            problems.append(f"source '{source.id}' is jewellery hallmarking evidence, not package-label evidence")
+        elif isinstance(row.get("source_quote"), str) and _RE_HALLMARK.search(row["source_quote"]):
+            problems.append("source_quote is about hallmarks / HUID, not package-label evidence")
+        for number in applies_to if isinstance(applies_to, list) else []:
+            item = standards_by_number.get(number) if standards_by_number else None
+            if item is not None and knowledge_domain(item) == JEWELLERY_HALLMARKING:
+                problems.append(f"applies_to '{number}' is a jewellery hallmarking standard, not a package-label product")
 
     limited = row.get("applies_to_products")
     if limited is not None:
@@ -352,34 +397,83 @@ class CoverageRow:
     declaration_field: str | None
     requirement_source: str | None  # knowledge id backing the requirement
     status: str  # SUPPORTED | UNSUPPORTED | NO_REQUIREMENT_DATA
-    standard_coverage: str  # SUPPORTED_FOR_INSPECTION | STANDARD_ONLY
+    standard_coverage: str  # INSPECTION_SUPPORTED | STANDARD_ONLY | UNSUPPORTED
 
 
 @dataclass(frozen=True)
 class StandardCoverage:
-    """Per-standard summary: what MetrIQ can currently inspect for it."""
+    """Per-standard summary: what MetrIQ can currently inspect for it, and why."""
 
     standard_number: str
     knowledge_id: str
     title: str
+    domain: str  # GENERAL_BIS_INFORMATION | JEWELLERY_HALLMARKING
     products: list[str]  # modelled product names (empty = not modelled)
-    verified_requirements: int
-    deterministic_rules: int
+    certification_route: str | None  # as recorded in the KB: "Scheme I (ISI Mark)" | "Scheme II (CRS registration)"
+    source_document: str | None
+    source_url: str | None
+    verified_requirements: int  # package-label requirements
+    deterministic_rules: int  # of those, checkable from package text
     unsupported_requirements: int
-    inspection_status: str  # SUPPORTED_FOR_INSPECTION | STANDARD_ONLY
+    requirement_ids: list[str]
+    coverage_status: str  # INSPECTION_SUPPORTED | STANDARD_ONLY | UNSUPPORTED
+    reason: str
+
+
+def certification_route(item) -> str | None:
+    """The certification route the knowledge-base record itself states — reported, never a rule."""
+    keywords = set(item.keywords)
+    if keywords & {"crs", "compulsory registration"} or "Compulsory Registration Scheme" in item.content:
+        return "Scheme II (CRS registration)"
+    if "compulsory certification" in keywords or "ISI Mark" in item.content:
+        return "Scheme I (ISI Mark)"
+    return None
+
+
+def standard_coverage(item, requirements: RequirementSet) -> tuple[str, str]:
+    """(coverage_status, reason) for one verified standard record. Deterministic."""
+    std = item.standard_number
+    if knowledge_domain(item) == JEWELLERY_HALLMARKING:
+        return UNSUPPORTED, (
+            "Jewellery hallmarking / assaying standard. Its verified facts (hallmark marks, HUID, purity "
+            "grades) describe marks on jewellery, not package labels, so package-label inspection does not apply."
+        )
+    reqs = requirements.for_standard(std)
+    rules = [r for r in reqs if r.supported]
+    if rules:
+        return INSPECTION_SUPPORTED, (
+            f"{len(rules)} of {len(reqs)} verified package-label requirement(s) can be checked from package "
+            f"text ({', '.join(r.id for r in rules)})."
+        )
+    route = certification_route(item)
+    route_note = (
+        f" The knowledge base records its certification route as {route}; that is not checkable from "
+        "package text and is not encoded as a rule." if route else ""
+    )
+    if reqs:
+        return STANDARD_ONLY, (
+            f"{len(reqs)} verified requirement(s) ({', '.join(r.id for r in reqs)}), none checkable from a "
+            f"package image.{route_note}"
+        )
+    return STANDARD_ONLY, f"No verified image-checkable requirement data.{route_note}"
+
+
+def _standard_records(knowledge_items):
+    return [
+        i for i in knowledge_items
+        if i.category == "indian_standards" and i.verification_status == "verified" and i.standard_number
+    ]
 
 
 def coverage_matrix(knowledge_items, requirements: RequirementSet) -> list[CoverageRow]:
     rows: list[CoverageRow] = []
-    for item in knowledge_items:
-        if item.category != "indian_standards" or item.verification_status != "verified" or not item.standard_number:
-            continue
+    for item in _standard_records(knowledge_items):
         std = item.standard_number
+        status, _ = standard_coverage(item, requirements)
         base = dict(standard_number=std, standard_knowledge_id=item.id, standard_title=item.title)
         products = requirements.products_for_standard(std) or [None]
         for product in products:
             reqs = requirements.for_product(std, product.id if product else None)
-            coverage = requirements.coverage(std, product.id if product else None)
             who = dict(
                 product_id=product.id if product else None,
                 product_name=product.name if product else None,
@@ -389,29 +483,31 @@ def coverage_matrix(knowledge_items, requirements: RequirementSet) -> list[Cover
             if not reqs:
                 rows.append(CoverageRow(**base, **who, requirement_id=None, requirement=None, rule_type=None,
                                         declaration_field=None, requirement_source=None,
-                                        status=ROW_NO_REQUIREMENT_DATA, standard_coverage=coverage))
+                                        status=ROW_NO_REQUIREMENT_DATA, standard_coverage=status))
             for r in reqs:
                 rows.append(CoverageRow(
                     **base, **who, requirement_id=r.id, requirement=r.description, rule_type=r.rule_type,
                     declaration_field=r.declaration_field, requirement_source=r.source_knowledge_id,
-                    status=ROW_SUPPORTED if r.supported else ROW_UNSUPPORTED, standard_coverage=coverage,
+                    status=ROW_SUPPORTED if r.supported else ROW_UNSUPPORTED, standard_coverage=status,
                 ))
     return rows
 
 
 def coverage_by_standard(knowledge_items, requirements: RequirementSet) -> list[StandardCoverage]:
     out: list[StandardCoverage] = []
-    for item in knowledge_items:
-        if item.category != "indian_standards" or item.verification_status != "verified" or not item.standard_number:
-            continue
+    for item in _standard_records(knowledge_items):
         std = item.standard_number
         reqs = requirements.for_standard(std)
+        status, reason = standard_coverage(item, requirements)
         out.append(StandardCoverage(
-            standard_number=std, knowledge_id=item.id, title=item.title,
+            standard_number=std, knowledge_id=item.id, title=item.title, domain=knowledge_domain(item),
             products=[p.name for p in requirements.products_for_standard(std)],
+            certification_route=certification_route(item),
+            source_document=item.document_name, source_url=item.source_url,
             verified_requirements=len(reqs),
             deterministic_rules=sum(r.supported for r in reqs),
             unsupported_requirements=sum(not r.supported for r in reqs),
-            inspection_status=(SUPPORTED_FOR_INSPECTION if any(r.supported for r in reqs) else STANDARD_ONLY),
+            requirement_ids=[r.id for r in reqs],
+            coverage_status=status, reason=reason,
         ))
     return out

@@ -218,7 +218,7 @@ export interface Declaration {
   image_id: string | null;
   ocr_confidence: number | null; // how sure OCR was reading the text — not correctness
   method: "regex" | "keyword" | "heuristic";
-  extraction_method: "deterministic";
+  extraction_method: "deterministic" | "deterministic_normalization"; // normalized = recovered from corrupted OCR; raw_text keeps the original
   note: string;
   reason: string; // why UNCERTAIN / NOT_DETECTED
   source_images: string[]; // every image the value was read from
@@ -371,7 +371,7 @@ export interface InspectionCoverage {
 /** Deterministic compliance evaluation — never decided by a model. */
 export interface ComplianceEvaluation {
   overall_status: "PASS" | "FAIL" | "REVIEW";
-  coverage_status: "SUPPORTED_FOR_INSPECTION" | "STANDARD_ONLY" | "NO_STANDARD";
+  coverage_status: "INSPECTION_SUPPORTED" | "STANDARD_ONLY" | "UNSUPPORTED" | "NO_STANDARD";
   reason_code: string;
   reason: string;
   product_name: string | null;

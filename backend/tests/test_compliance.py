@@ -211,9 +211,9 @@ def test_coverage_and_aggregation() -> None:
 
     zero = {"supported_checks": 0, "passed": 0, "failed": 0, "review": 0, "not_supported": 0}
     check("policy: SUPPORTED coverage with zero checks still REVIEW",
-          _aggregate("IS X", "SUPPORTED_FOR_INSPECTION", zero)[0] == "REVIEW")
+          _aggregate("IS X", "INSPECTION_SUPPORTED", zero)[0] == "REVIEW")
     check("policy: FAIL dominates REVIEW and unsupported",
-          _aggregate("IS X", "SUPPORTED_FOR_INSPECTION",
+          _aggregate("IS X", "INSPECTION_SUPPORTED",
                      {**zero, "supported_checks": 3, "failed": 1, "review": 1, "not_supported": 2})[0] == "FAIL")
     check("policy text is documented on every evaluation", ev.policy == AGGREGATION_POLICY and "PASS only when" in ev.policy)
 

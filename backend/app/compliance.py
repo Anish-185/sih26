@@ -51,11 +51,13 @@ from dataclasses import dataclass, field
 from app.declarations import DETECTED, NOT_DETECTED, UNCERTAIN, DeclarationStage
 from app.product_identification import MATCHED, ProductIdentification
 from app.requirements import (
+    JEWELLERY_HALLMARKING,
     STANDARD_ONLY,
-    SUPPORTED_FOR_INSPECTION,
+    UNSUPPORTED,
     InspectionProduct,
     Requirement,
     RequirementSet,
+    knowledge_domain,
 )
 from app.retrieval.text import find_standard_numbers, standard_number_key
 
@@ -82,6 +84,7 @@ REASON_CATEGORIES: dict[str, str] = {
     "EVIDENCE_CONFLICT": "CONFLICTING_EVIDENCE",
     "EVIDENCE_UNCERTAIN": "INSUFFICIENT_EVIDENCE",
     "EVIDENCE_LOW_CONFIDENCE": "INSUFFICIENT_EVIDENCE",
+    "EVIDENCE_NORMALIZED": "INSUFFICIENT_EVIDENCE",
     "NO_RELIABLE_TEXT": "INSUFFICIENT_EVIDENCE",
     "RULE_NOT_SUPPORTED": "NOT_SUPPORTED",
 }
@@ -168,7 +171,7 @@ class InspectionCoverage:
 @dataclass(frozen=True)
 class ComplianceEvaluation:
     overall_status: str  # PASS | FAIL | REVIEW
-    coverage_status: str  # SUPPORTED_FOR_INSPECTION | STANDARD_ONLY | NO_STANDARD
+    coverage_status: str  # INSPECTION_SUPPORTED | STANDARD_ONLY | UNSUPPORTED | NO_STANDARD
     reason_code: str
     reason: str
     product_name: str | None
@@ -223,6 +226,22 @@ def evaluate_compliance(
 
     standard = product.standard_number
     items = {i.id: i for i in knowledge_items}
+    record = items.get(product.knowledge_id)
+    if record is not None and knowledge_domain(record) == JEWELLERY_HALLMARKING:
+        reason = (
+            f"Standard {standard} is a jewellery hallmarking standard. Hallmark and HUID facts describe marks on "
+            "jewellery, not package labels, so package-label inspection does not apply. No check was run."
+        )
+        return ComplianceEvaluation(
+            overall_status=REVIEW, coverage_status=UNSUPPORTED, reason_code="DOMAIN_NOT_PACKAGE_LABEL",
+            reason=reason, product_name=product.name, standard_number=standard, knowledge_id=product.knowledge_id,
+            checks=[], notes=notes, summary=[reason, *_unreadable_lines(unreadable)], unreadable_images=unreadable,
+            inspection_coverage=InspectionCoverage(
+                standard_number=standard, product_applicability=PRODUCT_NOT_MODELLED, product_id=None,
+                product_name=None, product_category=None, applicability_source=None, verified_requirements=0,
+                deterministic_rules=0, unsupported_requirements=0, not_applied_requirements=[], explanation=reason,
+            ),
+        )
     applicability, confirmed, candidates = _confirm_product(product, requirements)
     applicable = requirements.for_product(standard, confirmed.id if confirmed else None)
     not_applied = [r for r in requirements.for_standard(standard) if r not in applicable]
@@ -482,6 +501,13 @@ def _rule_printed_standard_number(req: Requirement, standard: str, declarations:
         return result(REVIEW, "EVIDENCE_LOW_CONFIDENCE",
                       f"IS {expected} was read, but only at {pct}% OCR confidence (a pass needs "
                       f"{round(pass_conf * 100)}%).", "INSUFFICIENT", decl.value, ev)
+    if decl.extraction_method == "deterministic_normalization":
+        # The number was recovered from corrupted OCR text: good enough to confirm a
+        # match, never strong enough to fail a package.
+        return result(REVIEW, "EVIDENCE_NORMALIZED",
+                      f"The package text was read as '{decl.raw_text}' and normalized to {decl.value}, not "
+                      f"IS {expected}. A normalized reading is not used to fail a package — confirm against the "
+                      "physical package.", "INSUFFICIENT", decl.value, ev)
     if confidence >= fail_conf:
         return result(FAIL, "OBSERVED_DIFFERENT",
                       f"The package text shows {decl.value}, not IS {expected} (OCR {pct}%). "

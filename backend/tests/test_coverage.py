@@ -146,8 +146,8 @@ def test_knowledge() -> None:
 
     ev, _, _ = evaluate(WATER + ["IS 14543"])
     cov = ev.inspection_coverage
-    check("2 inspection-supported: water is SUPPORTED_FOR_INSPECTION",
-          ev.coverage_status == "SUPPORTED_FOR_INSPECTION", ev.coverage_status)
+    check("2 inspection-supported: water is INSPECTION_SUPPORTED",
+          ev.coverage_status == "INSPECTION_SUPPORTED", ev.coverage_status)
     check("2 inspection-supported: counts 3 requirements, 1 rule, 2 unsupported",
           (cov.verified_requirements, cov.deterministic_rules, cov.unsupported_requirements) == (3, 1, 2), str(cov))
     check("2 explanation counts the deterministic rules for this product and standard",
@@ -242,7 +242,7 @@ def test_matrix() -> None:
     by_std = {c.standard_number: c for c in coverage_by_standard(ITEMS, REAL)}
     standards = [i for i in ITEMS if i.category == "indian_standards"]
     check("matrix covers every verified standard", len(by_std) == len(standards) == 36, str(len(by_std)))
-    supported = sorted(s for s, c in by_std.items() if c.inspection_status == "SUPPORTED_FOR_INSPECTION")
+    supported = sorted(s for s, c in by_std.items() if c.coverage_status == "INSPECTION_SUPPORTED")
     check("matrix: only packaged water is supported for inspection",
           supported == ["IS 13428:2005", "IS 14543:2016"], str(supported))
     check("matrix: LED has 1 verified requirement and 0 rules",
@@ -312,8 +312,8 @@ def test_extraction() -> None:
              Region("OCR-004", "MRP Rs 20", 0.95, [10, 170, 200, 195]),
              Region("OCR-005", "Batch No: CF-0526-B", 0.95, [10, 200, 200, 225])]
     name = field(extract_declarations(brand), "product_name")
-    check("11 two prominent unlabelled lines -> product name UNCERTAIN (could be the brand)",
-          name.status == "UNCERTAIN" and "brand" in name.reason and name.value == "Aqua Spring", str(name))
+    check("11 brand-like prominent line -> product name UNCERTAIN and never the brand text",
+          name.status == "UNCERTAIN" and "brand" in name.reason and name.value != "Aqua Spring", str(name))
 
     fssai = field(extract_declarations(label(["MRP Rs 20", "FSSAl Lic.No.10099999000456"])), "fssai_license")
     check("OCR 'FSSAl' misread still reads the licence digits", fssai.value == "10099999000456", str(fssai))
@@ -343,9 +343,10 @@ def test_compliance() -> None:
     rule = ev.checks[0]
     check("17 insufficient evidence (IS number not detected) -> REVIEW",
           rule.result == "REVIEW" and rule.reason_code == "EVIDENCE_NOT_DETECTED" and ev.overall_status == "REVIEW")
-    merged = evaluate(WATER + ["ISTIS 14543 CM/L-7654321"])[0]
-    check("17 OCR-merged 'ISTIS 14543' is not read as a number -> REVIEW, never PASS",
-          merged.checks[0].result == "REVIEW", merged.checks[0].reason)
+    unknown = evaluate(WATER + ["ISTIS 99999 CM/L-7654321"])[0]
+    check("17 OCR-merged 'ISTIS 99999' (not a verified standard) is not recovered -> REVIEW, never PASS",
+          unknown.checks[0].result == "REVIEW" and unknown.checks[0].reason_code == "EVIDENCE_UNCERTAIN",
+          unknown.checks[0].reason)
     low = evaluate([*WATER, "IS 14543"], REAL)
     check("17 all explanations avoid 'missing' claims",
           not any(FORBIDDEN.search(s) for s in low[0].summary + [c.reason for c in low[0].checks]))

@@ -25,12 +25,27 @@ together. A label and a value are only joined inside the same photo. When the
 same field is read more than once, ``observations`` keeps every reading and
 ``consistency`` says whether they agree (``DUPLICATE``) or not (``CONFLICT`` —
 the value is withheld and the field is UNCERTAIN). Nothing is chosen silently.
+
+Normalization. Some OCR corruption is recoverable without guessing: "ISTIS 14543"
+(the ISI mark and "IS" merged), "IS No. 14543", or "care@ clearflow.com" (an
+inserted space). A normalized reading keeps the original OCR text in
+``raw_text`` and its regions / boxes, sets ``extraction_method`` to
+``deterministic_normalization`` and says what was changed in ``note``. An IS
+number is only recovered from a non-canonical form when its number is a verified
+standard in the knowledge base (``DeclarationKnowledge``); otherwise the field is
+UNCERTAIN with no value.
+
+Product name vs brand. The most prominent line is only DETECTED as the product
+name when it contains product vocabulary from the knowledge base (or the label
+says "Product name:"). A prominent line without product words may be the brand:
+the product name is then UNCERTAIN, never that line.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 from typing import Iterable, Protocol
 
 DETECTED = "DETECTED"
@@ -113,6 +128,43 @@ class DeclarationStage:
         return [d.field for d in self.fields if d.status == NOT_DETECTED]
 
 
+NORMALIZED = "deterministic_normalization"
+
+
+@dataclass(frozen=True)
+class DeclarationKnowledge:
+    """What extraction may validate against: verified knowledge-base facts only."""
+
+    standard_numbers: frozenset[str]  # primary numbers of verified standards: "14543", "269", …
+    product_phrases: tuple[tuple[str, ...], ...]  # multi-word product phrases of verified standards
+
+
+def knowledge_from_items(items) -> DeclarationKnowledge:
+    # Imported here: product_identification imports this module.
+    from app.product_identification import _phrase_index
+    from app.retrieval.text import standard_number_key
+
+    numbers = {
+        standard_number_key(i.standard_number)[0]
+        for i in items
+        if i.category == "indian_standards" and i.verification_status == "verified"
+        and standard_number_key(i.standard_number)
+    }
+    return DeclarationKnowledge(frozenset(numbers), tuple(_phrase_index(items)))
+
+
+@lru_cache(maxsize=1)
+def default_knowledge() -> DeclarationKnowledge:
+    """The verified knowledge base, loaded once. Empty (so nothing is recovered and
+    no product name is confirmed) if it cannot be loaded."""
+    try:
+        from app.knowledge.loader import load_knowledge_base
+
+        return knowledge_from_items(load_knowledge_base().items)
+    except Exception:  # noqa: BLE001 — extraction must still run, just more conservatively
+        return DeclarationKnowledge(frozenset(), ())
+
+
 # field -> (label, method used to search for it). Order = display order.
 FIELDS: dict[str, tuple[str, str]] = {
     "product_name": ("Product name", "heuristic"),
@@ -162,7 +214,11 @@ def _num(s: str) -> float | None:
 # --------------------------------------------------------------------------- api
 
 
-def extract_declarations(regions: Iterable[RegionLike]) -> DeclarationStage:
+def extract_declarations(
+    regions: Iterable[RegionLike], knowledge: DeclarationKnowledge | None = None,
+) -> DeclarationStage:
+    """``knowledge`` defaults to the verified knowledge base."""
+    knowledge = knowledge if knowledge is not None else default_knowledge()
     regions = [r for r in regions if r is not None and isinstance(getattr(r, "text", None), str)]
     notes: list[str] = []
 
@@ -180,7 +236,7 @@ def extract_declarations(regions: Iterable[RegionLike]) -> DeclarationStage:
     found: dict[str, Declaration] = {}
     for name, extractor in _EXTRACTORS:
         try:
-            decl = extractor(regions)
+            decl = extractor(regions, knowledge) if name in _NEEDS_KNOWLEDGE else extractor(regions)
         except Exception as exc:  # noqa: BLE001 — one bad field must not kill the stage
             notes.append(f"{name}: {exc}")
             decl = None
@@ -191,12 +247,14 @@ def extract_declarations(regions: Iterable[RegionLike]) -> DeclarationStage:
     # needs to know which regions a labelled field already claimed.
     claimed = {rid for d in found.values() for rid in d.source_regions}
     try:
-        name = _product_name(regions, claimed)
+        name, brand_hint = _product_name(regions, claimed, knowledge)
     except Exception as exc:  # noqa: BLE001
         notes.append(f"product_name: {exc}")
-        name = None
+        name, brand_hint = None, None
     if name is not None:
         found["product_name"] = name
+    if brand_hint is not None and "brand" not in found:
+        found["brand"] = brand_hint
 
     fields = [found.get(f) or _not_detected(f, "No OCR text matched this field.") for f in FIELDS]
 
@@ -266,6 +324,7 @@ class _Cand:
     numeric_value: float | None = None
     note: str = ""
     uncertain: str = ""  # non-empty => UNCERTAIN with this reason
+    normalized: str = ""  # non-empty => value recovered from this corrupted OCR text
 
 
 def _build(
@@ -295,6 +354,7 @@ def _build(
         image_id=images[0] if images else None,
         ocr_confidence=round(lowest, 4),
         method=method or default_method,
+        extraction_method=NORMALIZED if cand.normalized else "deterministic",
         unit=cand.unit,
         numeric_value=cand.numeric_value,
         note=cand.note,
@@ -353,9 +413,12 @@ def _resolve(field_name: str, cands: list[_Cand], method: str | None = None) -> 
         for c in group:
             merged.extend(r for r in c.regions if r not in merged)
         uncertain = next((c.uncertain for c in group if c.uncertain), "")
+        # Normalized only when no reading of the value was clean.
+        normalized = first.normalized if all(c.normalized for c in group) else ""
+        note = first.note if normalized else next((c.note for c in group if not c.normalized), first.note)
         return _build(field_name, _Cand(
             regions=merged, value=first.value, unit=first.unit,
-            numeric_value=first.numeric_value, note=first.note, uncertain=uncertain,
+            numeric_value=first.numeric_value, note=note, uncertain=uncertain, normalized=normalized,
         ), method, consistency="DUPLICATE" if len(cands) > 1 else "SINGLE", observations=observations)
 
     readings = "; ".join(
@@ -716,29 +779,73 @@ def _expiry_date(regions):
     return _label_only("expiry_date", regions, _RE_EXP_LABEL, "Expiry")
 
 
-# "IS" is matched case-sensitively so ordinary words ("this is") do not match.
-_RE_STANDARD = re.compile(
-    r"(?<![A-Za-z])I\s?\.?\s?S(?![A-Za-z])\.?\s*[:\-]?\s*(\d{3,5})"
+_IS_TAIL = (
+    r"\s*[:\-]?\s*(\d{3,5})"
     r"(?:\s*\(\s*[Pp](?:ar)?t\.?\s*[-:]?\s*(\d{1,2})\s*\))?"
     r"(?:\s*[:\-]\s*((?:19|20)\d{2}))?"
     r"(?![\d%])(?!\s*(?:%|kgs?\b|g\b|gm\b|mg\b|ml\b|l\b|ltr\b))"
 )
+# "IS" is matched case-sensitively so ordinary words ("this is") do not match.
+_RE_STANDARD = re.compile(r"(?<![A-Za-z])I\s?\.?\s?S(?![A-Za-z])\.?" + _IS_TAIL)
+# Non-canonical Indian Standard references. A number read this way is only kept
+# when it is a verified standard number in the knowledge base.
+_RE_STANDARD_LOOSE = re.compile(
+    r"(?<![A-Za-z0-9])(?:"
+    r"IS[IT1l|]\s?[I1l|]S"  # "ISI IS" merged or misread: ISTIS, ISIIS, ISI1S
+    r"|[1l|]S"  # "1S" / "lS" read for "IS"
+    r"|I\s?S\s*(?i:no\.?|number)"  # "IS No." / "IS NUMBER"
+    r"|(?i:indian\s+standard)(?:\s*(?i:no\.?|number))?(?:\s*I\s?S)?"
+    r")(?![A-Za-z])\.?" + _IS_TAIL
+)
 
 
-def _standard_number(regions):
+def _is_value(match) -> tuple[str, str]:
+    number, part, year = match.group(1), match.group(2), match.group(3)
+    return number, f"IS {number}" + (f" (Part {part})" if part else "") + (f":{year}" if year else "")
+
+
+def _short(match) -> bool:
+    return len(match.group(1)) == 3 and not match.group(2) and not match.group(3)
+
+
+_SHORT_REASON = "A short number after 'IS' could be ordinary text rather than a standard."
+
+
+def _standard_number(regions, knowledge: DeclarationKnowledge):
     cands = []
+    strict_regions: list[tuple[set, str]] = []
     for h in _hits(regions, _RE_STANDARD):
-        number, part, year = h.match.group(1), h.match.group(2), h.match.group(3)
-        value = f"IS {number}" + (f" (Part {part})" if part else "") + (f":{year}" if year else "")
-        short = len(number) == 3 and not year and not part
+        _, value = _is_value(h.match)
+        strict_regions.append(({r.id for r in h.regions}, value))
         cands.append(_Cand(
             regions=h.regions, value=value, key=value,
             note="Standard number as printed on the label — read from OCR, not verified against BIS.",
-            uncertain=("A short number after 'IS' could be ordinary text rather than a standard."
-                       if short else ""),
+            uncertain=_SHORT_REASON if _short(h.match) else "",
         ))
+    for h in _hits(regions, _RE_STANDARD_LOOSE):
+        number, value = _is_value(h.match)
+        ids = {r.id for r in h.regions}
+        if any(v == value and ids & seen for seen, v in strict_regions):
+            continue  # the same number was already read cleanly ("ISI IS 14543")
+        source = h.match.group(0).strip()
+        if number in knowledge.standard_numbers:
+            cands.append(_Cand(
+                regions=h.regions, value=value, key=value, normalized=source,
+                note=(f"OCR text '{source}' normalized to {value}: {number} is a verified standard number in "
+                      "the knowledge base. Read from OCR, not verified against the physical package."),
+                uncertain=_SHORT_REASON if _short(h.match) else "",
+            ))
+        else:
+            cands.append(_Cand(
+                regions=h.regions, value=None, key="rejected",
+                uncertain=(f"'{source}' looks like an Indian Standard reference, but {number} is not a verified "
+                           "standard number in the knowledge base, so no number was recovered."),
+            ))
     if not cands:
         return None
+    if all(c.value is None for c in cands):
+        return _resolve("standard_number", cands)
+    cands = [c for c in cands if c.value is not None]
     distinct: list[_Cand] = []
     for c in cands:  # several different IS numbers on one label is normal
         if all(c.value != d.value for d in distinct):
@@ -752,6 +859,7 @@ def _standard_number(regions):
         regions=regions_all, value=", ".join(c.value for c in distinct),
         note=distinct[0].note,
         uncertain=next((c.uncertain for c in distinct if c.uncertain), ""),
+        normalized=distinct[0].normalized if all(c.normalized for c in cands) else "",
     ))
 
 
@@ -807,14 +915,43 @@ _RE_EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 _RE_EMAIL_TLD = re.compile(r"^(.+?\.(?:com|in|org|net|co\.in|gov\.in|info|biz|example))[a-z]+$", re.IGNORECASE)
 
 
+# An email with ONE OCR-inserted space around "@" or the final ".": "care@ clearflow.com".
+_RE_EMAIL_SPACED = re.compile(
+    r"(?<![A-Za-z0-9._%+\-])([A-Za-z0-9._%+\-]{3,40})(\s?)@(\s?)"
+    r"([A-Za-z0-9\-]{2,40}(?:\.[A-Za-z0-9\-]{2,40})*?)(\s?)\.(\s?)"
+    r"(co\.in|gov\.in|org\.in|com|in|org|net|info|biz|example)(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+# A space is only removed when the text is clearly about contacting someone.
+_RE_EMAIL_CUE = re.compile(r"e-?mail|mail|care|contact|support|write|enquir|info|help|feedback|service", re.IGNORECASE)
+
+
 def _consumer_care(regions):
     cands = []
+    clean_regions: set[str] = set()
     for h in _hits(regions, _RE_EMAIL):
         email, note = h.match.group(0), ""
         m = _RE_EMAIL_TLD.match(email)
         if m:  # OCR joined the next words: "haldirams.comandfor"
             email, note = m.group(1), f"OCR joined text after the address ('{email}'); trimmed at the domain ending."
+        clean_regions.update(r.id for r in h.regions)
         cands.append(_Cand(regions=h.regions, value=email, key=email.lower(), note=note))
+    for h in _hits(regions, _RE_EMAIL_SPACED):
+        if clean_regions & {r.id for r in h.regions}:
+            continue
+        local, domain, tld = h.match.group(1), h.match.group(4), h.match.group(7)
+        spaces = sum(len(h.match.group(g)) for g in (2, 3, 5, 6))
+        text = " ".join(r.text for r in h.regions)
+        before = text[: text.find(h.match.group(0))] if h.match.group(0) in text else ""
+        email = f"{local}@{domain}.{tld}"
+        if (spaces != 1 or not re.search(r"[A-Za-z]", local) or not _RE_EMAIL.fullmatch(email)
+                or not (_RE_EMAIL_CUE.search(local) or _RE_EMAIL_CUE.search(before))):
+            continue  # not clearly one address with one stray space — never assembled from loose words
+        raw = h.match.group(0)
+        cands.append(_Cand(
+            regions=h.regions, value=email, key=email.lower(), normalized=raw,
+            note=f"OCR inserted a space in '{raw}'; the space was removed to read {email}.",
+        ))
     return _resolve("consumer_care", cands)
 
 
@@ -884,7 +1021,7 @@ _LABEL_WORDS = re.compile(
     r"brand|ingredients?|nutrit\w*|information|serving|servings|calories|energy|daily value|"
     r"storage|store|allergens?|contains|rda|recommended|dietary|keep|clean|recycle|"
     r"protein|carbohydrates?|fat|sugars?|sodium|cholesterol|fib(?:re|er)|kcal|extra|offer|"
-    r"www\.|http|@|display panel)\b",
+    r"product\s*name|generic\s*name|www\.|http|@|display panel)\b",
     re.IGNORECASE,
 )
 # The product name must be printed noticeably larger than the typical line.
@@ -897,17 +1034,58 @@ def _text_size(region) -> int:
     return min(x2 - x1, y2 - y1)
 
 
-def _product_name(regions, claimed_region_ids: set[str]):
-    """The product name, chosen separately on each photo (text size is only
-    comparable within one photo), then merged like any other field."""
+_RE_PRODUCT_LABEL = re.compile(
+    r"\b(?:product\s*name|name\s*of\s*(?:the\s*)?(?:product|commodity)|(?:common\s*or\s*)?generic\s*name)"
+    r"\s*[:\-]\s*([A-Za-z][^,;|]{2,60})",
+    re.IGNORECASE,
+)
+
+
+def _names_product(text: str, knowledge: DeclarationKnowledge) -> bool:
+    """True when the text contains a multi-word product phrase of a verified standard."""
+    from app.product_identification import _contains, _tokens
+
+    tokens = _tokens(text)
+    squashed = re.sub(r"[^a-z]", "", text.lower())
+    return any(
+        _contains(phrase, tokens) or (len("".join(phrase)) >= 8 and "".join(phrase) in squashed)
+        for phrase in knowledge.product_phrases
+    )
+
+
+def _product_name(regions, claimed_region_ids: set[str], knowledge: DeclarationKnowledge):
+    """(product name, brand hint). A labelled "Product name:" wins; otherwise the
+    name is chosen separately on each photo (text size is only comparable within
+    one photo), then merged like any other field."""
+    labelled = []
+    for h in _hits(regions, _RE_PRODUCT_LABEL):
+        value = h.match.group(1).strip(" .:-")
+        problem = noise_reason(value)
+        labelled.append(_Cand(
+            regions=h.regions, value=None if problem else value,
+            key="rejected" if problem else re.sub(r"\W+", "", value.lower()),
+            note="labelled 'Product name' on the package",
+            uncertain=f"Rejected as a product name: {problem}" if problem else "",
+        ))
+    if labelled:
+        return _resolve("product_name", _without_rejected(labelled), method="regex"), None
+
     by_image: dict[object, list] = {}
     for r in regions:
         by_image.setdefault(getattr(r, "image_id", None), []).append(r)
-    cands = [c for group in by_image.values() if (c := _product_name_on_image(group, claimed_region_ids))]
-    return _resolve("product_name", _without_rejected(cands)) if cands else None
+    names, brands = [], []
+    for group in by_image.values():
+        name, brand = _product_name_on_image(group, claimed_region_ids, knowledge)
+        if name:
+            names.append(name)
+        if brand:
+            brands.append(brand)
+    name = _resolve("product_name", _without_rejected(names)) if names else None
+    brand = _resolve("brand", brands, method="heuristic") if brands else None
+    return name, brand
 
 
-def _product_name_on_image(regions, claimed_region_ids: set[str]) -> _Cand | None:
+def _product_name_on_image(regions, claimed_region_ids: set[str], knowledge: DeclarationKnowledge):
     """Heuristic: the most prominent line that is not a labelled field.
 
     Prominence = text size relative to the median line, preferring earlier and
@@ -954,13 +1132,13 @@ def _product_name_on_image(regions, claimed_region_ids: set[str]) -> _Cand | Non
 
     if not candidates:
         if not rejected:
-            return None
+            return None, None
         _, r, problem = max(rejected, key=lambda x: x[0])
         return _Cand(
             regions=[r], value=None, key="rejected",
             uncertain=f"Product name uncertain: the most prominent line was rejected. {problem}",
             note="most prominent unlabelled line on the panel failed validation",
-        )
+        ), None
     candidates.sort(key=lambda c: -c[0])
     _, size, r, t, word_count = candidates[0]
     runner_up = candidates[1][1] if len(candidates) > 1 else 0.0
@@ -979,11 +1157,59 @@ def _product_name_on_image(regions, claimed_region_ids: set[str]) -> _Cand | Non
         uncertain = "The most prominent line is a single word — it could be the brand rather than the product name."
 
     value = t.title() if t.isupper() else t
-    return _Cand(
-        regions=[r], value=value, key=re.sub(r"\W+", "", value.lower()), uncertain=uncertain,
-        note="most prominent unlabelled line on the panel",
-    )
+    if _names_product(t, knowledge):
+        return _Cand(
+            regions=[r], value=value, key=re.sub(r"\W+", "", value.lower()), uncertain=uncertain,
+            note="most prominent unlabelled line on the panel; contains knowledge-base product words",
+        ), None
 
+    # BRAND != PRODUCT NAME. The most prominent line names no known product: it may be
+    # the brand. Look for a line on this photo that does name a product.
+    product_lines = [
+        x for x in regions
+        if x is not r and x.id not in claimed_region_ids and x.text.strip()
+        and not noise_reason(x.text) and not _LABEL_WORDS.search(x.text) and not _RE_PARENS.match(x.text)
+        and _names_product(x.text, knowledge)
+    ]
+    if product_lines:
+        line = max(product_lines, key=lambda x: _text_size(x) if getattr(x, "bbox", None) is not None else 0)
+        text = line.text.strip()
+        product_value = text.title() if text.isupper() else text
+        from app.product_identification import _tokens
+
+        shared = {w for w in _tokens(t) if w.isalpha()} & set(_tokens(text))
+        if shared:
+            # "LED BULB 9W" over "Self-ballasted LED lamp": the same product described twice,
+            # not a brand. Still not certain which wording is the product name.
+            return _Cand(
+                regions=[line], value=product_value, key=re.sub(r"\W+", "", product_value.lower()),
+                uncertain=(f"The most prominent line '{t}' names no product from the knowledge base; a less "
+                           f"prominent line ('{text}') does, and both describe the product, so the product "
+                           "name is not certain."),
+                note="line with knowledge-base product words; not the most prominent line",
+            ), None
+        return (
+            _Cand(
+                regions=[line], value=product_value, key=re.sub(r"\W+", "", product_value.lower()),
+                uncertain=(f"The most prominent line '{t}' names no product from the knowledge base and may be the "
+                           f"brand; the product appears to be named on a less prominent line ('{text}')."),
+                note="line with knowledge-base product words; not the most prominent line",
+            ),
+            _Cand(
+                regions=[r], value=value, key=re.sub(r"\W+", "", value.lower()),
+                uncertain="Not labelled as a brand: the most prominent line names no product, so it may be the brand.",
+                note="most prominent unlabelled line without product words",
+            ),
+        )
+    why = (f"Product name uncertain: the most prominent line '{t}' names no product from the knowledge base, "
+           "so it may be the brand rather than the product name.")
+    return _Cand(
+        regions=[r], value=None, key="rejected", uncertain=f"{why} {uncertain}".strip(),
+        note="most prominent unlabelled line on the panel; no product words",
+    ), None
+
+
+_NEEDS_KNOWLEDGE = {"standard_number"}
 
 _EXTRACTORS = (
     ("brand", _brand),

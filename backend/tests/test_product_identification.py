@@ -280,9 +280,12 @@ def test_ocr_joined_words() -> None:
     p, regions = identify(["BISLERI", "PACKAGED DRINKINGWATEROZONISED", "MKTBY:BISLERI INTERNATIONALPVT.LTD."])
     check("joined OCR words still identify packaged drinking water",
           p.status == "MATCHED" and p.standard_number == "IS 14543:2016", p.reason)
-    ev = next(ev for ev in p.evidence if ev.clue.kind == "ocr_text")
+    # The line is now read as the (uncertain) product name — "BISLERI" names no product — so find
+    # its evidence by OCR region rather than by clue kind.
+    ev = next(ev for ev in p.evidence if ev.clue.source_regions == ["OCR-002"])
     check("evidence keeps the original OCR text and shows what was searched",
-          ev.clue.text == "PACKAGED DRINKINGWATEROZONISED"
+          ev.clue.text.upper() == "PACKAGED DRINKINGWATEROZONISED"
+          and next(r for r in regions if r.id == "OCR-002").text == "PACKAGED DRINKINGWATEROZONISED"
           and ev.clue.search_text == "packaged drinking water ozonised"
           and ev.clue.source_regions == ["OCR-002"])
 

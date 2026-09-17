@@ -17,7 +17,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.knowledge.loader import DEFAULT_KNOWLEDGE_DIR, load_knowledge_base, main  # noqa: E402
 from app.requirements import (  # noqa: E402
-    SUPPORTED_FOR_INSPECTION,
+    INSPECTION_SUPPORTED,
+    STANDARD_ONLY,
+    UNSUPPORTED,
     coverage_by_standard,
     coverage_matrix,
     load_requirements,
@@ -38,13 +40,20 @@ def check_requirements(argv: list[str]) -> int:
           f"({', '.join(p.name for p in requirements.products) or 'none'})")
 
     by_standard = coverage_by_standard(items, requirements)
-    covered = [c for c in by_standard if c.inspection_status == SUPPORTED_FOR_INSPECTION]
-    print(f"\nInspection coverage: {len(covered)} of {len(by_standard)} standards supported for inspection")
-    print(f"  {'STANDARD':30} {'PRODUCT / CATEGORY':46} {'REQS':>4} {'RULES':>5}  STATUS")
+    counts = {status: sum(c.coverage_status == status for c in by_standard)
+              for status in (INSPECTION_SUPPORTED, STANDARD_ONLY, UNSUPPORTED)}
+    print(f"\nInspection coverage (package-label inspection) — total standards: {len(by_standard)}")
+    print(f"  Inspection-supported: {counts[INSPECTION_SUPPORTED]}")
+    print(f"  Standard-only:        {counts[STANDARD_ONLY]}  (verified and retrievable; not a failure)")
+    print(f"  Unsupported:          {counts[UNSUPPORTED]}")
     for c in by_standard:
         product = ", ".join(c.products) or c.title.split(" — ", 1)[-1] + " (product not modelled)"
-        print(f"  {c.standard_number:30} {product[:46]:46} {c.verified_requirements:>4} "
-              f"{c.deterministic_rules:>5}  {c.inspection_status}")
+        print(f"\n  {c.standard_number}")
+        print(f"    Product / category: {product}")
+        print(f"    Source:             {c.source_document}")
+        print(f"    Requirements: {c.verified_requirements}   Rules: {c.deterministic_rules}   "
+              f"Coverage: {c.coverage_status}")
+        print(f"    Reason: {c.reason}")
 
     print("\nCoverage matrix rows with requirement data (product | standard | requirement | rule | status):")
     for r in coverage_matrix(items, requirements):

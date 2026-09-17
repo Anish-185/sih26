@@ -32,6 +32,7 @@ from app.inspection import (
     MAX_BYTES,
     CoverageMatrixOut,
     CoverageRowOut,
+    CoverageTotalsOut,
     ImageError,
     InspectionAnalysisOut,
     InspectionAnalyzer,
@@ -149,8 +150,14 @@ def coverage() -> CoverageMatrixOut:
     """MetrIQ's inspection coverage matrix, read from the verified data files."""
     items = get_product_finder().search_engine.items
     requirements = load_requirements(items)
+    standards = coverage_by_standard(items, requirements)
+    count = lambda status: sum(c.coverage_status == status for c in standards)  # noqa: E731
     return CoverageMatrixOut(
-        standards=[StandardCoverageOut(**c.__dict__) for c in coverage_by_standard(items, requirements)],
+        totals=CoverageTotalsOut(
+            total=len(standards), inspection_supported=count("INSPECTION_SUPPORTED"),
+            standard_only=count("STANDARD_ONLY"), unsupported=count("UNSUPPORTED"),
+        ),
+        standards=[StandardCoverageOut(**c.__dict__) for c in standards],
         rows=[CoverageRowOut(**r.__dict__) for r in coverage_matrix(items, requirements)],
         errors=list(requirements.errors),
     )

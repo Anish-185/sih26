@@ -1061,6 +1061,9 @@ function DeclarationsPanel({
                       ` · OCR ${Math.round(d.ocr_confidence * 100)}%`}
                     {" · "}
                     <span className={methodTone(d.method)}>{d.method}</span>
+                    {d.extraction_method === "deterministic_normalization" && (
+                      <span className="text-review"> · normalized from OCR “{d.raw_text}”</span>
+                    )}
                   </Mono>
                   {d.reason && (
                     <p className="mt-1 text-[11px] leading-snug text-review">
@@ -1402,7 +1405,13 @@ function CoveragePanel({ compliance }: { compliance: ComplianceEvaluation }) {
     <Panel flush>
       <PanelHeader
         title="Inspection coverage"
-        meta={compliance.coverage_status === "SUPPORTED_FOR_INSPECTION" ? "inspection supported" : "standard only"}
+        meta={
+          compliance.coverage_status === "INSPECTION_SUPPORTED"
+            ? "inspection supported"
+            : compliance.coverage_status === "UNSUPPORTED"
+              ? "not a package-label standard"
+              : "standard only"
+        }
       />
       <dl className="px-5 py-2">
         <DefinitionRow label="Standard">
@@ -1472,7 +1481,8 @@ function CoveragePanel({ compliance }: { compliance: ComplianceEvaluation }) {
 }
 
 const COVERAGE_LABEL: Record<ComplianceEvaluation["coverage_status"], string> = {
-  SUPPORTED_FOR_INSPECTION: "Supported for inspection",
+  INSPECTION_SUPPORTED: "Supported for inspection",
+  UNSUPPORTED: "Unsupported — not a package-label inspection standard",
   STANDARD_ONLY: "Standard only — no checkable requirements",
   NO_STANDARD: "No identified standard",
 };

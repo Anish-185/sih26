@@ -367,18 +367,22 @@ def test_not_detected_and_uncertain() -> None:
           f"{small['product_name'].status} {small['product_name'].value}")
     single = fields_of([line(1, "RATLAMISEV", height=80), line(2, "with Pinch of Clove"),
                         line(3, "MRP ₹5")])["product_name"]
-    check("single big word -> UNCERTAIN (could be the brand)",
-          single.status == "UNCERTAIN" and single.value == "Ratlamisev" and "brand" in single.reason,
-          f"{single.status} {single.value} {single.reason}")
+    check("single big word with no product words -> UNCERTAIN, no value (could be the brand)",
+          single.status == "UNCERTAIN" and single.value is None and "brand" in single.reason
+          and single.raw_text == "RATLAMISEV", f"{single.status} {single.value} {single.reason}")
     twin = fields_of([line(1, "AQUA PURE", height=60), line(2, "FRESH WATER", height=58),
                       line(3, "MRP ₹20"), line(4, "Batch: AP26001"), line(5, "Mfg: 09/2026")])["product_name"]
     check("two lines of similar large size -> UNCERTAIN naming the other",
           twin.status == "UNCERTAIN" and "FRESH WATER" in twin.reason,
           f"{twin.status} {twin.reason}")
     big = fields_of([line(1, "AQUA PURE", height=60), line(2, "FRESH AND CLEAN"), line(3, "MRP ₹20")])
-    check("product name clearly larger than other text -> DETECTED",
-          big["product_name"].status == "DETECTED" and big["product_name"].value == "Aqua Pure",
+    check("largest line with no product words is NOT taken as the product name (brand != product)",
+          big["product_name"].status == "UNCERTAIN" and big["product_name"].value is None,
           f"{big['product_name'].status} {big['product_name'].value}")
+    kettle = fields_of([line(1, "ELECTRIC KETTLE 1.5 L", height=60), line(2, "FRESH AND CLEAN"), line(3, "MRP ₹20")])
+    check("largest line naming a knowledge-base product -> DETECTED",
+          kettle["product_name"].status == "DETECTED" and kettle["product_name"].value == "Electric Kettle 1.5 L",
+          f"{kettle['product_name'].status} {kettle['product_name'].value}")
     check("a line smaller than typical text is never offered as the product name",
           fields_of([line(1, "Protein (g)", height=20), line(2, "Energy 132", height=40),
                      line(3, "Total Fat 9", height=40)])["product_name"].status == "NOT_DETECTED")

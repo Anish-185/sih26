@@ -397,23 +397,39 @@ class CoverageRowOut(BaseModel):
     declaration_field: str | None = None
     requirement_source: str | None = None
     status: str = Field(description='"SUPPORTED" | "UNSUPPORTED" | "NO_REQUIREMENT_DATA"')
-    standard_coverage: str = Field(description='"SUPPORTED_FOR_INSPECTION" | "STANDARD_ONLY"')
+    standard_coverage: str = Field(description='"INSPECTION_SUPPORTED" | "STANDARD_ONLY" | "UNSUPPORTED"')
 
 
 class StandardCoverageOut(BaseModel):
     standard_number: str
     knowledge_id: str
     title: str
+    domain: str = Field(description='"GENERAL_BIS_INFORMATION" | "JEWELLERY_HALLMARKING"')
     products: list[str]
+    certification_route: str | None = Field(
+        default=None, description="Certification route stated by the KB record — reported, never a rule."
+    )
+    source_document: str | None = None
+    source_url: str | None = None
     verified_requirements: int
     deterministic_rules: int
     unsupported_requirements: int
-    inspection_status: str
+    requirement_ids: list[str]
+    coverage_status: str = Field(description='"INSPECTION_SUPPORTED" | "STANDARD_ONLY" | "UNSUPPORTED"')
+    reason: str
+
+
+class CoverageTotalsOut(BaseModel):
+    total: int
+    inspection_supported: int
+    standard_only: int
+    unsupported: int
 
 
 class CoverageMatrixOut(BaseModel):
     """What MetrIQ can currently inspect, derived from the verified data — not a compliance result."""
 
+    totals: CoverageTotalsOut
     standards: list[StandardCoverageOut]
     rows: list[CoverageRowOut]
     errors: list[str] = Field(default_factory=list, description="Requirement data rejected by the loader.")
@@ -424,7 +440,7 @@ class ComplianceOut(BaseModel):
 
     overall_status: str = Field(description='"PASS" | "FAIL" | "REVIEW"')
     coverage_status: str = Field(
-        description='"SUPPORTED_FOR_INSPECTION" | "STANDARD_ONLY" | "NO_STANDARD"'
+        description='"INSPECTION_SUPPORTED" | "STANDARD_ONLY" | "UNSUPPORTED" | "NO_STANDARD"'
     )
     reason_code: str
     reason: str

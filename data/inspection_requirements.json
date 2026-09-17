@@ -1,5 +1,5 @@
 {
-  "_comment": "Inspection coverage data used by the deterministic compliance engine (backend/app/requirements.py, backend/app/compliance.py). PRODUCT -> STANDARD -> REQUIREMENT -> RULE -> EVIDENCE. Every product -> standard link and every requirement must quote, word for word, a sentence from a VERIFIED record in data/knowledge/, and name standard numbers that exist in data/knowledge/indian_standards.json. Product aliases must be phrases of that standard record's title or keywords. applies_to_products limits a requirement to some products; without it a requirement applies to every product under its standards. rule_type is either a rule the engine implements or \"not_supported\" (a verified requirement that cannot be checked from a package image; it is shown, never scored). The loader rejects anything else. Do not add a product, link or requirement that is not stated in the knowledge base. Print the resulting coverage matrix with backend/scripts/check_knowledge.py (or GET /inspection/coverage).",
+  "_comment": "Inspection coverage data used by the deterministic compliance engine (backend/app/requirements.py, backend/app/compliance.py). PRODUCT -> STANDARD -> REQUIREMENT -> RULE -> EVIDENCE. Every product -> standard link and every requirement must quote, word for word, a sentence from a VERIFIED record in data/knowledge/, and name standard numbers that exist in data/knowledge/indian_standards.json. Product aliases must be phrases of that standard record's title or keywords. applies_to_products limits a requirement to some products; without it a requirement applies to every product under its standards. rule_type is either a rule the engine implements or \"not_supported\" (a verified requirement that cannot be checked from a package image; it is shown, never scored). domain is PACKAGE_LABEL for package inspection; a PACKAGE_LABEL requirement or product link may not use jewellery hallmarking records, standards or hallmark/HUID quotes. The loader rejects anything else. Do not add a product, link or requirement that is not stated in the knowledge base. Print the resulting coverage matrix with backend/scripts/check_knowledge.py (or GET /inspection/coverage).",
   "products": [
     {
       "id": "packaged-drinking-water",
@@ -47,6 +47,7 @@
   "requirements": [
     {
       "id": "packaged-water-label-shows-is-number",
+      "domain": "PACKAGE_LABEL",
       "applies_to": ["IS 14543:2016", "IS 13428:2005"],
       "applies_to_products": ["packaged-drinking-water", "packaged-natural-mineral-water"],
       "description": "The package shows the IS number of its Indian Standard (IS 14543 or IS 13428) with the BIS Certification Mark.",
@@ -61,6 +62,7 @@
     },
     {
       "id": "packaged-water-bis-certification-mark",
+      "domain": "PACKAGE_LABEL",
       "applies_to": ["IS 14543:2016", "IS 13428:2005"],
       "applies_to_products": ["packaged-drinking-water", "packaged-natural-mineral-water"],
       "description": "The product is manufactured and sold under the BIS Certification Mark (ISI Mark).",
@@ -71,6 +73,7 @@
     },
     {
       "id": "packaged-drinking-water-quality-limits",
+      "domain": "PACKAGE_LABEL",
       "applies_to": ["IS 14543:2016"],
       "applies_to_products": ["packaged-drinking-water"],
       "description": "The water meets the physical, microbiological, chemical, pesticide and radioactive residue limits of IS 14543.",
@@ -81,6 +84,7 @@
     },
     {
       "id": "led-lamp-crs-registration",
+      "domain": "PACKAGE_LABEL",
       "applies_to": ["IS 16102 (Part 1)"],
       "applies_to_products": ["self-ballasted-led-lamp"],
       "description": "The LED lamp is registered with BIS under the Compulsory Registration Scheme (Scheme II) before it is sold.",
