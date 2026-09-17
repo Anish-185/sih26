@@ -15,9 +15,10 @@ Two things are stored side by side and never mixed:
   ``officer_decision``, ``officer_result`` (only for an override), ``officer_note``
   and the review timestamps.
 
-Combined system result (``combine_results``): FAIL if the BIS or the Legal
-Metrology result is FAIL; PASS only if both are PASS; otherwise REVIEW. Both
-underlying results are kept, so the combination never hides which one decided.
+Combined system result (``app.escalation.system_result``): FAIL if any applicable
+evidence system (BIS, Legal Metrology, hallmarking) FAILs; PASS only if all PASS;
+otherwise REVIEW. Every underlying result is kept, so the combination never hides
+which one decided.
 
 Escalation and review workflow (``OFFICER_TRANSITIONS``):
 
@@ -150,21 +151,19 @@ class InspectionImage(Base):
 # ------------------------------------------------------------------ system result
 
 
-def combine_results(bis: str, legal_metrology: str) -> str:
-    if "FAIL" in (bis, legal_metrology):
-        return "FAIL"
-    if bis == "PASS" and legal_metrology == "PASS":
-        return "PASS"
-    return "REVIEW"
-
-
 def system_reasons(analysis) -> list[dict]:
-    """One reason per evidence system, from the deterministic results — never written by a client."""
+    """One reason per evidence system, from the deterministic results — never written by a client.
+    Legal Metrology is listed even when not applied (its reason says so); hallmarking when evaluated."""
     bis, lm = analysis.compliance, analysis.package_label
-    return [
+    out = [
         {"source": "BIS", "result": bis.overall_status, "reason_code": bis.reason_code, "reason": bis.reason},
         {"source": "LEGAL_METROLOGY", "result": lm.overall_status, "reason_code": lm.reason_code, "reason": lm.reason},
     ]
+    h = analysis.hallmark
+    if h is not None and (h.detected or analysis.inspection_type == "HALLMARK"):
+        out.append({"source": "HALLMARKING", "result": h.overall_status, "reason_code": h.reason_code,
+                    "reason": h.reason})
+    return out
 
 
 def create_inspection(session: Session, analysis, uploads) -> InspectionRecord:
@@ -182,7 +181,7 @@ def create_inspection(session: Session, analysis, uploads) -> InspectionRecord:
         standard_number=product.standard_number if product.status == "MATCHED" else None,
         bis_result=bis,
         legal_metrology_result=lm,
-        system_result=combine_results(bis, lm),
+        system_result=escalation["system_result"],
         system_reasons=system_reasons(analysis),
         sides=[img.side for img in analysis.images],
         analysis=data,

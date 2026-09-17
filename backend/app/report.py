@@ -94,7 +94,7 @@ DECISIONS = {
     "MANUAL_REVIEW": "Manual review",
 }
 CHECK_RESULT = {"NOT_SUPPORTED": "UNSUPPORTED", "NOT_APPLICABLE": "NOT APPLICABLE"}
-AUTHORITY = {"BIS": "BIS", "LEGAL_METROLOGY": "Legal Metrology"}
+AUTHORITY = {"BIS": "BIS", "LEGAL_METROLOGY": "Legal Metrology", "HALLMARKING": "Hallmarking"}
 REASON_SOURCE = {**AUTHORITY, "OCR": "OCR evidence", "PRODUCT": "Product", "PIPELINE": "Pipeline"}
 
 
@@ -154,6 +154,7 @@ class _Doc:
 
     def __init__(self):
         self.s = _styles()
+        self.number = 1  # the header is section 01
 
     def p(self, text: str, style: str = "body") -> Paragraph:
         return Paragraph(text, self.s[style])
@@ -163,7 +164,9 @@ class _Doc:
         return [CondPageBreak(35 * mm), self.p(text, "h3")]
 
     def section(self, number: int, title: str, lead: str | None = None, room: float = 45 * mm) -> list:
-        head = Table([[self.p(f"{number:02d}", "eyebrow"), self.p(_t(title), "h2")]],
+        """``number`` is ignored: sections are numbered in the order they are added."""
+        self.number += 1
+        head = Table([[self.p(f"{self.number:02d}", "eyebrow"), self.p(_t(title), "h2")]],
                      colWidths=[12 * mm, CONTENT_W - 12 * mm])
         head.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "BOTTOM"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
@@ -498,6 +501,8 @@ def _bis(d: _Doc, rec: dict, an: dict) -> list:
 
 def _legal_metrology(d: _Doc, an: dict) -> list:
     pl = an["package_label"]
+    if pl.get("scope_status") == "NOT_APPLIED":
+        return d.section(7, "Legal Metrology evidence") + [d.callout(_t(pl["reason"]))]
     out = d.section(7, "Legal Metrology evidence", f"Source authority: {_t(pl['source_authority'])}. These are "
                     "package-label requirements of the Legal Metrology (Packaged Commodities) Rules, 2011 as "
                     "amended — not BIS requirements — and are reported separately from BIS.")
@@ -548,6 +553,72 @@ def _legal_metrology(d: _Doc, an: dict) -> list:
     return out
 
 
+def _hallmark_shown(an: dict) -> bool:
+    h = an.get("hallmark")
+    return bool(h) and bool(h.get("detected") or an.get("inspection_type") == "HALLMARK" or h.get("untrusted_claims"))
+
+
+def _hallmark(d: _Doc, an: dict) -> list:
+    """Hallmark evidence: what was OBSERVED, kept apart from VERIFICATION (never established)."""
+    if not _hallmark_shown(an):
+        return []
+    h = an["hallmark"]
+    huid, purity = h["huid"], h["purity"]
+    out = d.section(0, "Hallmarking evidence", "Hallmark marks read from the photos by OCR. Observing a potential "
+                    "HUID is not authenticating it: MetrIQ has no authoritative HUID verification.")
+    sides = {r["id"]: r.get("side", "UNKNOWN") for r in an["ocr"]["regions"]}
+
+    def where(obs: list) -> str:
+        return _t(_where([r for o in obs for r in o["source_regions"]], sides))
+
+    huid_text = {"DETECTED": "Potential HUID detected", "MULTIPLE": "Multiple potential HUID values detected",
+                 "UNCERTAIN": "Potential HUID detected — uncertain", "NOT_DETECTED": "No potential HUID read"}
+    conf = ", ".join(_pct(o["ocr_confidence"]) for o in huid.get("candidates", [])) or "—"
+    observed = d.definitions([
+        ("Potential HUID", f"{_t(huid_text.get(huid['status'], huid['status']))}"
+         + (f": <font name='Mono'>{_t(huid['value'])}</font>" if huid.get("value") else "")),
+        ("HUID OCR", "<br/>".join(f"“{_t(o['raw_text'])}” <font name='Mono' color='#8b8e94'>"
+                                  f"{_t(o['source_regions'][0])} · {_pct(o['ocr_confidence'])}</font>"
+                                  for o in huid.get("candidates", [])) or "—"),
+        ("HUID confidence", _t(conf)),
+        ("HUID source", where(huid.get("candidates", []))),
+        ("Purity / fineness", _t(purity["reason"])),
+        ("BIS text", "The letters 'BIS' were read (the BIS logo itself is a graphic OCR cannot establish)."
+         if h.get("bis_text") else "Not read."),
+    ])
+    verification = d.definitions([
+        ("Verification status", d.badge(None, _t(h["verification_status"]).replace("_", " "))),
+        ("Reason", _t(h["verification_note"])),
+    ])
+    out += [d.p("OBSERVED FROM THE IMAGE", "kicker"), observed, Spacer(1, 3 * mm),
+            d.p("VERIFICATION", "kicker"), verification]
+    if h.get("untrusted_claims"):
+        out += [Spacer(1, 3 * mm), d.callout(
+            "Text printed on the item or package claims verification: "
+            + "; ".join(f"“{_t(c['raw_text'])}” ({_t(c['source_regions'][0])})" for c in h["untrusted_claims"])
+            + ". Printed text is untrusted OCR evidence and verifies nothing.", "REVIEW")]
+    rows = []
+    for c in h.get("checks", []):
+        label = CHECK_RESULT.get(c["result"], c["result"])
+        src = c.get("source") or {}
+        rows.append([
+            _t(c["requirement"]),
+            d.badge(c["result"] if c["result"] in RESULT_COLORS else None, label),
+            (_t(c["observed_value"]) if c.get("observed_value") else "—")
+            + (f"<br/><font name='Mono' color='#8b8e94'>{_t(', '.join(c['source_regions']))}</font>"
+               if c.get("source_regions") else ""),
+            f"{_t(c['reason'])}<br/><font name='Mono' color='#8b8e94'>{_t(c['reason_code'])}"
+            f"{' · ' + _t(src.get('title')) if src else ''}</font>",
+        ])
+    if rows:
+        out += d.h3("Hallmark checks (deterministic, from the verified BIS Hallmarking FAQ)")
+        out.append(d.table(["Check", "Result", "Observed", "Reason / source"], rows,
+                           [48 * mm, 30 * mm, 30 * mm, CONTENT_W - 108 * mm]))
+    out += [Spacer(1, 2 * mm), d.definitions([("Hallmarking result", d.badge(h["overall_status"])),
+                                              ("Why", _t(h["reason"]))])]
+    return out
+
+
 def _compliance(d: _Doc, an: dict) -> list:
     out = d.section(8, "Compliance results", "Each row is one deterministic rule applied to the stored OCR evidence "
                     "and a verified requirement. No language model produced or changed these results. UNSUPPORTED "
@@ -576,8 +647,8 @@ def _system_result(d: _Doc, rec: dict, an: dict) -> list:
     out = d.section(9, "Automated system result")
     out.append(d.definitions([
         ("System result", d.badge(rec["system_result"])),
-        ("How it is combined", "FAIL if the BIS or the Legal Metrology result is FAIL; PASS only if both are PASS; "
-                               "otherwise REVIEW."),
+        ("How it is combined", "FAIL if any applicable evidence system (BIS, Legal Metrology, hallmarking) is FAIL; "
+                               "PASS only if all are PASS; otherwise REVIEW."),
         *[(f"{AUTHORITY[r['source']]} result",
            [d.badge(r["result"]), Spacer(1, 1 * mm), d.p(_t(r["reason"]), "cell"),
             d.p(_t(r["reason_code"]), "kicker")]) for r in rec["system_reasons"]],
@@ -596,6 +667,12 @@ def _system_result(d: _Doc, rec: dict, an: dict) -> list:
     conflicts = [f["label"] for f in fields if f.get("consistency") == "CONFLICT"]
     unsupported = [(c.get("reference") or c["requirement"]).rstrip(".") for ev in (an["compliance"], an["package_label"])
                    for c in ev["checks"] if c["result"] == "NOT_SUPPORTED"]
+    if _hallmark_shown(an):
+        h = an["hallmark"]
+        unresolved += [f"Hallmark {k}" for k in ("HUID", "purity") if h["huid" if k == "HUID" else "purity"]["status"]
+                       in ("UNCERTAIN", "MULTIPLE")]
+        conflicts += ["Hallmark purity"] if h["purity"]["status"] == "CONFLICT" else []
+        unsupported += [c["requirement"].rstrip(".") for c in h["checks"] if c["result"] == "NOT_SUPPORTED"]
     out += [Spacer(1, 3 * mm), d.definitions([
         ("Uncertain declarations", _t(", ".join(unresolved)) or "None"),
         ("Conflicting declarations", _t(", ".join(conflicts)) or "None"),
@@ -670,7 +747,12 @@ def _sources(d: _Doc, rec: dict, an: dict) -> list:
     bis_checks = [s for c in an["compliance"]["checks"] for s in [c.get("source"), *c.get("supporting_sources", [])]]
     lm = [an["package_label"].get("scope_source")] + [
         s for c in an["package_label"]["checks"] for s in [c.get("source"), *c.get("supporting_sources", [])]]
-    for title, items in (("BIS", collect(bis + bis_checks)), ("Legal Metrology", collect(lm))):
+    hallmark_sources = an["hallmark"].get("sources", []) if _hallmark_shown(an) else []
+    hallmark_sources = [{**s, "reference": None} for s in hallmark_sources]
+    groups = [("BIS", collect(bis + bis_checks)), ("Legal Metrology", collect(lm))]
+    if hallmark_sources:
+        groups.append(("BIS Hallmarking", collect(hallmark_sources)))
+    for title, items in groups:
         out += d.h3(title)
         out += items or [d.p("No source of this authority is stored for this inspection.", "soft")]
     out += d.h3("OCR / package evidence")
@@ -714,6 +796,7 @@ def build_story(record: dict, images: dict[int, bytes], generated_at: datetime) 
     story += _declarations(d, an)
     story += _bis(d, record, an)
     story += _legal_metrology(d, an)
+    story += _hallmark(d, an)
     story += _compliance(d, an)
     story += _system_result(d, record, an)
     story += _officer(d, record)

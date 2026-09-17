@@ -424,6 +424,31 @@ stored with the evidence. All stored text is XML-escaped. Endpoint `GET /inspect
 PASS / FAIL / REVIEW, officer states, honesty, multi-side, escaping, stored-only URLs, endpoint read-only
 with no LLM / recompute calls).
 
+Milestone 12 (hallmark / HUID workflow): `app/hallmark.py` `evaluate_hallmark(regions, knowledge_items,
+force)` — deterministic, never authenticates. Extracts a potential HUID (labelled six-character alphanumeric
+code; low confidence / wrong length / unlabelled → UNCERTAIN, several → MULTIPLE, none selected; prose after
+the word HUID such as "HUID VERIFIED" is never a value), purity (gold `22K916`-style pairs checked against the
+verified IS 1417 grades, caratage-fineness mismatch or two marks → CONFLICT; silver only with silver context,
+IS 2112 grades), "BIS" text, hallmark wording, and untrusted claims (verified / authentic / genuine / confirmed
+… printed text — recorded, changes nothing). Every observation keeps region / image / side / bbox /
+confidence / method. Checks quote verified records word for word: HALLMARK_HUID_OBSERVED (PASS = observed, not
+verified), HALLMARK_PURITY_GRADE, HALLMARK_BIS_LOGO (NOT_SUPPORTED, graphic), HUID_AUTHENTICITY (NOT_SUPPORTED,
+external authoritative verification required). No FAIL; `verification_status` NOT_VERIFIED / NOT_DETECTED
+only; hallmark `overall_status` always REVIEW. Knowledge: `gold-purity-grades-for-hallmarking` and
+`what-is-huid` now quote the BIS Hallmarking FAQ verbatim (re-verified 2026-09-17, the FAQ prints "24KS(995)"),
+new verified `silver-purity-grades-for-hallmarking`. `InspectionAnalysisOut` gains `inspection_type`
+(PACKAGE | HALLMARK, form field on `/inspection/analyze` and `POST /inspections`) and `hallmark`; a HALLMARK
+inspection reports Legal Metrology as `scope_status` NOT_APPLIED (reason_code NOT_A_PACKAGE_INSPECTION).
+`app.escalation.system_result` combines every applicable evidence system (BIS, Legal Metrology unless not
+applied, hallmarking when detected or a hallmark inspection); `system_reasons` gains HALLMARKING. Escalation
+uses the structured evidence ("Potential HUID X detected, but authenticity cannot be established from the
+uploaded image"), untrusted claims add a reason, a hallmarking standard still escalates. No DB migration.
+Report: numbered sections, "Hallmarking evidence" (observed vs verification, checks, untrusted claims), Legal
+Metrology "not applied", BIS Hallmarking sources. Frontend: `HallmarkEvidence.tsx` panel (OBSERVED FROM THE
+IMAGE | VERIFICATION STATUS) in the workspace; Hallmarking page gains "Inspect a hallmark photo" (analyse, save
+to officer review, HUID reference field = text comparison only). Sample `synth_hallmark-closeup.png`. Tests:
+`test_hallmark_inspection.py` (58).
+
 Only implement the current milestone. Do not start a new phase without being asked.
 
 ## Repository layout
@@ -458,6 +483,7 @@ sih26/
       records_api.py   # Milestone 9: /inspections save, list, stats, detail, stored photos, review
       escalation.py    # Milestone 10: deterministic resolve-or-escalate decision + evidence-linked reasons
       report.py        # Milestone 11: evidence-backed PDF report from the stored record (read-only)
+      hallmark.py      # Milestone 12: hallmark / HUID evidence + checks — observed, never authenticated
       report_fonts/    # Noto Sans TTFs (SIL OFL 1.1) used by the PDF report
       knowledge/       # knowledge-base schema + loader
         schema.py      # KnowledgeItem pydantic model + validation rules
@@ -493,6 +519,7 @@ sih26/
       test_inspection_records.py # Milestone 9/10: migrations, persistence, escalation states, officer review, stats (PostgreSQL)
       test_escalation.py   # Milestone 10: every escalation reason, resolve-or-escalate decision, determinism
       test_report.py       # Milestone 11: PDF report content, honesty, escaping, read-only endpoint (PostgreSQL)
+      test_hallmark_inspection.py # Milestone 12: HUID / purity extraction, untrusted text, escalation, report
       test_pipeline.py     # OCR -> standard candidates end-to-end + stage degradation
       test_plain_runners.py # pytest bridge — runs every runner, makes pytest authoritative
       fixtures/broken_kb/  # deliberately invalid KB for the loader tests

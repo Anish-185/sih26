@@ -470,6 +470,7 @@ export interface PipelineStages {
   compliance: string;
   officer_review: string;
   package_label: string;
+  hallmark: string;
 }
 
 export interface InspectionImage {
@@ -540,11 +541,79 @@ export interface InstantOcr {
   notes: string[];
 }
 
+/* ---------------------------------------------- hallmark evidence --- */
+
+/** Hallmark evidence read by OCR — untrusted text, linked to its region. Never an authentication. */
+export interface HallmarkObservation {
+  kind: "HUID" | "PURITY" | "BIS_TEXT" | "HALLMARK_TEXT" | "UNTRUSTED_CLAIM";
+  value: string | null;
+  raw_text: string;
+  source_regions: string[];
+  image_id: string | null;
+  side: PackageSide | null;
+  bbox: [number, number, number, number] | null;
+  ocr_confidence: number;
+  method: string;
+  status: "DETECTED" | "UNCERTAIN";
+  note: string;
+}
+
+export interface HallmarkSource {
+  knowledge_id: string;
+  title: string;
+  quote: string;
+  source_url: string | null;
+  document_name: string | null;
+  last_verified: string | null;
+}
+
+export interface HallmarkCheck {
+  rule_id: string;
+  requirement: string;
+  result: "PASS" | "REVIEW" | "NOT_SUPPORTED"; // never FAIL, never "verified"
+  reason_code: string;
+  reason: string;
+  observed_value: string | null;
+  source_regions: string[];
+  source: HallmarkSource | null;
+}
+
+export interface HallmarkEvidence {
+  detected: boolean;
+  verification_status: "NOT_VERIFIED" | "NOT_DETECTED"; // there is no VERIFIED state
+  verification_note: string;
+  overall_status: "PASS" | "FAIL" | "REVIEW";
+  reason_code: string;
+  reason: string;
+  huid: {
+    status: "DETECTED" | "UNCERTAIN" | "MULTIPLE" | "NOT_DETECTED";
+    value: string | null; // the potential HUID as read, only when exactly one clear candidate exists
+    candidates: HallmarkObservation[];
+    reason: string;
+  };
+  purity: {
+    status: "DETECTED" | "UNCERTAIN" | "CONFLICT" | "NOT_DETECTED";
+    metal: "GOLD" | "SILVER" | null;
+    caratage: string | null;
+    fineness: string | null;
+    permitted_grade: boolean | null;
+    candidates: HallmarkObservation[];
+    reason: string;
+  };
+  bis_text: HallmarkObservation[];
+  hallmark_text: HallmarkObservation[];
+  untrusted_claims: HallmarkObservation[];
+  checks: HallmarkCheck[];
+  sources: HallmarkSource[];
+}
+
+export type InspectionType = "PACKAGE" | "HALLMARK";
+
 /** One reason the automated system could not resolve an inspection by itself. */
 export interface EscalationReason {
   code: string; // e.g. PRODUCT_NOT_IDENTIFIED, CONFLICTING_DECLARATIONS
   label: string;
-  source: "OCR" | "PRODUCT" | "BIS" | "LEGAL_METROLOGY" | "PIPELINE";
+  source: "OCR" | "PRODUCT" | "BIS" | "LEGAL_METROLOGY" | "HALLMARKING" | "PIPELINE";
   message: string;
   source_regions: string[];
   checks: string[];
@@ -575,6 +644,8 @@ export interface InspectionAnalysis {
   pipeline: PipelineStages;
   notes: string[];
   escalation: Escalation | null; // null only for inspections saved before escalation existed
+  inspection_type: InspectionType;
+  hallmark: HallmarkEvidence | null; // observed hallmark / HUID evidence — never an authentication
 }
 
 /* ------------------------------------------------ saved inspections --- */
@@ -608,7 +679,7 @@ export interface InspectionSummary {
 }
 
 export interface InspectionRecord extends InspectionSummary {
-  system_reasons: { source: SourceAuthority; result: SystemResult; reason_code: string; reason: string }[];
+  system_reasons: { source: SourceAuthority | "HALLMARKING"; result: SystemResult; reason_code: string; reason: string }[];
   officer_note: string | null;
   images: { index: number; image_id: string; side: PackageSide; filename: string; content_type: string; url: string }[];
   analysis: InspectionAnalysis; // the saved deterministic analysis and its evidence
@@ -634,8 +705,9 @@ export const inspectionReportUrl = (id: string) => `${API_BASE}/inspections/${en
 /** Absolute URL of a stored package photo (the API returns a path). */
 export const inspectionImageUrl = (path: string) => `${API_BASE}${path}`;
 
-function packageForm(uploads: PackageUploadInput[]): FormData {
+function packageForm(uploads: PackageUploadInput[], inspectionType: InspectionType = "PACKAGE"): FormData {
   const form = new FormData();
+  if (inspectionType !== "PACKAGE") form.append("inspection_type", inspectionType);
   for (const u of uploads) {
     form.append("images", u.file);
     form.append("sides", u.side);
@@ -686,18 +758,18 @@ export const api = {
     ),
 
   // Smart Inspection: OCR + declarations + product + standards + compliance.
-  analyzeInspection: (uploads: PackageUploadInput[]) =>
+  analyzeInspection: (uploads: PackageUploadInput[], inspectionType: InspectionType = "PACKAGE") =>
     request<InspectionAnalysis>(
       "/inspection/analyze",
-      { method: "POST", body: packageForm(uploads) },
+      { method: "POST", body: packageForm(uploads, inspectionType) },
       60_000 + 60_000 * uploads.length,
     ),
 
   // Save: the backend re-runs the analysis on these photos and stores it for officer review.
-  saveInspection: (uploads: PackageUploadInput[]) =>
+  saveInspection: (uploads: PackageUploadInput[], inspectionType: InspectionType = "PACKAGE") =>
     request<InspectionRecord>(
       "/inspections",
-      { method: "POST", body: packageForm(uploads) },
+      { method: "POST", body: packageForm(uploads, inspectionType) },
       60_000 + 60_000 * uploads.length,
     ),
 

@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field
 from app.api import ReasonOut, WhyOut
 from app.declarations import extract_declarations, has_reliable_text
 from app.escalation import assess as assess_escalation
+from app.hallmark import HallmarkOut, evaluate_hallmark
 from app.llm import LocalLLM
 from app.product import ProductStandardFinder
 from app.product_identification import RETRIEVAL_NOTE, product_name_of
@@ -580,6 +581,10 @@ class PipelineStagesOut(BaseModel):
     compliance: str = "REVIEW"
     officer_review: str = "PENDING"
     package_label: str = "REVIEW"
+    hallmark: str = Field(default="NOT_DETECTED", description='"REVIEW" when hallmark evidence is evaluated')
+
+
+INSPECTION_TYPES = ("PACKAGE", "HALLMARK")
 
 
 class EscalationReasonOut(BaseModel):
@@ -618,6 +623,10 @@ class InspectionAnalysisOut(BaseModel):
     completeness: CompletenessOut
     pipeline: PipelineStagesOut
     notes: list[str] = Field(default_factory=list)
+    inspection_type: str = Field(default="PACKAGE", description='"PACKAGE" | "HALLMARK" (jewellery hallmark photo)')
+    hallmark: HallmarkOut | None = Field(
+        default=None, description="Hallmark / HUID evidence observed in the photos — never an authentication."
+    )
     escalation: EscalationOut | None = Field(
         default=None, description="Whether this inspection needs officer review, and why (null only for records "
         "saved before escalation existed)."
@@ -741,7 +750,7 @@ class InspectionAnalyzer:
             notes=notes,
         )
 
-    def analyze_package(self, uploads: list[PackageUpload]) -> InspectionAnalysisOut:
+    def analyze_package(self, uploads: list[PackageUpload], inspection_type: str = "PACKAGE") -> InspectionAnalysisOut:
         """Smart Inspection of one package: Instant OCR of every image, then the
         downstream pipeline (declarations -> product -> standards -> compliance)
         over the combined evidence."""
@@ -757,7 +766,8 @@ class InspectionAnalyzer:
         unreadable = gaps if len(evidence.images) > 1 else []
 
         try:
-            downstream = run_downstream(regions, self._llm, self._product_finder, unreadable_images=unreadable)
+            downstream = run_downstream(regions, self._llm, self._product_finder, unreadable_images=unreadable,
+                                        inspection_type=inspection_type)
             declaration_stage, product, standards, compliance, package_label, completeness, pipeline = (
                 _declaration_stage_out(downstream.declaration_stage),
                 _product_out(downstream.product),
@@ -810,7 +820,19 @@ class InspectionAnalyzer:
             completeness=completeness,
             pipeline=pipeline,
             notes=notes,
+            inspection_type=inspection_type,
         )
+        # Hallmark evidence is read from the OCR regions on its own, so a downstream failure cannot hide it.
+        try:
+            from app.api import get_product_finder
+
+            finder = self._product_finder or get_product_finder()
+            analysis.hallmark = evaluate_hallmark(regions, finder.search_engine.items,
+                                                  force=inspection_type == "HALLMARK")
+        except Exception as exc:  # noqa: BLE001
+            analysis.notes.append(f"Hallmark evidence extraction failed: {exc}")
+        if analysis.hallmark is not None and (analysis.hallmark.detected or inspection_type == "HALLMARK"):
+            analysis.pipeline.hallmark = analysis.hallmark.overall_status
         # Escalation reads the finished analysis, so it can never disagree with what is shown.
         try:
             analysis.escalation = EscalationOut(**assess_escalation(analysis.model_dump(mode="json")))

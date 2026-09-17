@@ -247,7 +247,7 @@ def test_search_api() -> None:
     check("API result carries source_url", bool(first.source_url))
     check("API result carries verification_status", first.verification_status == "verified")
     check("API result carries reasons", len(first.reasons) >= 1)
-    check("API result carries last_verified as ISO string", first.last_verified == "2026-09-07")
+    check("API result carries last_verified as ISO string", first.last_verified == "2026-09-17")
 
     posted = search_post(SearchRequest(query="IS 1786:2008"))
     check("POST /search standard-number query works", posted.results and posted.results[0].id.startswith("is-1786"))

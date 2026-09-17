@@ -76,6 +76,24 @@ def _review_package_label(note: str) -> PackageLabelEvaluation:
     )
 
 
+class _NotApplied(Exception):
+    pass
+
+
+NOT_APPLIED = "NOT_APPLIED"
+
+
+def _not_applied_package_label() -> PackageLabelEvaluation:
+    reason = ("Hallmark inspection: the Legal Metrology (Packaged Commodities) Rules apply to pre-packaged "
+              "commodities, so their package-label requirements were not applied to this jewellery hallmark photo.")
+    return PackageLabelEvaluation(
+        source_category="LEGAL_METROLOGY", source_authority="Legal Metrology (Department of Consumer Affairs)",
+        overall_status=REVIEW, reason_code="NOT_A_PACKAGE_INSPECTION", reason=reason, scope_status=NOT_APPLIED,
+        scope="", scope_source=None, exclusions_found=[], assumptions=[], assumption_sources=[], checks=[],
+        summary=[reason],
+    )
+
+
 def _review_compliance(note: str) -> ComplianceEvaluation:
     return ComplianceEvaluation(
         overall_status=REVIEW, coverage_status="NO_STANDARD", reason_code="ENGINE_ERROR",
@@ -89,8 +107,11 @@ def run_downstream(
     finder: ProductStandardFinder | None = None,
     requirements: RequirementSet | None = None,
     unreadable_images: list[str] | tuple = (),
+    inspection_type: str = "PACKAGE",
 ) -> DownstreamResult:
-    """``unreadable_images`` labels photos of this package that gave no usable OCR."""
+    """``unreadable_images`` labels photos of this package that gave no usable OCR.
+    ``inspection_type`` HALLMARK (a jewellery hallmark photo) does not apply the Legal Metrology
+    packaged-commodity rules: they are reported as not applied, never evaluated."""
     notes: list[str] = []
 
     # 1) declaration extraction ------------------------------------------
@@ -124,10 +145,14 @@ def run_downstream(
     # 4) Legal Metrology package-label requirements — independent of the BIS
     #    standard, applicability decided from the package evidence --------------
     try:
+        if inspection_type == "HALLMARK":
+            raise _NotApplied
         package_label = evaluate_package_label(
             decl, regions, requirements if requirements is not None else RequirementSet((), ()),
             finder.search_engine.items if finder is not None else [], unreadable_images,
         )
+    except _NotApplied:
+        package_label = _not_applied_package_label()
     except Exception as exc:  # noqa: BLE001
         package_label = _review_package_label(f"Package-label evaluation failed: {exc}")
         notes.append(str(exc))

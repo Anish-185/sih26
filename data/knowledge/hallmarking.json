@@ -33,31 +33,43 @@
     "source_url": "https://www.bis.gov.in/hallmarking-overview/hallmarking-faqs/hallmarking-faq/?lang=en",
     "document_name": "BIS: Hallmarking FAQ",
     "verification_status": "verified",
-    "last_verified": "2026-09-07"
+    "last_verified": "2026-09-17"
   },
   {
     "id": "what-is-huid",
     "title": "What HUID means",
     "category": "hallmarking",
-    "content": "HUID stands for Hallmark Unique Identification. According to the BIS Hallmarking FAQ it is a six-digit alphanumeric code that is unique to each hallmarked article and allows the article to be traced. A consumer can check it using the BIS Care App.",
+    "content": "HUID stands for Hallmark Unique Identification. The BIS Hallmarking FAQ states: \"It is a six-digit alphanumeric number which is unique for each hallmarked item and is traceable. Customer can also verify the HUID number in the BIS Care App using the 'Verify HUID' feature.\"",
     "keywords": ["huid", "hallmark unique identification", "six digit", "traceability", "bis care app"],
     "source_organization": "Bureau of Indian Standards (BIS)",
     "source_url": "https://www.bis.gov.in/hallmarking-overview/hallmarking-faqs/hallmarking-faq/?lang=en",
     "document_name": "BIS: Hallmarking FAQ",
     "verification_status": "verified",
-    "last_verified": "2026-09-07"
+    "last_verified": "2026-09-17"
   },
   {
     "id": "gold-purity-grades-for-hallmarking",
     "title": "Gold purity grades permitted for hallmarking",
     "category": "hallmarking",
-    "content": "The BIS Hallmarking FAQ lists the permitted gold caratages for hallmarking as 14K (585), 18K (750), 20K (833), 22K (916), 23K (958) and 24K (995) parts-per-thousand fineness.",
+    "content": "The BIS Hallmarking FAQ states: \"IS 1417:2016 permits hallmarking of six caratage (fineness in ppt) of gold jewellery/artefacts, viz. 14K(585), 18K(750), 20K(833), 22K(916), 23K(958) and 24KS(995).\" (The FAQ prints the last grade as 24KS.) So the permitted gold caratages for hallmarking are 14K (585), 18K (750), 20K (833), 22K (916), 23K (958) and 24K (995) parts-per-thousand fineness.",
     "keywords": ["gold purity", "caratage", "fineness", "22k", "18k", "14k", "916"],
     "source_organization": "Bureau of Indian Standards (BIS)",
     "source_url": "https://www.bis.gov.in/hallmarking-overview/hallmarking-faqs/hallmarking-faq/?lang=en",
     "document_name": "BIS: Hallmarking FAQ",
     "verification_status": "verified",
-    "last_verified": "2026-09-07"
+    "last_verified": "2026-09-17"
+  },
+  {
+    "id": "silver-purity-grades-for-hallmarking",
+    "title": "Silver purity grades permitted for hallmarking",
+    "category": "hallmarking",
+    "content": "The BIS Hallmarking FAQ states: \"IS 2112 : 2014 permits hallmarking of of six grades(fineness in ppt) of silver jewellery/artefacts, viz. 800(800.0), 835(835.0), 900(900.0), 925(925.0), 970(970.0) and 990(990.0)\" (quoted as printed).",
+    "keywords": ["silver", "purity", "fineness", "hallmarking", "IS 2112", "grades"],
+    "source_organization": "Bureau of Indian Standards (BIS)",
+    "source_url": "https://www.bis.gov.in/hallmarking-overview/hallmarking-faqs/hallmarking-faq/?lang=en",
+    "document_name": "BIS: Hallmarking FAQ",
+    "verification_status": "verified",
+    "last_verified": "2026-09-17"
   },
   {
     "id": "hallmarking-charges",

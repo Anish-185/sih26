@@ -31,7 +31,11 @@ import { Workspace } from "./inspection/InspectionView";
 import { DECISION_LABEL, EscalationPanel, OFFICER_STATUS_LABEL, OfficerStatusMark, productLabel } from "./records";
 
 const NOTE_MAX = 2000;
-const AUTHORITY: Record<string, string> = { BIS: "BIS compliance", LEGAL_METROLOGY: "Legal Metrology package label" };
+const AUTHORITY: Record<string, string> = {
+  BIS: "BIS compliance",
+  LEGAL_METROLOGY: "Legal Metrology package label",
+  HALLMARKING: "Hallmarking (not verified)",
+};
 
 /** A saved inspection: the fixed system result, its evidence, and the officer review. */
 export function ReviewView() {
@@ -170,7 +174,7 @@ function SystemResultPanel({ record }: { record: InspectionRecord }) {
         <DefinitionRow label="Overall">
           <StatusBadge status={record.system_result} />
           <p className="mt-1.5 text-[12px] leading-relaxed text-ink-soft">
-            FAIL if either evidence system failed; PASS only if both passed; otherwise REVIEW.
+            FAIL if any applicable evidence system failed; PASS only if all passed; otherwise REVIEW.
           </p>
         </DefinitionRow>
         {record.system_reasons.map((r) => (

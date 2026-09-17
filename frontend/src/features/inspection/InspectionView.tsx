@@ -47,6 +47,7 @@ import {
 } from "@/components/decor";
 import { PackageImages, RegionSides, regionSides, useWhere } from "./PackageImages";
 import { EscalationPanel } from "../records";
+import { HallmarkEvidencePanel, showHallmark } from "../HallmarkEvidence";
 
 // upload (stage photos) -> ocr (Instant OCR running) -> evidence (raw OCR shown)
 //        -> workspace (after the user runs Smart Inspection)
@@ -595,6 +596,9 @@ export function Workspace({
             selected={linkedRegions}
             onSelect={selectRegions}
           />
+          {showHallmark(result.hallmark, result.inspection_type) && (
+            <HallmarkEvidencePanel hallmark={result.hallmark} selected={linkedRegions} onSelect={selectRegions} />
+          )}
           <CompletenessPanel
             completeness={result.completeness}
             selected={linkedRegions}

@@ -20,7 +20,7 @@ regions / checks behind it:
   MULTIPLE_CANDIDATES         more than one plausible product / standard remains
   PRODUCT_NOT_CONFIRMED       a candidate exists, but the label does not confirm it
   NO_VERIFIED_STANDARD        no verified BIS standard could be applied
-  HALLMARK_NOT_VERIFIABLE     hallmark / HUID information, which MetrIQ never verifies
+  HALLMARK_NOT_VERIFIABLE     hallmark / HUID evidence (or claims printed about it) — MetrIQ never authenticates
   CONFLICTING_DECLARATIONS    photos or lines disagree on a declared value
   OCR_UNCERTAIN               a check could not rely on the OCR reading
   MISSING_EVIDENCE            a check found no evidence for a declaration
@@ -65,26 +65,76 @@ _CATEGORY_REASON = {
     "CONFLICTING_EVIDENCE": "CONFLICTING_DECLARATIONS",
     "INSUFFICIENT_EVIDENCE": "OCR_UNCERTAIN",
 }
-_SOURCE_NAME = {"BIS": "BIS", "LEGAL_METROLOGY": "Legal Metrology"}
+_SOURCE_NAME = {"BIS": "BIS", "LEGAL_METROLOGY": "Legal Metrology", "HALLMARKING": "Hallmarking"}
 
 
 def _reason(code: str, source: str, message: str, regions=(), checks=()) -> dict:
     return {
         "code": code,
         "label": REASONS[code],
-        "source": source,  # OCR | PRODUCT | BIS | LEGAL_METROLOGY | PIPELINE
+        "source": source,  # OCR | PRODUCT | BIS | LEGAL_METROLOGY | HALLMARKING | PIPELINE
         "message": message,
         "source_regions": sorted(set(regions)),
         "checks": list(dict.fromkeys(checks)),
     }
 
 
+def _hallmark_included(analysis: dict) -> bool:
+    h = analysis.get("hallmark")
+    return bool(h) and (h.get("detected") or analysis.get("inspection_type") == "HALLMARK")
+
+
+def _package_label_applied(analysis: dict) -> bool:
+    return analysis["package_label"].get("scope_status") != "NOT_APPLIED"
+
+
+def system_results(analysis: dict) -> list[tuple[str, str]]:
+    """(evidence system, result) for every evidence system that applies to this inspection."""
+    out = [("BIS", analysis["compliance"]["overall_status"])]
+    if _package_label_applied(analysis):
+        out.append(("LEGAL_METROLOGY", analysis["package_label"]["overall_status"]))
+    if _hallmark_included(analysis):
+        out.append(("HALLMARKING", analysis["hallmark"]["overall_status"]))
+    return out
+
+
 def system_result(analysis: dict) -> str:
-    bis = analysis["compliance"]["overall_status"]
-    lm = analysis["package_label"]["overall_status"]
-    if "FAIL" in (bis, lm):
+    """FAIL if any applicable evidence system FAILs; PASS only if all PASS; otherwise REVIEW."""
+    results = [r for _, r in system_results(analysis)]
+    if "FAIL" in results:
         return "FAIL"
-    return "PASS" if bis == lm == "PASS" else "REVIEW"
+    return "PASS" if all(r == "PASS" for r in results) else "REVIEW"
+
+
+def _hallmark_reasons(analysis: dict, h: dict) -> list[dict]:
+    """Structured hallmark evidence -> escalation. Detection is never authentication."""
+    huid, purity = h["huid"], h["purity"]
+    regions = [r for o in huid.get("candidates", []) + purity.get("candidates", []) + h.get("hallmark_text", [])
+               for r in o["source_regions"]]
+    out = []
+    if h.get("detected"):
+        what = {"DETECTED": f"Potential HUID {huid.get('value')} detected",
+                "MULTIPLE": "Multiple potential HUID values detected",
+                "UNCERTAIN": "Potential HUID detected with low OCR confidence or an unexpected form",
+                }.get(huid["status"], "Hallmark evidence detected, but no potential HUID was read")
+        out.append(_reason("HALLMARK_NOT_VERIFIABLE", "HALLMARKING",
+                           f"{what}, but authenticity cannot be established from the uploaded image. External "
+                           "authoritative HUID verification is required.", regions=regions))
+        if purity["status"] == "CONFLICT":
+            out.append(_reason("CONFLICTING_DECLARATIONS", "HALLMARKING", purity["reason"],
+                               regions=[r for o in purity["candidates"] for r in o["source_regions"]]))
+    elif analysis.get("inspection_type") == "HALLMARK":
+        out.append(_reason("HALLMARK_NOT_VERIFIABLE", "HALLMARKING",
+                           "Hallmark inspection, but no hallmark or HUID evidence was read in the photos; the "
+                           "article must be examined physically."))
+    claims = h.get("untrusted_claims") or []
+    if claims:
+        out.append(_reason("HALLMARK_NOT_VERIFIABLE", "HALLMARKING",
+                           "Text printed on the item or package claims verification ("
+                           + "; ".join(f"“{c['raw_text']}”" for c in claims[:3])
+                           + "). Printed text is untrusted evidence and verifies nothing.",
+                           regions=[r for c in claims for r in c["source_regions"]]))
+    return out
 
 
 def assess(analysis: dict) -> dict:
@@ -95,7 +145,7 @@ def assess(analysis: dict) -> dict:
     package_label = analysis["package_label"]
     product = analysis["product"]
     package = analysis.get("package") or {}
-    systems = (("BIS", compliance), ("LEGAL_METROLOGY", package_label))
+    systems = (("BIS", compliance),) + ((("LEGAL_METROLOGY", package_label),) if _package_label_applied(analysis) else ())
 
     # ---- pipeline ----------------------------------------------------------
     for source, ev in systems:
@@ -134,15 +184,26 @@ def assess(analysis: dict) -> dict:
         reasons.append(_reason("NO_VERIFIED_STANDARD", "BIS",
                                "No verified BIS standard could be applied, so no BIS requirement was checked."))
 
-    ocr_text = (analysis.get("ocr") or {}).get("text") or ""
-    hallmark_regions = [r["id"] for r in (analysis.get("ocr") or {}).get("regions", []) if _RE_HALLMARK.search(r["text"])]
-    if compliance.get("reason_code") == "DOMAIN_NOT_PACKAGE_LABEL" or _RE_HALLMARK.search(ocr_text):
-        reasons.append(_reason(
-            "HALLMARK_NOT_VERIFIABLE", "BIS",
-            "Hallmark / HUID information appears in this inspection. MetrIQ never authenticates a hallmark or "
-            "verifies a HUID; an officer must verify it (for example through the official BIS CARE app).",
-            regions=hallmark_regions,
-        ))
+    hallmark = analysis.get("hallmark")
+    if hallmark is not None:
+        reasons.extend(_hallmark_reasons(analysis, hallmark))
+        if compliance.get("reason_code") == "DOMAIN_NOT_PACKAGE_LABEL" and not any(
+                r["code"] == "HALLMARK_NOT_VERIFIABLE" for r in reasons):
+            reasons.append(_reason(
+                "HALLMARK_NOT_VERIFIABLE", "BIS",
+                f"{compliance.get('standard_number') or 'The identified standard'} is a jewellery hallmarking "
+                "standard. MetrIQ never authenticates a hallmark or verifies a HUID; an officer must verify the "
+                "article."))
+    else:  # analyses saved before structured hallmark evidence existed
+        ocr_text = (analysis.get("ocr") or {}).get("text") or ""
+        hallmark_regions = [r["id"] for r in (analysis.get("ocr") or {}).get("regions", []) if _RE_HALLMARK.search(r["text"])]
+        if compliance.get("reason_code") == "DOMAIN_NOT_PACKAGE_LABEL" or _RE_HALLMARK.search(ocr_text):
+            reasons.append(_reason(
+                "HALLMARK_NOT_VERIFIABLE", "BIS",
+                "Hallmark / HUID information appears in this inspection. MetrIQ never authenticates a hallmark or "
+                "verifies a HUID; an officer must verify it (for example through the official BIS CARE app).",
+                regions=hallmark_regions,
+            ))
 
     # ---- declarations ------------------------------------------------------
     conflicts = [d for d in analysis["declaration_stage"].get("fields", []) if d.get("consistency") == "CONFLICT"]
@@ -198,6 +259,9 @@ def assess(analysis: dict) -> dict:
         if ev["overall_status"] == "REVIEW" and ev.get("reason_code") != "ENGINE_ERROR":
             reasons.append(_reason("SYSTEM_RESULT_REVIEW", source,
                                    f"{_SOURCE_NAME[source]} result is REVIEW: {ev.get('reason', '')}"))
+
+    if _hallmark_included(analysis) and hallmark["overall_status"] == "REVIEW":
+        reasons.append(_reason("SYSTEM_RESULT_REVIEW", "HALLMARKING", f"Hallmarking result is REVIEW: {hallmark['reason']}"))
 
     order = list(REASONS)
     reasons.sort(key=lambda r: (order.index(r["code"]), r["source"]))

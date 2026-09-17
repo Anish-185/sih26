@@ -23,7 +23,8 @@ Both endpoints take ONE package, photographed from one or more sides
 
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import lru_cache, partial
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
@@ -145,12 +146,13 @@ async def analyze(
     side: str | None = Form(None),
     images: list[UploadFile] | None = File(None),
     sides: list[str] | None = Form(None),
+    inspection_type: Literal["PACKAGE", "HALLMARK"] = Form("PACKAGE"),
 ) -> InspectionAnalysisOut:
     """Smart Inspection: the same OCR step for every image, then declaration
     extraction, product identification, verified Indian Standard candidates and
     deterministic compliance over the combined evidence."""
     uploads = await _package(image, side, images, sides)
-    return _run(get_analyzer().analyze_package, uploads)
+    return _run(partial(get_analyzer().analyze_package, inspection_type=inspection_type), uploads)
 
 
 @router.get("/coverage", response_model=CoverageMatrixOut)

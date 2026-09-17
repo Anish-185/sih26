@@ -99,6 +99,18 @@ NOISY_LABEL: list[Line] = [
     ("www.example-foods.example", 22, False),
 ]
 
+# A jewellery hallmark close-up (as seen through a 10x loupe): BIS text, purity mark, HUID.
+# Synthetic: the HUID is a fictional six-character code, not a real article's HUID.
+HALLMARK_TAG: list[Line] = [
+    ("GOLD RING  -  HALLMARK CLOSE-UP", 40, True),
+    ("", 20, False),
+    ("BIS", 72, True),
+    ("22K916", 72, True),
+    ("HUID: K7M2Q9", 60, True),
+    ("", 20, False),
+    ("Net weight 4.20 g   (photographed under 10x loupe)", 26, False),
+]
+
 PRODUCTS: dict[str, list[Line]] = {
     "chana": CHANA,
     "led-lamp": LED_LAMP,
@@ -154,6 +166,7 @@ def main() -> None:
     save(render_base(ELECTRIC_KETTLE), "synth_electric-kettle.png", format="PNG")
     save(render_base(PACKAGED_WATER), "synth_packaged-water.png", format="PNG")
     save(render_base(NOISY_LABEL, height=620), "synth_noisy-qr-label.png", format="PNG")
+    save(render_base(HALLMARK_TAG, height=620), "synth_hallmark-closeup.png", format="PNG")
 
 
 if __name__ == "__main__":

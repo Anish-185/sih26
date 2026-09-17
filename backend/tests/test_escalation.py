@@ -201,10 +201,11 @@ def test_reasons() -> None:
     _, d = analyse((950, "FRONT", raw("GOLD RING", "22K916 HUID: AB12CD", "Hallmarked jewellery")))
     hallmark = by_code(assess(d), "HALLMARK_NOT_VERIFIABLE")
     check("10 hallmark / HUID text -> HALLMARK_NOT_VERIFIABLE with its OCR regions, never verified",
-          hallmark and set(hallmark[0]["source_regions"]) == {"OCR-002", "OCR-003"}
-          and "never authenticates" in hallmark[0]["message"], str(hallmark))
+          hallmark and {"OCR-002", "OCR-003"} <= set(hallmark[0]["source_regions"])
+          and "authenticity cannot be established" in hallmark[0]["message"], str(hallmark))
     crafted = copy.deepcopy(d)
     crafted["ocr"]["text"], crafted["ocr"]["regions"] = "", []
+    crafted["hallmark"]["detected"], crafted["hallmark"]["untrusted_claims"] = False, []
     crafted["compliance"]["reason_code"] = "DOMAIN_NOT_PACKAGE_LABEL"
     check("10 a jewellery hallmarking standard in package inspection -> HALLMARK_NOT_VERIFIABLE",
           bool(by_code(assess(crafted), "HALLMARK_NOT_VERIFIABLE")))

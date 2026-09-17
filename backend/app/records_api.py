@@ -21,6 +21,7 @@ refuses changes to the system columns as well.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from functools import partial
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, Request, Response, UploadFile
@@ -51,7 +52,7 @@ router = APIRouter(prefix="/inspections", tags=["inspections"])
 
 ResultLiteral = Literal["PASS", "FAIL", "REVIEW"]
 OfficerStatusLiteral = Literal["NOT_REQUIRED", "PENDING", "IN_REVIEW", "COMPLETED"]
-_PACKAGE_FIELDS = {"image", "side", "images", "sides"}
+_PACKAGE_FIELDS = {"image", "side", "images", "sides", "inspection_type"}
 _DB_UNAVAILABLE = "The inspection database is unavailable. Check that PostgreSQL is running and migrated."
 
 
@@ -59,7 +60,7 @@ _DB_UNAVAILABLE = "The inspection database is unavailable. Check that PostgreSQL
 
 
 class SystemReasonOut(BaseModel):
-    source: Literal["BIS", "LEGAL_METROLOGY"]
+    source: Literal["BIS", "LEGAL_METROLOGY", "HALLMARKING"]
     result: ResultLiteral
     reason_code: str
     reason: str
@@ -200,6 +201,7 @@ async def create(
     side: str | None = Form(None),
     images: list[UploadFile] | None = File(None),
     sides: list[str] | None = Form(None),
+    inspection_type: Literal["PACKAGE", "HALLMARK"] = Form("PACKAGE"),
     analyzer: InspectionAnalyzer = Depends(get_analyzer),
     session: Session = Depends(get_session),
 ) -> InspectionRecordOut:
@@ -212,7 +214,9 @@ async def create(
                    "the system result is computed by the backend.",
         )
     uploads = await _package(image, side, images, sides)
-    analysis = _run(analyzer.analyze_package, uploads)
+    analyze = analyzer.analyze_package if inspection_type == "PACKAGE" else partial(
+        analyzer.analyze_package, inspection_type=inspection_type)
+    analysis = _run(analyze, uploads)
     try:
         record = create_inspection(session, analysis, uploads)
         return _record_out(record)

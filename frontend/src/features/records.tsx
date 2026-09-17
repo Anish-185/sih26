@@ -32,6 +32,7 @@ const SOURCE_LABEL: Record<EscalationReason["source"], string> = {
   PRODUCT: "Product",
   BIS: "BIS",
   LEGAL_METROLOGY: "Legal Metrology",
+  HALLMARKING: "Hallmarking",
   PIPELINE: "Pipeline",
 };
 

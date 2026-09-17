@@ -90,6 +90,20 @@ clear evidence established; every other reason always escalates. With today's ve
 real inspection escalates — no standard has every requirement checkable — and that is shown, not
 hidden.
 
+### Hallmark / HUID evidence — observed, never authenticated
+
+The Hallmarking page can inspect a hallmark photo (a **hallmark inspection**): OCR → hallmark evidence
+(`app/hallmark.py`) → escalation → officer review → report. MetrIQ extracts a *potential* HUID (a labelled
+six-character alphanumeric code), the purity / fineness mark and any "BIS" text, each linked to its OCR region,
+and runs only checks the verified BIS Hallmarking FAQ supports: a HUID is readable (observed, not verified),
+the purity mark is a permitted grade (IS 1417 gold / IS 2112 silver), the BIS logo (not supported — a graphic),
+and HUID authenticity (not supported — external authoritative verification required, e.g. BIS Care App).
+`verification_status` is `NOT_VERIFIED` or `NOT_DETECTED`; there is no VERIFIED state, no check can FAIL, and
+the hallmark result is always REVIEW, so hallmark inspections go to an officer. Low-confidence, multiple or
+unlabelled HUID candidates are never selected. Printed text such as "HUID VERIFIED" is recorded as an
+untrusted claim and changes nothing. Legal Metrology package-label rules are not applied to a hallmark
+inspection. An optional HUID reference field only compares text with what OCR read.
+
 ### Officer review and inspection history
 
 **Save for officer review** sends the same photos to `POST /inspections`: the backend runs
@@ -124,7 +138,7 @@ and a required note), or **Manual review** (note required).
 
 | Endpoint | |
 |---|---|
-| `POST /inspections` | multipart photos (`image` or `images` + `sides`); other fields → 422 |
+| `POST /inspections` | multipart photos (`image` or `images` + `sides`), optional `inspection_type` `PACKAGE` / `HALLMARK`; other fields → 422 |
 | `GET /inspections` | newest first; `?officer_status=PENDING&officer_status=IN_REVIEW` |
 | `GET /inspections/stats` | database counts |
 | `GET /inspections/{id}` · `GET /inspections/{id}/images/{index}` | saved record · stored photo |
@@ -330,6 +344,7 @@ Phases 1–14 are complete (see [`CLAUDE.md`](CLAUDE.md) for the full log). What
 
 - [x] **Compliance engine** — deterministic PASS / FAIL / REVIEW over verified requirements (currently 2 of 36 standards have checkable requirements; everything else is `STANDARD_ONLY` → REVIEW)
 - [x] **Legal Metrology package-label requirements** — 11 requirements from the Legal Metrology (Packaged Commodities) Rules, 2011 and amendments (official Department of Consumer Affairs PDFs); 6 are checked deterministically (MRP, net quantity, manufacturer name + address, commodity name, month and year of manufacture, consumer-care phone + e-mail), 5 cannot be checked from a photo. Reported separately from BIS compliance.
+- [x] **Hallmark / HUID evidence** — potential HUID and purity extraction, observed vs not verified, officer escalation, report section
 - [ ] **Requirement coverage** — more verified BIS requirements (still 1 checkable BIS rule)
 - [x] **Officer review & inspection history** — saved inspections in PostgreSQL, immutable system result, officer accept / override / manual review with notes, real History, Review queue and Dashboard
 - [x] **Escalation** — deterministic resolve-or-escalate decision with evidence-linked reasons; officer review only for cases the system cannot resolve
