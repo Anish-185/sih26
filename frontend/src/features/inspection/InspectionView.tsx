@@ -12,6 +12,7 @@ import {
   type InstantOcr,
   type OcrRegion,
   PACKAGE_SIDES,
+  type PackageLabelEvaluation,
   type PackageImage,
   type PackageSide,
   type ProductEvidence,
@@ -501,8 +502,11 @@ function Workspace({
                   {matched ? product.standard_number : "Needs review"}
                 </span>
               </DefinitionRow>
-              <DefinitionRow label="Compliance">
+              <DefinitionRow label="BIS compliance">
                 <StatusBadge status={result.compliance.overall_status} size="sm" />
+              </DefinitionRow>
+              <DefinitionRow label="Package label (Legal Metrology)">
+                <StatusBadge status={result.package_label.overall_status} size="sm" />
               </DefinitionRow>
             </dl>
           </Panel>
@@ -534,6 +538,11 @@ function Workspace({
           <CoveragePanel compliance={result.compliance} />
           <CompliancePanel
             compliance={result.compliance}
+            selected={linkedRegions}
+            onSelect={selectRegions}
+          />
+          <PackageLabelPanel
+            packageLabel={result.package_label}
             selected={linkedRegions}
             onSelect={selectRegions}
           />
@@ -1586,7 +1595,186 @@ const REASON_LABEL: Record<ComplianceCheck["reason_category"], string> = {
   CONFLICTING_EVIDENCE: "Conflicting evidence",
   INSUFFICIENT_EVIDENCE: "Insufficient OCR evidence",
   NOT_SUPPORTED: "Not supported by the knowledge base",
+  NOT_APPLICABLE: "Does not apply to this package",
 };
+
+const AUTHORITY_LABEL: Record<ComplianceCheck["source_category"], string> = {
+  BIS: "BIS",
+  LEGAL_METROLOGY: "Legal Metrology",
+};
+
+/** Short names for the package-label table; the full requirement is in the detail rows. */
+const DECLARATION_SHORT: Record<string, string> = {
+  "lm-retail-sale-price-declared": "MRP",
+  "lm-net-quantity-declared": "Net quantity",
+  "lm-manufacturer-name-and-address": "Manufacturer / importer",
+  "lm-common-or-generic-name": "Commodity name",
+  "lm-month-and-year-of-manufacture": "Month & year of manufacture",
+  "lm-consumer-complaint-phone-and-email": "Consumer-care phone & e-mail",
+};
+
+function ResultMark({ result }: { result: ComplianceCheck["result"] }) {
+  if (result === "NOT_SUPPORTED" || result === "NOT_APPLICABLE")
+    return (
+      <Mono className="shrink-0 text-[10px] uppercase tracking-[0.1em] text-ink-faint">
+        {result === "NOT_SUPPORTED" ? "Not supported" : "Not applicable"}
+      </Mono>
+    );
+  return <StatusBadge status={result} size="sm" />;
+}
+
+/** Legal Metrology package-label requirements — a separate evidence system from BIS. */
+function PackageLabelPanel({
+  packageLabel: pl,
+  selected,
+  onSelect,
+}: {
+  packageLabel: PackageLabelEvaluation;
+  selected: string[];
+  onSelect: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const scored = pl.checks.filter((c) => c.result !== "NOT_SUPPORTED");
+  const uncheckable = pl.checks.filter((c) => c.result === "NOT_SUPPORTED");
+
+  return (
+    <Panel flush>
+      <PanelHeader
+        title="Package label requirements"
+        meta={<StatusBadge status={pl.overall_status} size="sm" />}
+      />
+      <p className="border-b border-line px-5 py-2.5 text-[11px] leading-relaxed text-ink-faint">
+        Source: {pl.source_authority} — the Legal Metrology (Packaged Commodities) Rules, 2011, as
+        amended. These are not BIS requirements, and this result is kept separate from the BIS
+        result above. Fixed rules over the OCR evidence decide each check; a declaration that was
+        not read is REVIEW, never FAIL.
+      </p>
+
+      <dl className="px-5 py-2">
+        <DefinitionRow label="Overall">
+          <StatusBadge status={pl.overall_status} />
+          <ul className="mt-1.5 space-y-0.5 text-[12px] leading-relaxed text-ink-soft">
+            {pl.summary.map((line, i) => (
+              <li key={i} className={i === 0 ? "text-ink" : undefined}>
+                {line}
+              </li>
+            ))}
+          </ul>
+        </DefinitionRow>
+      </dl>
+
+      {pl.exclusions_found.length > 0 && (
+        <ul className="space-y-1 border-t border-line px-5 py-3 text-[12px] text-review">
+          {pl.exclusions_found.map((f) => (
+            <li key={f.id}>
+              · {f.description}{" "}
+              <button
+                type="button"
+                onClick={() => onSelect(f.source_regions)}
+                className="font-mono text-[10px] uppercase tracking-[0.1em] text-accent"
+              >
+                read: {f.observed} →
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {scored.length > 0 && (
+        <div className="overflow-x-auto border-t border-line">
+          <table className="w-full text-left text-[12px]">
+            <thead>
+              <tr className="border-b border-line">
+                {["Requirement", "Rule", "Observed", "Result"].map((h) => (
+                  <th key={h} className="kicker px-5 py-2 font-normal">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {scored.map((c) => {
+                const ids = c.evidence.flatMap((e) => e.source_regions);
+                const active =
+                  ids.length > 0 && ids.length === selected.length && ids.every((id, i) => selected[i] === id);
+                return (
+                  <tr
+                    key={c.rule_id}
+                    onClick={ids.length ? () => onSelect(ids) : undefined}
+                    className={cn(
+                      "border-b border-line align-top last:border-b-0",
+                      ids.length > 0 && "cursor-pointer hover:bg-surface",
+                      active && "bg-accent-soft",
+                    )}
+                  >
+                    <td className="px-5 py-2.5 text-ink">{DECLARATION_SHORT[c.rule_id] ?? c.requirement}</td>
+                    <td className="px-5 py-2.5">
+                      <Mono muted className="text-[10px]">
+                        {c.reference}
+                      </Mono>
+                    </td>
+                    <td className={cn("px-5 py-2.5", c.observed_value ? "text-ink" : "italic text-ink-faint")}>
+                      {c.observed_value ?? "—"}
+                    </td>
+                    <td className="px-5 py-2.5">
+                      <ResultMark result={c.result} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {uncheckable.length > 0 && (
+        <p className="border-t border-line px-5 py-2.5 text-[11px] leading-relaxed text-ink-faint">
+          Not checkable from a photo: {uncheckable.map((c) => c.reference).join(" · ")} — listed in
+          the details, never scored.
+        </p>
+      )}
+
+      {!open ? (
+        <div className="border-t border-line px-5 py-4">
+          <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
+            <ClipboardCheck className="h-3.5 w-3.5" />
+            Show evidence and sources
+          </Button>
+        </div>
+      ) : (
+        <>
+          <ul className="border-t border-line">
+            {pl.checks.map((c, i) => (
+              <li key={c.rule_id} className={cn(i > 0 && "border-t border-line")}>
+                <ComplianceCheckRow check={c} selected={selected} onSelect={onSelect} />
+              </li>
+            ))}
+          </ul>
+          {pl.assumptions.length > 0 && (
+            <div className="border-t border-line px-5 py-3">
+              <div className="kicker">Applies on these assumptions (not visible on a label)</div>
+              <ul className="mt-1 space-y-0.5 text-[11px] leading-relaxed text-ink-soft">
+                {pl.assumptions.map((a, i) => (
+                  <li key={i}>· {a}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {pl.notes.length > 0 && (
+            <ul className="space-y-1 border-t border-line px-5 py-3 text-[12px] text-review">
+              {pl.notes.map((n, i) => (
+                <li key={i}>· {n}</li>
+              ))}
+            </ul>
+          )}
+          <p className="border-t border-line px-5 py-3 text-[11px] leading-relaxed text-ink-faint">
+            {pl.policy}
+          </p>
+        </>
+      )}
+    </Panel>
+  );
+}
 
 const COMPLETENESS_LABEL: Record<DeclarationCompleteness["items"][number]["status"], string> = {
   DETECTED: "Detected",
@@ -1614,8 +1802,8 @@ function CompletenessPanel({
       <p className="border-b border-line px-5 py-2.5 text-[11px] leading-relaxed text-ink-faint">
         {completeness.note} “Not detected” means not found in the uploaded OCR evidence — it does not
         mean legally missing.
-        {completeness.with_verified_requirement > 0 && completeness.standard_number
-          ? ` Only fields used by a verified requirement under ${completeness.standard_number} are linked to one.`
+        {completeness.with_verified_requirement > 0
+          ? " Only fields used by a verified, checkable requirement that applies to this package (BIS or Legal Metrology) are linked to one."
           : " No field is linked to a verified, checkable requirement for this package."}
       </p>
       {completeness.unreadable_images.length > 0 && (
@@ -1710,14 +1898,15 @@ function ComplianceCheckRow({
   return (
     <div className="px-5 py-4">
       <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 text-[13px] font-medium text-ink">{check.requirement}</div>
-        {check.result === "NOT_SUPPORTED" ? (
-          <Mono className="shrink-0 text-[10px] uppercase tracking-[0.1em] text-ink-faint">
-            Not supported
-          </Mono>
-        ) : (
-          <StatusBadge status={check.result} size="sm" />
-        )}
+        <div className="min-w-0 text-[13px] font-medium text-ink">
+          {check.requirement}
+          {check.reference && (
+            <Mono muted className="mt-0.5 block text-[10px]">
+              {AUTHORITY_LABEL[check.source_category]} · {check.reference}
+            </Mono>
+          )}
+        </div>
+        <ResultMark result={check.result} />
       </div>
 
       <dl className="mt-2 grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 text-[12px]">
@@ -1773,12 +1962,27 @@ function ComplianceCheckRow({
 
       {check.source && (
         <div className="mt-3 border-l-2 border-line pl-3">
-          <div className="kicker">BIS requirement evidence</div>
+          <div className="kicker">{AUTHORITY_LABEL[check.source_category]} requirement evidence</div>
           <p className="mt-1 text-[12px] italic leading-relaxed text-ink-soft">“{check.source.quote}”</p>
           <p className="mt-1 text-[11px] text-ink-faint">
             {check.source.title}
             {check.source.last_verified ? ` · verified ${check.source.last_verified}` : ""}
           </p>
+          {check.supporting_sources.length > 0 && (
+            <details className="mt-1 text-[11px] text-ink-faint">
+              <summary className="cursor-pointer">
+                {check.supporting_sources.length} further verified{" "}
+                {check.supporting_sources.length === 1 ? "quote" : "quotes"} (amendments, related rules)
+              </summary>
+              <ul className="mt-1 space-y-1">
+                {check.supporting_sources.map((s, i) => (
+                  <li key={i}>
+                    <span className="italic text-ink-soft">“{s.quote}”</span> — {s.title}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
           {check.source.source_url && (
             <a
               href={check.source.source_url}
@@ -1786,7 +1990,7 @@ function ComplianceCheckRow({
               rel="noreferrer"
               className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-accent hover:text-accent-hover"
             >
-              Official BIS source
+              Official {AUTHORITY_LABEL[check.source_category]} source
               <ArrowUpRight className="h-3 w-3" />
             </a>
           )}
@@ -1817,7 +2021,12 @@ function DownstreamPanel({ result }: { result: InspectionAnalysis }) {
       "Verified knowledge-base records only — never generated",
       p.standard_retrieval,
     ],
-    ["Compliance check", "Verified requirements + deterministic rules — no model", p.compliance],
+    ["Compliance check (BIS)", "Verified requirements + deterministic rules — no model", p.compliance],
+    [
+      "Package label (Legal Metrology)",
+      "Verified Packaged Commodities Rules + deterministic rules — no model",
+      p.package_label,
+    ],
     ["Officer review & report", "Human verification, PDF report, history", p.officer_review],
   ];
   return (

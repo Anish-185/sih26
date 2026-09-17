@@ -319,7 +319,7 @@ class CheckEvidenceOut(BaseModel):
 
 
 class RequirementSourceOut(BaseModel):
-    """Knowledge evidence behind a requirement: the verified BIS record it quotes."""
+    """Knowledge evidence behind a requirement: the verified record (BIS or Legal Metrology) it quotes."""
 
     knowledge_id: str
     title: str
@@ -329,14 +329,18 @@ class RequirementSourceOut(BaseModel):
     reference: str | None = None
     verification_status: str
     last_verified: str | None = None
+    source_authority: str = Field(default="BIS", description='"BIS" | "LEGAL_METROLOGY"')
+    source_organization: str | None = None
 
 
 class ComplianceCheckOut(BaseModel):
     rule_id: str
     requirement: str
     rule_type: str
-    standard_number: str
-    result: str = Field(description='"PASS" | "FAIL" | "REVIEW" | "NOT_SUPPORTED"')
+    standard_number: str | None = Field(
+        default=None, description="The BIS standard checked; null for Legal Metrology package-label requirements."
+    )
+    result: str = Field(description='"PASS" | "FAIL" | "REVIEW" | "NOT_SUPPORTED" | "NOT_APPLICABLE"')
     reason_code: str = Field(description="Machine-readable reason, e.g. EVIDENCE_NOT_DETECTED.")
     reason: str = Field(description="Deterministic, factual explanation produced by the rule.")
     reason_category: str = Field(
@@ -351,6 +355,54 @@ class ComplianceCheckOut(BaseModel):
     )
     evidence: list[CheckEvidenceOut]
     source: RequirementSourceOut | None = None
+    source_category: str = Field(default="BIS", description='Authority of the requirement: "BIS" | "LEGAL_METROLOGY"')
+    domain: str = "PACKAGE_LABEL"
+    reference: str = Field(default="", description='Rule / clause of the source, e.g. "Rule 6(1)(e)".')
+    applicability: str = ""
+    supporting_sources: list[RequirementSourceOut] = Field(
+        default_factory=list, description="Further verified quotes behind the requirement (amendments, related rules)."
+    )
+
+
+class ExclusionFindingOut(BaseModel):
+    """An applicability exclusion whose evidence was read on the package."""
+
+    id: str
+    description: str
+    observed: str
+    source_regions: list[str]
+    sources: list[RequirementSourceOut]
+    evidence: list[CheckEvidenceOut] = Field(default_factory=list)
+
+
+class PackageLabelOut(BaseModel):
+    """Legal Metrology package-label requirements — a separate evidence system from BIS compliance.
+    Its result is never merged with the BIS result. Never decided by a model."""
+
+    source_category: str = Field(default="LEGAL_METROLOGY")
+    source_authority: str = "Legal Metrology (Department of Consumer Affairs)"
+    overall_status: str = Field(description='"PASS" | "FAIL" | "REVIEW"')
+    reason_code: str
+    reason: str
+    scope_status: str = Field(description='"IN_SCOPE" | "OUT_OF_SCOPE" | "NO_REQUIREMENT_DATA"')
+    scope: str = ""
+    scope_source: RequirementSourceOut | None = None
+    exclusions_found: list[ExclusionFindingOut] = Field(default_factory=list)
+    assumptions: list[str] = Field(
+        default_factory=list, description="Applicability conditions a package label cannot show."
+    )
+    assumption_sources: list[RequirementSourceOut] = Field(default_factory=list)
+    checks: list[ComplianceCheckOut] = Field(default_factory=list)
+    supported_checks: int = 0
+    passed: int = 0
+    failed: int = 0
+    review: int = 0
+    not_supported: int = 0
+    not_applicable: int = 0
+    policy: str = ""
+    summary: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    unreadable_images: list[str] = Field(default_factory=list)
 
 
 class ComplianceCoverageOut(BaseModel):
@@ -420,10 +472,42 @@ class StandardCoverageOut(BaseModel):
 
 
 class CoverageTotalsOut(BaseModel):
-    total: int
+    """BIS standards and Legal Metrology requirements are different knowledge sources, counted separately."""
+
+    total: int = Field(description="BIS standards in the knowledge base.")
     inspection_supported: int
     standard_only: int
     unsupported: int
+    bis_requirements: int = 0
+    bis_rules: int = 0
+    legal_metrology_requirements: int = 0
+    legal_metrology_rules: int = 0
+    legal_metrology_not_checkable: int = 0
+    package_label_checkable_requirements: int = Field(default=0, description="BIS + Legal Metrology.")
+    deterministic_rules: int = Field(default=0, description="One deterministic rule per checkable requirement.")
+    rule_types: list[str] = Field(default_factory=list)
+
+
+class PackageRequirementRowOut(BaseModel):
+    requirement_id: str
+    reference: str
+    requirement: str
+    rule_type: str
+    format: str | None = None
+    declaration_fields: list[str]
+    exclusions: list[str]
+    applicability: str
+    source_category: str
+    source_knowledge_id: str
+    status: str = Field(description='"SUPPORTED" | "UNSUPPORTED"')
+
+
+class LegalMetrologyCoverageOut(BaseModel):
+    source_category: str = "LEGAL_METROLOGY"
+    scope: str = ""
+    exclusions: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    requirements: list[PackageRequirementRowOut] = Field(default_factory=list)
 
 
 class CoverageMatrixOut(BaseModel):
@@ -432,6 +516,7 @@ class CoverageMatrixOut(BaseModel):
     totals: CoverageTotalsOut
     standards: list[StandardCoverageOut]
     rows: list[CoverageRowOut]
+    legal_metrology: LegalMetrologyCoverageOut = Field(default_factory=LegalMetrologyCoverageOut)
     errors: list[str] = Field(default_factory=list, description="Requirement data rejected by the loader.")
 
 
@@ -493,6 +578,7 @@ class PipelineStagesOut(BaseModel):
     standard_retrieval: str
     compliance: str = "REVIEW"
     officer_review: str = "PENDING"
+    package_label: str = "REVIEW"
 
 
 class InspectionAnalysisOut(BaseModel):
@@ -509,7 +595,8 @@ class InspectionAnalysisOut(BaseModel):
         description="Ranked verified knowledge-base standards supported by the package evidence."
     )
     retrieval_note: str = RETRIEVAL_NOTE
-    compliance: ComplianceOut
+    compliance: ComplianceOut = Field(description="BIS compliance for the identified standard.")
+    package_label: PackageLabelOut = Field(description="Legal Metrology package-label requirements (separate from BIS).")
     completeness: CompletenessOut
     pipeline: PipelineStagesOut
     notes: list[str] = Field(default_factory=list)
@@ -649,11 +736,12 @@ class InspectionAnalyzer:
 
         try:
             downstream = run_downstream(regions, self._llm, self._product_finder, unreadable_images=unreadable)
-            declaration_stage, product, standards, compliance, completeness, pipeline = (
+            declaration_stage, product, standards, compliance, package_label, completeness, pipeline = (
                 _declaration_stage_out(downstream.declaration_stage),
                 _product_out(downstream.product),
                 [_candidate_out(c) for c in downstream.product.candidates],
                 _compliance_out(downstream.compliance),
+                _package_label_out(downstream.package_label),
                 CompletenessOut(
                     **{k: v for k, v in downstream.completeness.__dict__.items() if k != "items"},
                     items=[CompletenessItemOut(**i.__dict__) for i in downstream.completeness.items],
@@ -665,6 +753,10 @@ class InspectionAnalyzer:
             declaration_stage, product, standards, compliance, pipeline = _all_review(
                 f"Downstream pipeline error: {exc}"
             )
+            package_label = PackageLabelOut(
+                overall_status="REVIEW", reason_code="ENGINE_ERROR", reason=f"Downstream pipeline error: {exc}",
+                scope_status="NO_REQUIREMENT_DATA",
+            )
             completeness = CompletenessOut(
                 items=[], detected=0, uncertain=0, not_detected=0, conflicts=0,
                 with_verified_requirement=0, note=f"Downstream pipeline error: {exc}",
@@ -673,10 +765,12 @@ class InspectionAnalyzer:
 
         # The compliance result must say when some photos gave no usable evidence.
         if unreadable:
-            compliance.notes.append(
+            gap_note = (
                 "Some images gave no usable OCR evidence (" + "; ".join(gaps) + "). Checks use the "
                 "remaining images only; unread evidence is never treated as a finding about the package."
             )
+            compliance.notes.append(gap_note)
+            package_label.notes.append(gap_note)
 
         return InspectionAnalysisOut(
             inspection_id=evidence.inspection_id,
@@ -690,6 +784,7 @@ class InspectionAnalyzer:
             product=product,
             standards=standards,
             compliance=compliance,
+            package_label=package_label,
             completeness=completeness,
             pipeline=pipeline,
             notes=notes,
@@ -1028,22 +1123,51 @@ def _compliance_out(ev) -> ComplianceOut:
         standard_number=ev.standard_number,
         knowledge_id=ev.knowledge_id,
         coverage=_coverage_out(ev),
-        checks=[
-            ComplianceCheckOut(
-                rule_id=c.rule_id, requirement=c.requirement, rule_type=c.rule_type,
-                standard_number=c.standard_number, result=c.result, reason_code=c.reason_code,
-                reason=c.reason, reason_category=c.reason_category, rule_condition=c.rule_condition,
-                observed_value=c.observed_value,
-                expected_condition=c.expected_condition, evidence_status=c.evidence_status,
-                evidence=[CheckEvidenceOut(**e.__dict__) for e in c.evidence],
-                source=RequirementSourceOut(**c.source.__dict__) if c.source else None,
-            )
-            for c in ev.checks
-        ],
+        checks=[_check_out(c) for c in ev.checks],
         policy=ev.policy,
         notes=list(ev.notes),
         summary=list(ev.summary),
         unreadable_images=list(ev.unreadable_images),
+    )
+
+
+def _source_out(source) -> RequirementSourceOut | None:
+    return RequirementSourceOut(**source.__dict__) if source else None
+
+
+def _check_out(c) -> ComplianceCheckOut:
+    return ComplianceCheckOut(
+        rule_id=c.rule_id, requirement=c.requirement, rule_type=c.rule_type,
+        standard_number=c.standard_number, result=c.result, reason_code=c.reason_code,
+        reason=c.reason, reason_category=c.reason_category, rule_condition=c.rule_condition,
+        observed_value=c.observed_value,
+        expected_condition=c.expected_condition, evidence_status=c.evidence_status,
+        evidence=[CheckEvidenceOut(**e.__dict__) for e in c.evidence],
+        source=_source_out(c.source),
+        source_category=c.source_category, domain=c.domain, reference=c.reference,
+        applicability=c.applicability,
+        supporting_sources=[_source_out(s) for s in c.supporting_sources],
+    )
+
+
+def _package_label_out(ev) -> PackageLabelOut:
+    return PackageLabelOut(
+        source_category=ev.source_category, source_authority=ev.source_authority,
+        overall_status=ev.overall_status, reason_code=ev.reason_code, reason=ev.reason,
+        scope_status=ev.scope_status, scope=ev.scope, scope_source=_source_out(ev.scope_source),
+        exclusions_found=[
+            ExclusionFindingOut(
+                id=f.id, description=f.description, observed=f.observed, source_regions=list(f.source_regions),
+                sources=[_source_out(s) for s in f.sources],
+                evidence=[CheckEvidenceOut(**e.__dict__) for e in f.evidence],
+            )
+            for f in ev.exclusions_found
+        ],
+        assumptions=list(ev.assumptions), assumption_sources=[_source_out(s) for s in ev.assumption_sources],
+        checks=[_check_out(c) for c in ev.checks],
+        supported_checks=ev.supported_checks, passed=ev.passed, failed=ev.failed, review=ev.review,
+        not_supported=ev.not_supported, not_applicable=ev.not_applicable, policy=ev.policy,
+        summary=list(ev.summary), notes=list(ev.notes), unreadable_images=list(ev.unreadable_images),
     )
 
 
@@ -1055,6 +1179,7 @@ def _pipeline_out(stages) -> PipelineStagesOut:
         standard_retrieval=stages.standard_retrieval,
         compliance=stages.compliance,
         officer_review=stages.officer_review,
+        package_label=stages.package_label,
     )
 
 

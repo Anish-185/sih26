@@ -306,7 +306,7 @@ export interface CheckEvidence {
   source_sides: PackageSide[];
 }
 
-/** The verified BIS knowledge record a requirement quotes. */
+/** The verified knowledge record a requirement quotes — BIS or Legal Metrology. */
 export interface RequirementSource {
   knowledge_id: string;
   title: string;
@@ -316,15 +316,20 @@ export interface RequirementSource {
   reference: string | null;
   verification_status: string;
   last_verified: string | null;
+  source_authority: SourceAuthority;
+  source_organization: string | null;
 }
 
-export type CheckResult = "PASS" | "FAIL" | "REVIEW" | "NOT_SUPPORTED";
+/** Which authority a requirement comes from. The two are never merged. */
+export type SourceAuthority = "BIS" | "LEGAL_METROLOGY";
+
+export type CheckResult = "PASS" | "FAIL" | "REVIEW" | "NOT_SUPPORTED" | "NOT_APPLICABLE";
 
 export interface ComplianceCheck {
   rule_id: string;
   requirement: string;
   rule_type: string;
-  standard_number: string;
+  standard_number: string | null; // null for Legal Metrology package-label requirements
   result: CheckResult;
   reason_code: string; // machine-readable
   reason: string; // deterministic, produced by the rule
@@ -335,13 +340,55 @@ export interface ComplianceCheck {
     | "EVIDENCE_NOT_DETERMINABLE"
     | "CONFLICTING_EVIDENCE"
     | "INSUFFICIENT_EVIDENCE"
-    | "NOT_SUPPORTED";
+    | "NOT_SUPPORTED"
+    | "NOT_APPLICABLE";
   rule_condition: string; // the exact deterministic condition the rule applies
   observed_value: string | null;
   expected_condition: string;
   evidence_status: "SUFFICIENT" | "INSUFFICIENT" | "NOT_DETECTED" | "NOT_APPLICABLE";
   evidence: CheckEvidence[];
   source: RequirementSource | null;
+  source_category: SourceAuthority;
+  domain: string;
+  reference: string; // rule / clause, e.g. "Rule 6(1)(e)"
+  applicability: string;
+  supporting_sources: RequirementSource[]; // amendments and related rules, quoted
+}
+
+/** An applicability exclusion read on the package (e.g. "not for retail sale"). */
+export interface ExclusionFinding {
+  id: string;
+  description: string;
+  observed: string;
+  source_regions: string[];
+  sources: RequirementSource[];
+  evidence: CheckEvidence[];
+}
+
+/** Legal Metrology package-label requirements — separate from BIS compliance, never merged. */
+export interface PackageLabelEvaluation {
+  source_category: "LEGAL_METROLOGY";
+  source_authority: string;
+  overall_status: "PASS" | "FAIL" | "REVIEW";
+  reason_code: string;
+  reason: string;
+  scope_status: "IN_SCOPE" | "OUT_OF_SCOPE" | "NO_REQUIREMENT_DATA";
+  scope: string;
+  scope_source: RequirementSource | null;
+  exclusions_found: ExclusionFinding[];
+  assumptions: string[]; // applicability a label cannot show
+  assumption_sources: RequirementSource[];
+  checks: ComplianceCheck[];
+  supported_checks: number;
+  passed: number;
+  failed: number;
+  review: number;
+  not_supported: number;
+  not_applicable: number;
+  policy: string;
+  summary: string[];
+  notes: string[];
+  unreadable_images: string[];
 }
 
 /** What MetrIQ can inspect for this package: product -> standard -> requirements -> rules. */
@@ -421,6 +468,7 @@ export interface PipelineStages {
   standard_retrieval: string;
   compliance: string;
   officer_review: string;
+  package_label: string;
 }
 
 export interface InspectionImage {
@@ -503,7 +551,8 @@ export interface InspectionAnalysis {
   product: ProductIdentification;
   standards: StandardCandidate[]; // ranked, verified knowledge-base records only
   retrieval_note: string;
-  compliance: ComplianceEvaluation;
+  compliance: ComplianceEvaluation; // BIS
+  package_label: PackageLabelEvaluation; // Legal Metrology
   completeness: DeclarationCompleteness;
   pipeline: PipelineStages;
   notes: string[];

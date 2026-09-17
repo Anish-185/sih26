@@ -190,8 +190,11 @@ def test_knowledge() -> None:
         src = KB[r.source_knowledge_id]
         check(f"5 {r.id} is verified: quote word for word in a verified record",
               r.source_quote in src.content and src.verification_status == "verified")
-    check("5 only the printed IS-number rule is checkable (no invented rules)",
-          [r.id for r in REAL.requirements if r.supported] == ["packaged-water-label-shows-is-number"])
+    # Milestone 8 adds Legal Metrology requirements (tested in test_legal_metrology.py);
+    # the BIS side still has exactly one checkable rule.
+    check("5 only the printed IS-number rule is checkable among BIS requirements (no invented rules)",
+          [r.id for r in REAL.requirements if r.supported and r.scope == "STANDARD"]
+          == ["packaged-water-label-shows-is-number"])
 
     ev, _, _ = evaluate(WATER + ["IS 14543"])
     for c in ev.checks:
@@ -352,14 +355,16 @@ def test_compliance() -> None:
           not any(FORBIDDEN.search(s) for s in low[0].summary + [c.reason for c in low[0].checks]))
 
     res = run_downstream(label(WATER + ["IS 14543"]), finder=FINDER, requirements=REAL)
-    linked = [i.field for i in res.completeness.items if i.requirement_coverage == "VERIFIED_REQUIREMENT"]
-    check("completeness links only the field a verified rule uses", linked == ["standard_number"], str(linked))
+    bis_ids = {r.id for r in REAL.requirements if r.scope == "STANDARD"}
+    linked = [i.field for i in res.completeness.items if set(i.requirement_ids) & bis_ids]
+    check("completeness links only the field a verified BIS rule uses", linked == ["standard_number"], str(linked))
     mrp = next(i for i in res.completeness.items if i.field == "mrp")
-    check("completeness: detected MRP is an observation, not a requirement",
-          mrp.requirement_coverage == "NOT_ESTABLISHED")
+    check("completeness: MRP is never linked to a BIS requirement (only to Legal Metrology)",
+          not set(mrp.requirement_ids) & bis_ids
+          and all(rid.startswith("lm-") for rid in mrp.requirement_ids), str(mrp.requirement_ids))
     led = run_downstream(label(["LED BULB 9W", "Self-ballasted LED lamp, Cool Daylight 6500K"]), finder=FINDER, requirements=REAL)
-    check("completeness: LED has no requirement-linked fields (its requirement is not checkable)",
-          led.completeness.with_verified_requirement == 0)
+    check("completeness: LED has no BIS-requirement-linked fields (its BIS requirement is not checkable)",
+          not any(set(i.requirement_ids) & bis_ids for i in led.completeness.items))
     check("completeness: not detected is never called missing",
           not any(FORBIDDEN.search(i.statement) for i in res.completeness.items))
 

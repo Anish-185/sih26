@@ -1,7 +1,12 @@
-"""Schema for a single BIS knowledge-base item.
+"""Schema for a single knowledge-base item.
 
 This is intentionally a flat structure: one `KnowledgeItem` maps cleanly to one row
 in a future PostgreSQL table, so migrating later is straightforward.
+
+Every item names the authority its source belongs to (`source_authority`). Most
+items are BIS; the `legal_metrology` category holds official Legal Metrology
+(Department of Consumer Affairs) texts. The two stay distinct: a Legal Metrology
+item is never presented as BIS information.
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 class Category(str, Enum):
-    """The eight knowledge categories the project supports."""
+    """The knowledge categories the project supports."""
 
     BIS_GENERAL = "bis_general"
     INDIAN_STANDARDS = "indian_standards"
@@ -24,6 +29,19 @@ class Category(str, Enum):
     HALLMARKING = "hallmarking"
     CONSUMER_INFORMATION = "consumer_information"
     FAQS = "faqs"
+    LEGAL_METROLOGY = "legal_metrology"
+
+
+class SourceAuthority(str, Enum):
+    """The authority an item's official source belongs to.
+
+    - BIS:             Bureau of Indian Standards.
+    - LEGAL_METROLOGY: Legal Metrology, Department of Consumer Affairs (for example
+                       the Legal Metrology (Packaged Commodities) Rules, 2011).
+    """
+
+    BIS = "BIS"
+    LEGAL_METROLOGY = "LEGAL_METROLOGY"
 
 
 class VerificationStatus(str, Enum):
@@ -70,6 +88,10 @@ class KnowledgeItem(BaseModel):
     )
 
     # --- provenance / traceability ---
+    source_authority: SourceAuthority = Field(
+        default=SourceAuthority.BIS,
+        description="BIS or LEGAL_METROLOGY. Must be LEGAL_METROLOGY exactly for the legal_metrology category.",
+    )
     source_organization: str = Field(
         default="Bureau of Indian Standards (BIS)",
         description="Who publishes the source, e.g. 'Bureau of Indian Standards (BIS)'.",
@@ -156,6 +178,14 @@ class KnowledgeItem(BaseModel):
             raise ValueError(
                 "non-sample items must have a source_url so they are traceable "
                 "(use verification_status 'sample' for development placeholders)"
+            )
+
+        is_lm_category = category == Category.LEGAL_METROLOGY.value
+        is_lm_source = self.source_authority == SourceAuthority.LEGAL_METROLOGY.value
+        if is_lm_category != is_lm_source:
+            raise ValueError(
+                "source_authority must be 'LEGAL_METROLOGY' for items in the 'legal_metrology' "
+                "category, and 'BIS' for every other category"
             )
 
         if category == Category.INDIAN_STANDARDS.value and not self.standard_number:

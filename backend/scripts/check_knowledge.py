@@ -1,4 +1,4 @@
-"""Validate the BIS knowledge base and the inspection requirements, and print a report.
+"""Validate the knowledge base (BIS + Legal Metrology) and the inspection requirements, and print a report.
 
 Usage:
 
@@ -22,7 +22,9 @@ from app.requirements import (  # noqa: E402
     UNSUPPORTED,
     coverage_by_standard,
     coverage_matrix,
+    coverage_totals,
     load_requirements,
+    package_requirement_rows,
 )
 
 
@@ -42,7 +44,7 @@ def check_requirements(argv: list[str]) -> int:
     by_standard = coverage_by_standard(items, requirements)
     counts = {status: sum(c.coverage_status == status for c in by_standard)
               for status in (INSPECTION_SUPPORTED, STANDARD_ONLY, UNSUPPORTED)}
-    print(f"\nInspection coverage (package-label inspection) — total standards: {len(by_standard)}")
+    print(f"\nBIS inspection coverage (package-label inspection) — total BIS standards: {len(by_standard)}")
     print(f"  Inspection-supported: {counts[INSPECTION_SUPPORTED]}")
     print(f"  Standard-only:        {counts[STANDARD_ONLY]}  (verified and retrievable; not a failure)")
     print(f"  Unsupported:          {counts[UNSUPPORTED]}")
@@ -60,6 +62,31 @@ def check_requirements(argv: list[str]) -> int:
         if r.requirement_id:
             print(f"  {r.product_name or '(any product)'} | {r.standard_number} | {r.requirement_id} | "
                   f"{r.rule_type} | {r.status}")
+
+    scope = requirements.package_scope
+    print("\nLegal Metrology package-label requirements (source: Legal Metrology, Department of Consumer Affairs)")
+    print(f"  Scope: {scope.description if scope else 'NO VALID package_scope'}")
+    for e in scope.exclusions if scope else ():
+        print(f"  Exclusion (observable): {e.id} — {e.description}")
+    for a in scope.assumptions if scope else ():
+        print(f"  Assumption (not observable): {a}")
+    for row in package_requirement_rows(requirements):
+        excl = f"  excluded when: {', '.join(row.exclusions)}" if row.exclusions else ""
+        print(f"  {row.reference:24} {row.requirement_id:40} {row.rule_type:16} {row.status}{excl}")
+
+    t = coverage_totals(items, requirements)
+    print("\nCoverage summary (BIS standards and Legal Metrology requirements are separate sources)")
+    print(f"  Total BIS standards:                    {t.bis_standards}")
+    print(f"  Inspection-supported BIS standards:     {t.bis_inspection_supported}")
+    print(f"  Standard-only BIS standards:            {t.bis_standard_only}")
+    print(f"  Unsupported BIS standards:              {t.bis_unsupported}")
+    print(f"  BIS package-label requirements:         {t.bis_requirements} ({t.bis_rules} checkable)")
+    print(f"  Legal Metrology requirements:           {t.legal_metrology_requirements}")
+    print(f"  Legal Metrology checkable rules:        {t.legal_metrology_rules} "
+          f"({t.legal_metrology_not_checkable} not checkable from an image)")
+    print(f"  Total package-label checkable requirements: {t.package_label_checkable_requirements}")
+    print(f"  Total deterministic rules:              {t.deterministic_rules} "
+          f"(rule types: {', '.join(t.rule_types)})")
 
     if requirements.errors:
         print(f"\nRequirement errors: {len(requirements.errors)}")

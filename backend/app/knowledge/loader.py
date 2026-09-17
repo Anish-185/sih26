@@ -1,4 +1,4 @@
-"""Load and validate the BIS knowledge base from JSON files on disk.
+"""Load and validate the knowledge base (BIS + Legal Metrology) from JSON files on disk.
 
 Layout (one file per category):
 
@@ -11,6 +11,7 @@ Layout (one file per category):
         hallmarking.json
         consumer_information.json
         faqs.json
+        legal_metrology.json   (Legal Metrology texts — source_authority LEGAL_METROLOGY)
 
 Each file holds a JSON array of knowledge items. The filename must match the
 `category` field of every item inside it.

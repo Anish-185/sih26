@@ -10,6 +10,7 @@ the LLM come later and are expected to depend on this package.
 from app.knowledge.schema import (
     Category,
     KnowledgeItem,
+    SourceAuthority,
     VerificationStatus,
 )
 from app.knowledge.loader import LoadResult, LoadError, load_knowledge_base
@@ -17,6 +18,7 @@ from app.knowledge.loader import LoadResult, LoadError, load_knowledge_base
 __all__ = [
     "Category",
     "KnowledgeItem",
+    "SourceAuthority",
     "VerificationStatus",
     "LoadResult",
     "LoadError",

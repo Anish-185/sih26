@@ -4,8 +4,12 @@
       -> declaration extraction   (deterministic)
       -> product identification   (existing BIS retrieval engine + product phrase gate)
       -> standard candidates      (verified knowledge-base records only)
-      -> compliance               (verified requirements + deterministic rules)
+      -> compliance               (BIS: verified requirements of the identified standard + deterministic rules)
+      -> package label            (Legal Metrology: packaged-commodity declarations + deterministic rules)
       -> declaration completeness (what the photos show, never "legally missing")
+
+BIS compliance and the Legal Metrology package-label evaluation are separate
+evidence systems with separate results; neither is merged into the other.
 
 Each stage is isolated: a failure in one stage degrades that stage to REVIEW and
 the pipeline still returns. Nothing here fabricates a result.
@@ -19,6 +23,7 @@ from app.completeness import DeclarationCompleteness, declaration_completeness
 from app.compliance import REVIEW, ComplianceEvaluation, evaluate_compliance
 from app.declarations import DeclarationStage, extract_declarations
 from app.llm import LocalLLM
+from app.package_label import PackageLabelEvaluation, evaluate_package_label
 from app.product import ProductStandardFinder
 from app.product_identification import MATCHED, ProductIdentification, identify_product
 from app.requirements import RequirementSet, load_requirements
@@ -32,6 +37,7 @@ class PipelineStages:
     standard_retrieval: str
     compliance: str = REVIEW
     officer_review: str = "PENDING"
+    package_label: str = REVIEW
 
 
 @dataclass(frozen=True)
@@ -40,6 +46,7 @@ class DownstreamResult:
     product: ProductIdentification
     compliance: ComplianceEvaluation
     completeness: DeclarationCompleteness
+    package_label: PackageLabelEvaluation
     stages: PipelineStages
     notes: list[str]
 
@@ -57,6 +64,15 @@ def _review_product(note: str) -> ProductIdentification:
     return ProductIdentification(
         status="REVIEW", name=None, knowledge_id=None, standard_number=None,
         confidence="none", method="deterministic", reason=note, evidence=[], candidates=[],
+    )
+
+
+def _review_package_label(note: str) -> PackageLabelEvaluation:
+    return PackageLabelEvaluation(
+        source_category="LEGAL_METROLOGY", source_authority="Legal Metrology (Department of Consumer Affairs)",
+        overall_status=REVIEW, reason_code="ENGINE_ERROR", reason=note, scope_status="NO_REQUIREMENT_DATA",
+        scope="", scope_source=None, exclusions_found=[], assumptions=[], assumption_sources=[], checks=[],
+        summary=[note],
     )
 
 
@@ -105,7 +121,18 @@ def run_downstream(
         compliance = _review_compliance(f"Compliance evaluation failed: {exc}")
         notes.append(str(exc))
 
-    # 4) declaration completeness — detection status + whether a verified
+    # 4) Legal Metrology package-label requirements — independent of the BIS
+    #    standard, applicability decided from the package evidence --------------
+    try:
+        package_label = evaluate_package_label(
+            decl, regions, requirements if requirements is not None else RequirementSet((), ()),
+            finder.search_engine.items if finder is not None else [], unreadable_images,
+        )
+    except Exception as exc:  # noqa: BLE001
+        package_label = _review_package_label(f"Package-label evaluation failed: {exc}")
+        notes.append(str(exc))
+
+    # 5) declaration completeness — detection status + whether a verified
     #    requirement covers the field; never "legally missing" ---------------
     standard = product.standard_number if product.status == MATCHED else None
     confirmed = compliance.inspection_coverage.product_id if compliance.inspection_coverage else None
@@ -113,6 +140,7 @@ def run_downstream(
         completeness = declaration_completeness(
             decl, requirements if requirements is not None else RequirementSet((), ()),
             standard, unreadable_images, product_id=confirmed,
+            extra_requirements=package_label.field_requirements,
         )
     except Exception as exc:  # noqa: BLE001
         completeness = declaration_completeness(decl, RequirementSet((), ()), None, unreadable_images)
@@ -124,12 +152,14 @@ def run_downstream(
         product_identification=product.status,
         standard_retrieval=MATCHED if product.status == MATCHED else "REVIEW",
         compliance=compliance.overall_status,
+        package_label=package_label.overall_status,
     )
     return DownstreamResult(
         declaration_stage=decl,
         product=product,
         compliance=compliance,
         completeness=completeness,
+        package_label=package_label,
         stages=stages,
         notes=notes,
     )

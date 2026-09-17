@@ -158,8 +158,9 @@ backend/                      Python 3.14 · FastAPI
     declarations.py           deterministic declarations (DETECTED / UNCERTAIN / NOT_DETECTED)
     product_identification.py product + standard candidates over the knowledge base
     requirements.py           verified inspection requirements: load, validate, coverage
-    compliance.py             deterministic compliance engine (PASS / FAIL / REVIEW)
-    pipeline.py               OCR → declarations → product → standards → compliance
+    compliance.py             deterministic compliance engine (PASS / FAIL / REVIEW) + generic declaration rules
+    package_label.py          Legal Metrology package-label requirements (separate result from BIS)
+    pipeline.py               OCR → declarations → product → standards → BIS compliance + package label
     retrieval/                deterministic lexical search (text.py, engine.py)
     rag.py                    grounded Q&A (/ask)
     product.py                Product → Standard + "Why this result?"
@@ -168,7 +169,8 @@ backend/                      Python 3.14 · FastAPI
     api.py / main.py          router / app
   tests/                      plain-Python runners, bridged to pytest
 data/
-  knowledge/                  BIS knowledge base — one JSON file per category (the only source of standards)
+  knowledge/                  knowledge base — one JSON file per category (BIS; legal_metrology.json holds
+                              official Legal Metrology texts, source_authority LEGAL_METROLOGY)
   inspection_requirements.json requirements quoted word for word from verified knowledge records
 samples/ocr-labels/           sample label images for the inspection pipeline
 frontend/                     React 19 · TypeScript · Vite · Tailwind v4
@@ -246,7 +248,8 @@ authoritative gate. Model-dependent tests use a stub — no LM Studio needed.
 Phases 1–14 are complete (see [`CLAUDE.md`](CLAUDE.md) for the full log). What remains:
 
 - [x] **Compliance engine** — deterministic PASS / FAIL / REVIEW over verified requirements (currently 2 of 36 standards have checkable requirements; everything else is `STANDARD_ONLY` → REVIEW)
-- [ ] **Requirement coverage** — more verified requirements; Legal Metrology (Packaged Commodities) declaration rules are not in the knowledge base yet
+- [x] **Legal Metrology package-label requirements** — 11 requirements from the Legal Metrology (Packaged Commodities) Rules, 2011 and amendments (official Department of Consumer Affairs PDFs); 6 are checked deterministically (MRP, net quantity, manufacturer name + address, commodity name, month and year of manufacture, consumer-care phone + e-mail), 5 cannot be checked from a photo. Reported separately from BIS compliance.
+- [ ] **Requirement coverage** — more verified BIS requirements (still 1 checkable BIS rule)
 - [ ] **Officer review & report** — human sign-off, PDF, inspection history (currently placeholder data)
 
 ---

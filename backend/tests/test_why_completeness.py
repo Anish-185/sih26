@@ -221,16 +221,20 @@ def test_completeness() -> None:
     check("9 uncertain field (label with no readable value)", batch.status == "UNCERTAIN" and not batch.conflict
           and batch.statement.startswith("Uncertain:"), batch.statement)
 
-    check("10 no verified requirement for chana fields -> NOT_ESTABLISHED everywhere",
-          all(i.requirement_coverage == "NOT_ESTABLISHED" for i in res.completeness.items))
+    # Milestone 8: Legal Metrology package-label requirements also link fields
+    # (tested in test_legal_metrology.py). Here only BIS links are asserted.
+    bis_ids = {r.id for r in REAL.requirements if r.scope == "STANDARD"}
+    check("10 no verified BIS requirement for chana fields -> no BIS-linked field",
+          not any(set(i.requirement_ids) & bis_ids for i in res.completeness.items))
     water = package({F: lines(*WATER), B: lines("IS 14543", big_first=False)}, [(F, "FRONT"), (B, "BACK")])
     cov = {i.field: i.requirement_coverage for i in water.completeness.items}
-    check("10/16 only the field used by a verified requirement is VERIFIED_REQUIREMENT",
-          [f for f, c in cov.items() if c == "VERIFIED_REQUIREMENT"] == ["standard_number"], str(cov))
+    check("10/16 only the field used by a verified BIS requirement is BIS-linked",
+          [i.field for i in water.completeness.items if set(i.requirement_ids) & bis_ids] == ["standard_number"],
+          str(cov))
     check("16 VERIFIED_REQUIREMENT names the real requirement id",
           next(i for i in water.completeness.items if i.field == "standard_number").requirement_ids
           == ["packaged-water-label-shows-is-number"])
-    grounded = {r.declaration_field for r in REAL.requirements if r.supported}
+    grounded = {name for r in REAL.requirements if r.supported for name in r.fields}
     check("16 no field is claimed as required without a verified requirement",
           {i.field for i in water.completeness.items if i.requirement_coverage == "VERIFIED_REQUIREMENT"} <= grounded)
     for i in res.completeness.items + water.completeness.items:

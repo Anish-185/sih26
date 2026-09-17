@@ -1,5 +1,52 @@
 {
-  "_comment": "Inspection coverage data used by the deterministic compliance engine (backend/app/requirements.py, backend/app/compliance.py). PRODUCT -> STANDARD -> REQUIREMENT -> RULE -> EVIDENCE. Every product -> standard link and every requirement must quote, word for word, a sentence from a VERIFIED record in data/knowledge/, and name standard numbers that exist in data/knowledge/indian_standards.json. Product aliases must be phrases of that standard record's title or keywords. applies_to_products limits a requirement to some products; without it a requirement applies to every product under its standards. rule_type is either a rule the engine implements or \"not_supported\" (a verified requirement that cannot be checked from a package image; it is shown, never scored). domain is PACKAGE_LABEL for package inspection; a PACKAGE_LABEL requirement or product link may not use jewellery hallmarking records, standards or hallmark/HUID quotes. The loader rejects anything else. Do not add a product, link or requirement that is not stated in the knowledge base. Print the resulting coverage matrix with backend/scripts/check_knowledge.py (or GET /inspection/coverage).",
+  "_comment": "Inspection coverage data used by the deterministic compliance engine (backend/app/requirements.py, backend/app/compliance.py). PRODUCT -> STANDARD -> REQUIREMENT -> RULE -> EVIDENCE. Every product -> standard link and every requirement must quote, word for word, a sentence from a VERIFIED record in data/knowledge/, and name standard numbers that exist in data/knowledge/indian_standards.json. Product aliases must be phrases of that standard record's title or keywords. applies_to_products limits a requirement to some products; without it a requirement applies to every product under its standards. rule_type is either a rule the engine implements or \"not_supported\" (a verified requirement that cannot be checked from a package image; it is shown, never scored). domain is PACKAGE_LABEL for package inspection; a PACKAGE_LABEL requirement or product link may not use jewellery hallmarking records, standards or hallmark/HUID quotes. The loader rejects anything else. Do not add a product, link or requirement that is not stated in the knowledge base. Legal Metrology: a requirement with scope PACKAGED_COMMODITY applies to pre-packaged commodities in general (no applies_to), must quote a Legal Metrology record (source_authority LEGAL_METROLOGY) and give its rule reference; package_scope states when these requirements apply (Rule 3), with observable exclusions (implemented in backend/app/package_label.py) and the assumptions a label cannot show. A STANDARD-scope requirement must quote a BIS record. Print the resulting coverage matrix with backend/scripts/check_knowledge.py (or GET /inspection/coverage).",
+  "package_scope": {
+    "source_category": "LEGAL_METROLOGY",
+    "description": "Chapter II of the Legal Metrology (Packaged Commodities) Rules, 2011 (provisions applicable to packages intended for retail sale, including the Rule 6 declarations) applies to pre-packaged commodities, except the packages Rule 3 excludes.",
+    "source_knowledge_id": "lm-pcr-amendment-rules-2017",
+    "source_quote": "The provisions of this chapter shall not apply to-",
+    "exclusions": [
+      {
+        "id": "NET_QUANTITY_ABOVE_25_KG_OR_25_L",
+        "description": "The package declares a net quantity of more than 25 kg or 25 litre (Rule 3(a)).",
+        "sources": [
+          {
+            "source_knowledge_id": "lm-pcr-amendment-rules-2017",
+            "source_quote": "(a) packages of commodities containing quantity of more than 25 kilogram or 25 litre;"
+          }
+        ]
+      },
+      {
+        "id": "NOT_FOR_RETAIL_SALE_DECLARED",
+        "description": "The package declares 'not for retail sale', the declaration borne by packages for industrial or institutional consumers (Rule 3(c), Rule 2(bb), Rule 2(bc)).",
+        "sources": [
+          {
+            "source_knowledge_id": "lm-pcr-amendment-rules-2017",
+            "source_quote": "(c) packaged commodities meant for industrial consumers or institutional consumers."
+          },
+          {
+            "source_knowledge_id": "lm-pcr-amendment-rules-2017",
+            "source_quote": "means the institution which buys packaged commodities bearing a declaration 'not for retail sale'"
+          },
+          {
+            "source_knowledge_id": "lm-pcr-amendment-rules-2015",
+            "source_quote": "for use by that industry and the package shall have declaration 'not for retail sale'"
+          }
+        ]
+      }
+    ],
+    "assumptions": ["The package is a pre-packaged commodity intended for retail sale, not one meant for an industrial or institutional consumer. A label only shows the opposite when it declares 'not for retail sale'.", "Cement, fertilizer and agricultural farm produce in bags above 50 kg are excluded by Rule 3(b). MetrIQ does not identify these commodities; such a bag also declares more than 25 kg, which is checked.", "For packages containing medical devices the declarations follow the Medical Devices Rules, 2017. MetrIQ does not identify medical devices.", "Commodity-specific provisos and exemptions in the Rules (for particular commodities or package types) are not modelled. An officer should confirm them before acting on a result."],
+    "assumption_sources": [
+      {
+        "source_knowledge_id": "lm-pcr-amendment-rules-2017",
+        "source_quote": "(b) cement, fertilizer and agricultural farm produce sold in bags above 50 kilogram; and"
+      },
+      {
+        "source_knowledge_id": "lm-pcr-amendment-rules-2025-medical-devices",
+        "source_quote": "Provided that for packages containing medical devices, the provisions of the Medical Devices Rules, 2017, shall apply to make declarations;"
+      }
+    ]
+  },
   "products": [
     {
       "id": "packaged-drinking-water",
@@ -92,6 +139,237 @@
       "unsupported_reason": "Registration is held in BIS records, not on the package. OCR can read a registration number printed on a label, but MetrIQ does not check registrations, and the knowledge base does not say how a registration must be shown on the package, so this cannot be decided from the image.",
       "source_knowledge_id": "products-under-compulsory-registration-scheme-ii",
       "source_quote": "BIS publishes a list of electronics and IT goods that require BIS registration under the Compulsory Registration Scheme (Scheme II) before they can be sold in India."
+    },
+    {
+      "id": "lm-retail-sale-price-declared",
+      "domain": "PACKAGE_LABEL",
+      "scope": "PACKAGED_COMMODITY",
+      "reference": "Rule 6(1)(e)",
+      "description": "The package declares its retail sale price as the maximum retail price (MRP), inclusive of all taxes, in Indian currency.",
+      "applicability": "Every package within the scope of Chapter II. The Rules exempt some commodities (not modelled).",
+      "rule_type": "value_format",
+      "format": "retail_sale_price_inclusive_of_taxes_in_indian_currency",
+      "declaration_field": "mrp",
+      "parameters": {
+        "min_ocr_confidence_pass": 0.8
+      },
+      "source_knowledge_id": "lm-pcr-amendment-rules-2017",
+      "source_quote": "shall clearly indicate that it is the maximum retail price inclusive of all taxes",
+      "supporting_sources": [
+        {
+          "source_knowledge_id": "lm-pcr-2011-principal-rules-declarations",
+          "source_quote": "the retail sale price of the package;"
+        },
+        {
+          "source_knowledge_id": "lm-pcr-amendment-rules-2021",
+          "source_quote": "in clause (e), for the words commencing with \"and the price in rupees and paisa\", and ending with \"(d) MRP Rs. ₹ xx.xx(inclusive of all taxes):\", the words \"in Indian currency:\" shall be substituted;"
+        },
+        {
+          "source_knowledge_id": "lm-pcr-amendment-rules-2017",
+          "source_quote": "means the maximum price at which the commodity in packaged form may be sold to the consumer inclusive of all taxes;"
+        }
+      ]
+    },
+    {
+      "id": "lm-net-quantity-declared",
+      "domain": "PACKAGE_LABEL",
+      "scope": "PACKAGED_COMMODITY",
+      "reference": "Rule 6(1)(c); Rule 13(4)–(5)",
+      "description": "The package declares its net quantity as a number with a standard (SI) unit of weight or measure, or as a number of items.",
+      "applicability": "Every package within the scope of Chapter II.",
+      "rule_type": "value_format",
+      "format": "net_quantity_in_standard_units",
+      "declaration_field": "net_quantity",
+      "parameters": {
+        "min_ocr_confidence_pass": 0.8,
+        "min_ocr_confidence_fail": 0.9
+      },
+      "source_knowledge_id": "lm-pcr-2011-principal-rules-declarations",
+      "source_quote": "The net quantity, in terms of the standard unit of weight or measure, of the commodity contained in the package or where the commodity is packed or sold by number, the number of the commodity contained in the package shall be mentioned.",
+      "supporting_sources": [
+        {
+          "source_knowledge_id": "lm-pcr-2011-principal-rules-declarations",
+          "source_quote": "No system of units other than the International System of Units shall be used in furnishing the net quantity of the package;"
+        },
+        {
+          "source_knowledge_id": "lm-pcr-2011-principal-rules-declarations",
+          "source_quote": "No number called the dozen, score, gross, great gross or the like shall be specified or indicated on any package"
+        },
+        {
+          "source_knowledge_id": "lm-pcr-amendment-rules-2021",
+          "source_quote": "for items sold by number, the number or unit or piece or pair or set or such other word which represents the quantity in the package shall be mentioned."
+        },
+        {
+          "source_knowledge_id": "lm-pcr-amendment-rules-2015",
+          "source_quote": "it shall be permissible to affix a label on imported packages for making the declarations required under these rules."
+        }
+      ]
+    },
+    {
+      "id": "lm-manufacturer-name-and-address",
+      "domain": "PACKAGE_LABEL",
+      "scope": "PACKAGED_COMMODITY",
+      "reference": "Rule 6(1)(a)",
+      "description": "The package declares the name and address of the manufacturer (or, for an imported package, the importer).",
+      "applicability": "Packages within the scope of Chapter II that do not contain food articles. Where the manufacturer is not the packer, the packer's name and address are also required (not separately checked).",
+      "rule_type": "field_present",
+      "declaration_fields": [["manufacturer", "importer"], ["manufacturer_address"]],
+      "require_same_image": true,
+      "parameters": {
+        "min_ocr_confidence_pass": 0.8
+      },
+      "exclusions": [
+        {
+          "id": "FOOD_ARTICLE_FSSAI_LICENCE",
+          "description": "An FSSAI licence number is read on the package, so it contains a food article; for food articles Rule 6(1)(a) does not apply and the Food Safety and Standards Act, 2006 and its rules apply instead.",
+          "sources": [
+            {
+              "source_knowledge_id": "lm-pcr-amendment-rules-2017",
+              "source_quote": "In respect of packages containing food articles, the provisions of this clause shall not apply, but the provisions of, and the requirements specified in the Food Safety and Standards Act, 2006 (34 of 2006) and the rules made thereunder shall apply;"
+            }
+          ]
+        }
+      ],
+      "source_knowledge_id": "lm-pcr-2011-principal-rules-declarations",
+      "source_quote": "the name and address of the manufacturer, or where the manufacturer is not the packer, the name and address of the manufacturer and packer and for any imported package the name and address of the importer shall be mentioned",
+      "supporting_sources": [
+        {
+          "source_knowledge_id": "lm-pcr-amendment-rules-2017",
+          "source_quote": "the name of the street, number (if any) assigned to the premises of the manufacturer or packer or importer and the name of the city and State where the business is carried on by the manufacturer or packer or importer and the Postal Index Number [PIN] Code"
+        }
+      ]
+    },
+    {
+      "id": "lm-common-or-generic-name",
+      "domain": "PACKAGE_LABEL",
+      "scope": "PACKAGED_COMMODITY",
+      "reference": "Rule 6(1)(b)",
+      "description": "The package declares the common or generic name of the commodity it contains.",
+      "applicability": "Every package within the scope of Chapter II. Packages with more than one product must also name each product with its number or quantity (not separately checked).",
+      "rule_type": "field_present",
+      "declaration_field": "product_name",
+      "parameters": {
+        "min_ocr_confidence_pass": 0.8
+      },
+      "source_knowledge_id": "lm-pcr-2011-principal-rules-declarations",
+      "source_quote": "The common or generic names of the commodity contained in the package and in case of packages with more than one product, the name and number or quantity of each product shall be mentioned on the package."
+    },
+    {
+      "id": "lm-month-and-year-of-manufacture",
+      "domain": "PACKAGE_LABEL",
+      "scope": "PACKAGED_COMMODITY",
+      "reference": "Rule 6(1)(d)",
+      "description": "The package declares the month and year in which the commodity was manufactured, in words and/or numerals.",
+      "applicability": "Packages within the scope of Chapter II that do not contain food articles. The Rules provide further commodity-specific provisos (not modelled).",
+      "rule_type": "date_format",
+      "format": "month_and_year",
+      "declaration_field": "manufacturing_date",
+      "parameters": {
+        "min_ocr_confidence_pass": 0.8
+      },
+      "exclusions": [
+        {
+          "id": "FOOD_ARTICLE_FSSAI_LICENCE",
+          "description": "An FSSAI licence number is read on the package, so it contains a food article; for food articles the month-and-year declaration follows the Food Safety and Standards Act, 2006 and its rules (proviso to Rule 6(1)(d), as amended in 2012).",
+          "sources": [
+            {
+              "source_knowledge_id": "lm-pcr-2011-principal-rules-declarations",
+              "source_quote": "Provided that for packages containing food articles, the provisions of the Prevention of Food Adulteration Act 1954 (37 of 1954) and the rules made there under shall apply:"
+            },
+            {
+              "source_knowledge_id": "lm-pcr-amendment-rules-2012",
+              "source_quote": "in sub-rule (1), for the words \"Prevention of Food Adulteration Act, 1954 (37 of 1954)\" the words \"Food Safety and Standards Act, 2006 (34 of 2006)\" shall be substituted;"
+            }
+          ]
+        }
+      ],
+      "source_knowledge_id": "lm-pcr-2011-principal-rules-declarations",
+      "source_quote": "The month and year in which the commodity is manufactured or pre-packed or imported shall be mentioned in the package:",
+      "supporting_sources": [
+        {
+          "source_knowledge_id": "lm-pcr-amendment-rules-2021",
+          "source_quote": "in clause (d), the words, \"or pre-packed or imported\" shall be omitted;"
+        },
+        {
+          "source_knowledge_id": "lm-pcr-2011-principal-rules-declarations",
+          "source_quote": "The month and the year in which commodity is pre-packed may be expressed either in words, or by numerals indicating the month and the year, or by both."
+        }
+      ]
+    },
+    {
+      "id": "lm-consumer-complaint-phone-and-email",
+      "domain": "PACKAGE_LABEL",
+      "scope": "PACKAGED_COMMODITY",
+      "reference": "Rule 6(2)",
+      "description": "The package shows a telephone number and an e-mail address for consumer complaints.",
+      "applicability": "Every package within the scope of Chapter II.",
+      "rule_type": "field_present",
+      "declaration_fields": [["toll_free"], ["consumer_care"]],
+      "parameters": {
+        "min_ocr_confidence_pass": 0.8
+      },
+      "source_knowledge_id": "lm-pcr-amendment-rules-2015",
+      "source_quote": "(2) Every package shall bear the name, address, telephone number, e-mail address of the person who can be or the office which can be contacted, in case of consumer complaints."
+    },
+    {
+      "id": "lm-consumer-complaint-name-and-address",
+      "domain": "PACKAGE_LABEL",
+      "scope": "PACKAGED_COMMODITY",
+      "reference": "Rule 6(2)",
+      "description": "The package shows the name and address of the person or office to contact for consumer complaints.",
+      "applicability": "Every package within the scope of Chapter II.",
+      "rule_type": "not_supported",
+      "unsupported_reason": "MetrIQ can read names and addresses on a label, but cannot deterministically tell which one is given for consumer complaints (it may be the manufacturer's address or a separate office), so this part of Rule 6(2) is not decided from the image.",
+      "source_knowledge_id": "lm-pcr-amendment-rules-2015",
+      "source_quote": "(2) Every package shall bear the name, address, telephone number, e-mail address of the person who can be or the office which can be contacted, in case of consumer complaints."
+    },
+    {
+      "id": "lm-unit-sale-price",
+      "domain": "PACKAGE_LABEL",
+      "scope": "PACKAGED_COMMODITY",
+      "reference": "Rule 6(11)",
+      "description": "The package declares the unit sale price in rupees (per gram / kilogram, millilitre / litre, centimetre / metre, or per number or unit).",
+      "applicability": "Pre-packaged commodities, except where the retail sale price equals the unit sale price and other cases the Rules exempt.",
+      "rule_type": "not_supported",
+      "unsupported_reason": "MetrIQ does not extract a unit sale price declaration yet, and whether one is required depends on conditions (for example the retail sale price equalling the unit sale price) that are not modelled.",
+      "source_knowledge_id": "lm-pcr-amendment-rules-2022-unit-sale-price",
+      "source_quote": "(11) The unit sale price in rupees, rounded off to the nearest two decimal place, shall be declared on every pre-packaged commodities in the following manner, namely:-"
+    },
+    {
+      "id": "lm-country-of-origin-imported",
+      "domain": "PACKAGE_LABEL",
+      "scope": "PACKAGED_COMMODITY",
+      "reference": "Rule 6(1)(aa)",
+      "description": "An imported product's package names the country of origin, manufacture or assembly.",
+      "applicability": "Imported products only.",
+      "rule_type": "not_supported",
+      "unsupported_reason": "This applies only to imported products. MetrIQ does not extract a country-of-origin declaration and cannot establish from a label alone whether a product is imported.",
+      "source_knowledge_id": "lm-pcr-amendment-rules-2017",
+      "source_quote": "(aa) The name of the country of origin or manufacture or assembly in case of imported products shall be mentioned on the package;"
+    },
+    {
+      "id": "lm-best-before-or-use-by",
+      "domain": "PACKAGE_LABEL",
+      "scope": "PACKAGED_COMMODITY",
+      "reference": "Rule 6(1)(da)",
+      "description": "A package of a commodity that may become unfit for human consumption shows a 'best before' or 'use by' date, month and year.",
+      "applicability": "Only commodities that may become unfit for human consumption after a period of time, where no other law provides for it.",
+      "rule_type": "not_supported",
+      "unsupported_reason": "Whether it applies depends on the commodity and on other laws (for food, the Food Safety and Standards Act). MetrIQ cannot establish that from the label, so a best-before / use-by date is reported as an observation only.",
+      "source_knowledge_id": "lm-pcr-amendment-rules-2017",
+      "source_quote": "(da) If a package contains a commodity which may become unfit for human consumption after a period of time, the 'best before or use by the date, month and year' shall also be mentioned on the label:"
+    },
+    {
+      "id": "lm-declaration-character-height",
+      "domain": "PACKAGE_LABEL",
+      "scope": "PACKAGED_COMMODITY",
+      "reference": "Rule 7(2) and Table-I",
+      "description": "Numerals and letters in the declarations meet the minimum height for the principal display panel area.",
+      "applicability": "Every package within the scope of Chapter II (subject to Rule 7(5)).",
+      "rule_type": "not_supported",
+      "unsupported_reason": "The minimum height depends on the physical area of the principal display panel and on printed character sizes in millimetres. A photo has no reliable physical scale, so this cannot be measured from the image.",
+      "source_knowledge_id": "lm-pcr-amendment-rules-2017",
+      "source_quote": "(2) The height of any numeral and letter in the declaration required under these rules shall be as per Table-I."
     }
   ]
 }

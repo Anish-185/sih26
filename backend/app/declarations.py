@@ -502,12 +502,25 @@ def _hits(regions, pattern: re.Pattern, valid=lambda m: True) -> list[_Hit]:
 _MRP_LABEL = r"(?:\bm\s*\.?\s*r\s*\.?\s*p\b\.?|\bmaximum\s+retail\s+price\b)"
 _RE_MRP = re.compile(
     _MRP_LABEL + r"\s*(?:\((?:incl|inclusive)[^)]*\))?\s*[:\-]?\s*"
-    r"(?:rs\.?|inr|₹|rupees)?\s*(\d+(?:[.,]\d{1,2})?)",
+    r"(?:rs\.?|inr|₹|rupees)?\s*(\d+(?:[.,]\d{1,2})?)" + r"(?![a-z0-9]|[.,]\d)",
     re.IGNORECASE,
 )
 _RE_MRP_LABEL = re.compile(_MRP_LABEL, re.IGNORECASE)
-_RE_PRICE_BARE = re.compile(r"(?:₹|\brs\.?)\s*(\d+(?:[.,]\d{1,2})?)", re.IGNORECASE)
+# A price must end cleanly: "Rs. 8O" (letter O misread for a zero) is not read as ₹8.
+_PRICE_END = r"(?![a-z0-9]|[.,]\d)"
+_RE_PRICE_BARE = re.compile(r"(?:₹|\brs\.?)\s*(\d+(?:[.,]\d{1,2})?)" + _PRICE_END, re.IGNORECASE)
+_RE_MRP_MALFORMED = re.compile(
+    _MRP_LABEL + r"\s*(?:\((?:incl|inclusive)[^)]*\))?\s*[:\-]?\s*(?:rs\.?|inr|₹|rupees)\s*(\d[\w.,]*)",
+    re.IGNORECASE,
+)
 _RE_INCL_TAX = re.compile(r"incl(?:\.|usive)?\s*of\s*all\s*taxes", re.IGNORECASE)
+# An MRP printed in a currency other than the rupee ("MRP US$ 4.99"). Kept as a
+# reading with its currency so a rule can see it; never converted.
+_FOREIGN_CURRENCY = {"$": "USD", "us$": "USD", "usd": "USD", "€": "EUR", "eur": "EUR", "£": "GBP", "gbp": "GBP"}
+_RE_MRP_FOREIGN = re.compile(
+    _MRP_LABEL + r"\s*[:\-]?\s*(us\s?\$|\$|usd|eur|€|£|gbp)\s*(\d+(?:[.,]\d{1,2})?)" + _PRICE_END,
+    re.IGNORECASE,
+)
 
 
 def _mrp(regions):
@@ -522,8 +535,23 @@ def _mrp(regions):
         )
 
     labelled = [cand(h) for h in _hits(regions, _RE_MRP)]
+    for h in _hits(regions, _RE_MRP_FOREIGN):
+        currency = _FOREIGN_CURRENCY[re.sub(r"\s+", "", h.match.group(1).lower())]
+        val = _num(h.match.group(2))
+        labelled.append(_Cand(
+            regions=h.regions, value=f"{currency} {h.match.group(2)}", key=(currency, val), unit=currency,
+            numeric_value=val, note="price declared in a currency other than the Indian rupee",
+        ))
     if labelled:
         return _resolve("mrp", labelled)
+    for r in regions:  # "MRP Rs. 8O": a labelled price that is not a clean number — kept, value withheld
+        m = _RE_MRP_MALFORMED.search(r.text)
+        if m:
+            return _build("mrp", _Cand(
+                regions=[r], value=None,
+                uncertain=f"Found an MRP label, but the amount '{m.group(1)}' is not a clean number (possible OCR "
+                          "misread), so no value was taken.",
+            ))
     label_only = _label_only("mrp", regions, _RE_MRP_LABEL, "MRP")
     if label_only:
         return label_only
@@ -540,6 +568,16 @@ _RE_NET_QTY = re.compile(
 _RE_NET_LABEL = re.compile(_NET_LABEL, re.IGNORECASE)
 _RE_NUTRITION = re.compile(r"nutrition|serving", re.IGNORECASE)
 _RE_QTY_ALONE = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*" + _UNITS + r"\s*$", re.IGNORECASE)
+# Net quantity stated in a unit outside the SI ("16 oz", "2 lb") or as a dozen.
+# Read as-is (unit kept) only when no SI net quantity was found.
+_OTHER_UNITS = r"(fl\.?\s*oz|oz|ounces?|lbs?|pounds?|dozens?|doz)"
+_RE_NET_QTY_NO_UNIT = re.compile(_NET_LABEL + r"\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(?![\w%])", re.IGNORECASE)
+_OTHER_UNIT_CANON = {"oz": "oz", "ounce": "oz", "ounces": "oz", "lb": "lb", "lbs": "lb", "pound": "lb",
+                     "pounds": "lb", "dozen": "dozen", "dozens": "dozen", "doz": "dozen"}
+_RE_NET_QTY_OTHER = re.compile(
+    _NET_LABEL + r"\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*" + _OTHER_UNITS + r"(?![a-z])",
+    re.IGNORECASE,
+)
 
 
 def _qty_cand(hit: _Hit, uncertain: str = "") -> _Cand:
@@ -550,10 +588,29 @@ def _qty_cand(hit: _Hit, uncertain: str = "") -> _Cand:
                  unit=unit, numeric_value=val, uncertain=uncertain)
 
 
+def _other_unit(raw: str) -> str:
+    key = re.sub(r"[\s.]+", "", raw.lower())
+    return "fl oz" if key.startswith("floz") else _OTHER_UNIT_CANON.get(key, key)
+
+
 def _net_quantity(regions):
     labelled = [_qty_cand(h) for h in _hits(regions, _RE_NET_QTY)]
     if labelled:
         return _resolve("net_quantity", labelled)
+    other = []
+    for h in _hits(regions, _RE_NET_QTY_OTHER):
+        unit, val = _other_unit(h.match.group(2)), _num(h.match.group(1))
+        other.append(_Cand(regions=h.regions, value=f"{h.match.group(1)} {unit}", key=(val, unit), unit=unit,
+                           numeric_value=val, note="net quantity stated without an SI unit"))
+    if other:
+        return _resolve("net_quantity", other)
+    no_unit = [
+        _Cand(regions=h.regions, value=h.match.group(1), key=("no unit", h.match.group(1)),
+              uncertain="A net quantity number was read without a unit of weight, measure or number.")
+        for h in _hits(regions, _RE_NET_QTY_NO_UNIT)
+    ]
+    if no_unit:
+        return _resolve("net_quantity", no_unit)
     label_only = _label_only("net_quantity", regions, _RE_NET_LABEL, "Net quantity")
     if label_only:
         return label_only

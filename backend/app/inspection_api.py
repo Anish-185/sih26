@@ -33,6 +33,8 @@ from app.inspection import (
     CoverageMatrixOut,
     CoverageRowOut,
     CoverageTotalsOut,
+    LegalMetrologyCoverageOut,
+    PackageRequirementRowOut,
     ImageError,
     InspectionAnalysisOut,
     InspectionAnalyzer,
@@ -41,7 +43,13 @@ from app.inspection import (
     StandardCoverageOut,
 )
 from app.llm import LocalLLM
-from app.requirements import coverage_by_standard, coverage_matrix, load_requirements
+from app.requirements import (
+    coverage_by_standard,
+    coverage_matrix,
+    coverage_totals,
+    load_requirements,
+    package_requirement_rows,
+)
 from app.ocr import OcrError
 
 router = APIRouter(prefix="/inspection", tags=["inspection"])
@@ -147,17 +155,26 @@ async def analyze(
 
 @router.get("/coverage", response_model=CoverageMatrixOut)
 def coverage() -> CoverageMatrixOut:
-    """MetrIQ's inspection coverage matrix, read from the verified data files."""
+    """MetrIQ's inspection coverage, read from the verified data files. BIS standards and
+    Legal Metrology package-label requirements are reported separately."""
     items = get_product_finder().search_engine.items
     requirements = load_requirements(items)
     standards = coverage_by_standard(items, requirements)
-    count = lambda status: sum(c.coverage_status == status for c in standards)  # noqa: E731
+    totals = coverage_totals(items, requirements)
+    scope = requirements.package_scope
     return CoverageMatrixOut(
         totals=CoverageTotalsOut(
-            total=len(standards), inspection_supported=count("INSPECTION_SUPPORTED"),
-            standard_only=count("STANDARD_ONLY"), unsupported=count("UNSUPPORTED"),
+            total=totals.bis_standards, inspection_supported=totals.bis_inspection_supported,
+            standard_only=totals.bis_standard_only, unsupported=totals.bis_unsupported,
+            **{k: v for k, v in totals.__dict__.items() if not k.startswith("bis_") or k in ("bis_requirements", "bis_rules")},
         ),
         standards=[StandardCoverageOut(**c.__dict__) for c in standards],
         rows=[CoverageRowOut(**r.__dict__) for r in coverage_matrix(items, requirements)],
+        legal_metrology=LegalMetrologyCoverageOut(
+            scope=scope.description if scope else "",
+            exclusions=[e.description for e in scope.exclusions] if scope else [],
+            assumptions=list(scope.assumptions) if scope else [],
+            requirements=[PackageRequirementRowOut(**r.__dict__) for r in package_requirement_rows(requirements)],
+        ),
         errors=list(requirements.errors),
     )

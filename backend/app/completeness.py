@@ -7,14 +7,15 @@ For every declaration field MetrIQ searches for, report two separate facts:
   value, or CONFLICT between photos) or NOT_DETECTED.
 * ``requirement_coverage`` — what MetrIQ knows about whether the field is
   required: ``VERIFIED_REQUIREMENT`` when a verified, checkable requirement that
-  applies to the identified product and standard uses this field, otherwise
-  ``NOT_ESTABLISHED``. An observation is not a requirement: detecting an MRP
+  applies to this package uses this field — a BIS requirement of the identified
+  product and standard, or an applicable Legal Metrology package-label
+  requirement — otherwise ``NOT_ESTABLISHED``. An observation is not a requirement: detecting an MRP
   does not make MRP required, and not detecting it does not make it missing.
 
 NOT_DETECTED only ever means "not found in the OCR text of the uploaded
-photos". It is never reported as legally missing: no verified requirement in
-the knowledge base currently says any declaration field must appear, and even
-where one does, the compliance check — not this view — decides the result.
+photos". It is never reported as legally missing: even where a verified
+requirement says a declaration must appear, the compliance / package-label
+check — not this view — decides the result, and absence is never a failure.
 When some photos could not be read, a field not found elsewhere is marked as
 undeterminable for those photos. Deterministic; no model involved.
 """
@@ -61,7 +62,7 @@ class DeclarationCompleteness:
         "These are observations of the OCR evidence from the uploaded photos only. "
         "\"Not detected\" only means it was not found in these photos; it is not a finding about the "
         "package and not a legal determination. A field is linked to a requirement only where MetrIQ "
-        "holds a verified, checkable requirement for the identified product and standard."
+        "holds a verified, checkable requirement that applies to this package (BIS or Legal Metrology)."
     )
 
 
@@ -77,14 +78,17 @@ def declaration_completeness(
     standard_number: str | None,
     unreadable_images: list[str] | tuple = (),
     product_id: str | None = None,
+    extra_requirements: dict[str, list[str]] | None = None,
 ) -> DeclarationCompleteness:
     """``product_id`` is the product confirmed by the compliance engine; only
-    requirements that apply to it (or to every product under the standard) count."""
+    requirements that apply to it (or to every product under the standard) count.
+    ``extra_requirements`` maps field -> ids of applied Legal Metrology requirements."""
     unreadable = list(unreadable_images)
-    required_by: dict[str, list[str]] = {}
+    required_by: dict[str, list[str]] = {k: list(v) for k, v in (extra_requirements or {}).items()}
     for req in requirements.for_product(standard_number, product_id):
-        if req.supported and req.declaration_field:
-            required_by.setdefault(req.declaration_field, []).append(req.id)
+        if req.supported:
+            for name in req.fields:
+                required_by.setdefault(name, []).append(req.id)
 
     items: list[CompletenessItem] = []
     for d in declarations.fields:

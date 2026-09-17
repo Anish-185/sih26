@@ -184,7 +184,14 @@ class SearchEngine:
         self.config = config or RetrievalConfig()
         load = load_knowledge_base(knowledge_dir)
         self.load_errors = load.errors
-        self._index: list[_IndexedItem] = [self._index_item(it) for it in load.items]
+        self._items = list(load.items)
+        # Only BIS items are searchable: every search feature (Q&A, Product ->
+        # Standard, certification, laboratories) presents its results as BIS
+        # sources. Legal Metrology items are loaded (see ``items``) for inspection
+        # requirements, never mixed into BIS search results.
+        self._index: list[_IndexedItem] = [
+            self._index_item(it) for it in load.items if it.source_authority == "BIS"
+        ]
 
     # ------------------------------------------------------------------ indexing
 
@@ -208,8 +215,8 @@ class SearchEngine:
 
     @property
     def items(self) -> list[KnowledgeItem]:
-        """Every loaded knowledge item, in load order (read-only use)."""
-        return [indexed.item for indexed in self._index]
+        """Every loaded knowledge item (BIS and Legal Metrology), in load order (read-only use)."""
+        return list(self._items)
 
     # ------------------------------------------------------------------ scoring
 

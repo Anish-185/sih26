@@ -281,14 +281,16 @@ def test_knowledge() -> None:
     check("coverage totals 2 / 30 / 4 of 36, no fake rules",
           (len(by_std), counts["INSPECTION_SUPPORTED"], counts["STANDARD_ONLY"], counts["UNSUPPORTED"]) == (36, 2, 30, 4),
           str(counts))
-    check("only one checkable rule exists in the data (nothing invented)",
-          [r.id for r in REAL.requirements if r.supported] == ["packaged-water-label-shows-is-number"])
+    check("only one checkable BIS rule exists in the data (nothing invented)",
+          [r.id for r in REAL.requirements if r.supported and r.scope == "STANDARD"]
+          == ["packaged-water-label-shows-is-number"])
     for c in by_std.values():
         check(f"coverage row has a reason and source ({c.standard_number})", bool(c.reason) and bool(c.source_document))
 
     body = TestClient(app).get("/inspection/coverage").json()
     check("GET /inspection/coverage exposes totals + reasons",
-          body["totals"] == {"total": 36, "inspection_supported": 2, "standard_only": 30, "unsupported": 4}
+          {k: body["totals"][k] for k in ("total", "inspection_supported", "standard_only", "unsupported")}
+          == {"total": 36, "inspection_supported": 2, "standard_only": 30, "unsupported": 4}
           and all(s["reason"] for s in body["standards"]), str(body.get("totals")))
 
     _, water_product, stage = evaluate(WATER + ["IS 14543"])

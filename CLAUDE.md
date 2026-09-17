@@ -330,6 +330,32 @@ contains KB product vocabulary or the label says "Product name:"; a brand-like l
 product name. The remaining work is verified requirement data and the officer review / report
 surface.
 
+Milestone 8 (verified Legal Metrology package-label requirements): the knowledge base gains a
+`legal_metrology` category (`data/knowledge/legal_metrology.json`) whose items have
+`source_authority: LEGAL_METROLOGY` (every other item is `BIS`; the schema enforces the pairing).
+Records quote the Legal Metrology (Packaged Commodities) Rules, 2011 and its 2012 / 2015 / 2017 /
+2021 / 2022 / 2025 amendments from official Department of Consumer Affairs PDFs
+(`consumeraffairs.gov.in`); every quote was checked against the PDFs (text layer, or OCR + page image
+for scanned Gazettes). BIS search indexes BIS items only. `inspection_requirements.json` gains
+`package_scope` (Rule 3: observable exclusions — net quantity > 25 kg / 25 L, "not for retail sale" —
+and stated assumptions a label cannot show) and `scope: PACKAGED_COMMODITY` requirements (domain
+PACKAGE_LABEL, `reference` such as "Rule 6(1)(e)", `supporting_sources`, per-requirement `exclusions`
+such as food articles via an FSSAI licence for Rules 6(1)(a) / 6(1)(d)). The loader rejects a
+packaged-commodity requirement quoting BIS evidence, a BIS requirement quoting Legal Metrology
+evidence, unimplemented formats / exclusions and hallmarking evidence. `app/package_label.py`
+evaluates them as a separate result (`package_label` in `/inspection/analyze`, `pipeline.package_label`)
+— never merged with BIS compliance. Generic rules in `app/compliance.py`: `field_present`
+(PASS or REVIEW, never FAIL), `value_format` (MRP inclusive of all taxes in Indian currency — PASS or
+REVIEW, a foreign-currency MRP is REVIEW because Rule 6(9) allows an affixed label; net quantity in SI
+units — FAIL only for a dozen, Rule 13(4)), `date_format` (month and year, PASS or REVIEW; a packing date
+alone is REVIEW). 11 Legal Metrology requirements, 6 checkable; overall PASS only when every applicable
+requirement was checked, so with uncheckable areas the overall is REVIEW. Declaration extraction no
+longer reads "Rs. 8O" as ₹8 (UNCERTAIN, value withheld). Coverage report / `GET /inspection/coverage`
+separate BIS standards (36 = 2 / 30 / 4) from Legal Metrology requirements (11, 6 checkable); total
+deterministic rules 7. Frontend: "Package label requirements" panel (requirement / rule / observed /
+result, evidence + quoted Legal Metrology source), authority-aware source labels. Tests:
+`test_legal_metrology.py` (129 checks).
+
 Only implement the current milestone. Do not start a new phase without being asked.
 
 ## Repository layout
@@ -356,6 +382,7 @@ sih26/
                        #   product-specific applicability, coverage matrix
       compliance.py    # deterministic compliance engine: PASS / FAIL / REVIEW / NOT_SUPPORTED, no model;
                        #   every check carries rule_condition + reason_code/category + both evidence chains
+      package_label.py # Milestone 8: Legal Metrology package-label evaluation (scope, exclusions, separate result)
       completeness.py  # declaration completeness: detection status + verified-requirement coverage, never "missing"
       pipeline.py      # OCR -> declarations -> product identification -> standard candidates -> compliance
       knowledge/       # knowledge-base schema + loader
@@ -386,13 +413,14 @@ sih26/
       test_why_completeness.py # why PASS/FAIL/REVIEW + declaration completeness, never "legally missing"
       test_coverage.py     # Milestone 7: product applicability, coverage matrix, junk-name rejection, real labels
       test_hardening.py    # Milestone 7 hardening: coverage classes, domains, IS/email normalization, brand != product
+      test_legal_metrology.py # Milestone 8: Legal Metrology sources, rules, applicability, BIS separation, UI contract
       test_pipeline.py     # OCR -> standard candidates end-to-end + stage degradation
       test_plain_runners.py # pytest bridge — runs every runner, makes pytest authoritative
       fixtures/broken_kb/  # deliberately invalid KB for the loader tests
     requirements.txt
     .env.example
   data/
-    knowledge/         # the BIS knowledge base: one JSON file per category (Q&A / retrieval)
+    knowledge/         # the knowledge base: one JSON file per category (BIS; legal_metrology.json = Legal Metrology)
     inspection_requirements.json # inspection products + requirements, each quoting a verified knowledge record
   samples/
     ocr-labels/        # sample package images for testing /inspection/analyze
