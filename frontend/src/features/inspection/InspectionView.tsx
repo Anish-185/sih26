@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowUpRight, ClipboardCheck, RotateCcw, ScanSearch, X } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { ArrowUpRight, ClipboardCheck, RotateCcw, Save, ScanSearch, X } from "lucide-react";
 import {
   ApiError,
   api,
@@ -73,6 +74,8 @@ export function InspectionView() {
 
   const ocrTask = useAsyncTask(api.instantOcr);
   const task = useAsyncTask(api.analyzeInspection);
+  const saveTask = useAsyncTask(api.saveInspection);
+  const navigate = useNavigate();
 
   useEffect(() => {
     return () => stagedRef.current.forEach((s) => URL.revokeObjectURL(s.url));
@@ -147,7 +150,18 @@ export function InspectionView() {
     setSelection([]);
     ocrTask.reset();
     task.reset();
+    saveTask.reset();
     setPhase("upload");
+  }
+
+  // Saving sends the same photos again: the backend runs its own analysis and
+  // stores that, so a saved result can never come from the browser.
+  function saveForReview() {
+    if (!staged.length) return;
+    saveTask
+      .run(uploads())
+      .then((record) => navigate(`/history/${record.inspection_id}`))
+      .catch(() => {});
   }
 
   /* ------------------------------------------------------------- upload --- */
@@ -390,14 +404,33 @@ export function InspectionView() {
       setSelectedRegion={setSelectedRegion}
       linkedRegions={selection}
       selectRegions={selectRegions}
-      onReset={reset}
+      actions={
+        <div className="flex flex-col items-end gap-1.5">
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={saveForReview} disabled={saveTask.loading}>
+              <Save className="h-3.5 w-3.5" />
+              {saveTask.loading ? "Saving…" : "Save for officer review"}
+            </Button>
+            <Button variant="secondary" size="sm" onClick={reset}>
+              <RotateCcw className="h-3.5 w-3.5" />
+              New inspection
+            </Button>
+          </div>
+          {saveTask.error != null && (
+            <span className="text-[12px] text-review">
+              {saveTask.error instanceof ApiError ? saveTask.error.detail : "The inspection could not be saved."}
+            </span>
+          )}
+        </div>
+      }
     />
   );
 }
 
 /* ------------------------------------------------------------- workspace --- */
 
-function Workspace({
+/** The inspection result with its evidence. Also used, read-only, for saved inspections. */
+export function Workspace({
   result,
   urls,
   activeImageId,
@@ -406,7 +439,8 @@ function Workspace({
   setSelectedRegion,
   linkedRegions,
   selectRegions,
-  onReset,
+  actions,
+  intro,
 }: {
   result: InspectionAnalysis;
   urls: string[];
@@ -416,7 +450,8 @@ function Workspace({
   setSelectedRegion: (id: string | null) => void;
   linkedRegions: string[];
   selectRegions: (ids: string[]) => void;
-  onReset: () => void;
+  actions?: ReactNode;
+  intro?: ReactNode; // replaces the live-pipeline callout, e.g. for a saved inspection
 }) {
   const { image, quality, ocr, declaration_stage, product, standards, images } = result;
   const activeImage = images.find((i) => i.image_id === activeImageId);
@@ -433,13 +468,10 @@ function Workspace({
           title={images.length > 1 ? `${images.length} package images` : image.filename}
           className="[&_h1]:text-2xl [&_h1]:break-all"
         />
-        <Button variant="secondary" size="sm" onClick={onReset}>
-          <RotateCcw className="h-3.5 w-3.5" />
-          New inspection
-        </Button>
+        {actions}
       </div>
 
-      <Callout>
+      {intro ?? <Callout>
         <span className="font-medium">Live pipeline.</span> Local OCR, then
         deterministic declaration extraction, then product identification and
         standard candidates retrieved from the verified BIS knowledge base. Every
@@ -447,7 +479,7 @@ function Workspace({
         standard match is not a compliance or certification decision; compliance
         applies only verified requirements, and unresolved stages read “review”,
         never a guess.
-      </Callout>
+      </Callout>}
 
       {result.notes.length > 0 && (
         <Callout tone="abstain" title={images.length > 1 ? "Notes on the images" : "Notes on this image"}>
@@ -1800,11 +1832,9 @@ function CompletenessPanel({
         meta={`${completeness.detected} detected · ${completeness.uncertain} uncertain · ${completeness.not_detected} not detected`}
       />
       <p className="border-b border-line px-5 py-2.5 text-[11px] leading-relaxed text-ink-faint">
-        {completeness.note} “Not detected” means not found in the uploaded OCR evidence — it does not
-        mean legally missing.
-        {completeness.with_verified_requirement > 0
-          ? " Only fields used by a verified, checkable requirement that applies to this package (BIS or Legal Metrology) are linked to one."
-          : " No field is linked to a verified, checkable requirement for this package."}
+        {completeness.note}
+        {completeness.with_verified_requirement === 0 &&
+          " No field is linked to a verified, checkable requirement for this package."}
       </p>
       {completeness.unreadable_images.length > 0 && (
         <p className="border-b border-line px-5 py-2.5 text-[12px] text-review">
@@ -1958,6 +1988,10 @@ function ComplianceCheckRow({
             </div>
           ))}
         </button>
+      )}
+
+      {check.evidence.length === 0 && ["PASS", "FAIL", "REVIEW"].includes(check.result) && (
+        <p className="mt-3 text-[12px] italic text-ink-faint">No supporting evidence available.</p>
       )}
 
       {check.source && (

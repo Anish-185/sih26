@@ -9,14 +9,16 @@ import {
   Target,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { LinkButton, Mono, StatusBadge } from "@/components/ui";
+import { LinkButton, Mono, StatusBadge, type ComplianceStatus } from "@/components/ui";
 import { Annotation, Figurine, PhotoFragment } from "@/components/decor";
-import {
-  MOCK_DASHBOARD_STATS,
-  listMockInspections,
-  type ComplianceStatus,
-} from "@/mocks";
+import { api } from "@/lib/api";
+import { useOnMount } from "@/lib/hooks";
 import { formatDate } from "@/lib/format";
+import { OfficerStatusMark, productLabel } from "./records";
+
+// Stable references: useOnMount re-runs when its task changes.
+const loadStats = () => api.inspectionStats();
+const loadRecent = () => api.listInspections([], 4);
 
 interface Surface {
   to: string;
@@ -47,8 +49,11 @@ const FLOW: [string, string, string][] = [
 ];
 
 export function DashboardView() {
-  const recent = listMockInspections().slice(0, 4);
-  const s = MOCK_DASHBOARD_STATS;
+  const stats = useOnMount(loadStats);
+  const recent = useOnMount(loadRecent);
+  const s = stats.data;
+  // Counts come straight from the database. Unavailable -> "—", never a made-up number.
+  const count = (n: number | undefined) => (n === undefined ? "—" : String(n).padStart(2, "0"));
 
   return (
     <div className="space-y-20 sm:space-y-24">
@@ -88,27 +93,49 @@ export function DashboardView() {
             </LinkButton>
           </div>
 
-          {/* inline stats — not a dashboard grid */}
-          <dl className="mt-10 flex flex-wrap gap-x-10 gap-y-4 border-t border-line pt-6">
-            {[
-              ["Inspections", s.inspections, undefined],
-              ["Pass", s.pass, "PASS"],
-              ["Review", s.review, "REVIEW"],
-              ["Fail", s.fail, "FAIL"],
-            ].map(([label, value, status]) => (
-              <div key={label as string}>
-                <dd className="flex items-baseline gap-2">
-                  <span className="font-mono text-2xl font-semibold tabular-nums text-ink">
-                    {String(value).padStart(2, "0")}
-                  </span>
-                  {status && (
-                    <StatusBadge status={status as ComplianceStatus} size="sm" />
-                  )}
-                </dd>
-                <dt className="kicker mt-1">{label as string}</dt>
-              </div>
-            ))}
-          </dl>
+          {/* inline stats — not a dashboard grid. System results and officer
+              review states are different things and are never added together. */}
+          <div className="mt-10 border-t border-line pt-6">
+            <div className="kicker mb-3">System results · saved inspections</div>
+            <dl className="flex flex-wrap gap-x-10 gap-y-4">
+              {(
+                [
+                  ["Inspections", s?.total, undefined],
+                  ["Pass", s?.system.PASS, "PASS"],
+                  ["Review", s?.system.REVIEW, "REVIEW"],
+                  ["Fail", s?.system.FAIL, "FAIL"],
+                ] as [string, number | undefined, ComplianceStatus | undefined][]
+              ).map(([label, value, status]) => (
+                <div key={label}>
+                  <dd className="flex items-baseline gap-2">
+                    <span className="font-mono text-2xl font-semibold tabular-nums text-ink">{count(value)}</span>
+                    {status && <StatusBadge status={status} size="sm" />}
+                  </dd>
+                  <dt className="kicker mt-1">{label}</dt>
+                </div>
+              ))}
+            </dl>
+            <div className="kicker mb-3 mt-6">Officer review</div>
+            <dl className="flex flex-wrap gap-x-10 gap-y-4">
+              {(
+                [
+                  ["Pending", s?.officer.PENDING],
+                  ["In review", s?.officer.IN_REVIEW],
+                  ["Completed", s?.officer.COMPLETED],
+                ] as [string, number | undefined][]
+              ).map(([label, value]) => (
+                <div key={label}>
+                  <dd className="font-mono text-2xl font-semibold tabular-nums text-ink">{count(value)}</dd>
+                  <dt className="kicker mt-1">{label}</dt>
+                </div>
+              ))}
+            </dl>
+            {stats.error != null && (
+              <p className="mt-3 text-[12px] text-review">
+                Inspection statistics are unavailable — the inspection database could not be reached.
+              </p>
+            )}
+          </div>
         </div>
 
         {/* right — the reference hero plate (Lion Capital + its own blueprint
@@ -242,11 +269,22 @@ export function DashboardView() {
               <ArrowUpRight className="h-3.5 w-3.5" />
             </Link>
           </div>
+          {recent.data && recent.data.items.length === 0 && (
+            <p className="border border-dashed border-line-strong bg-surface px-5 py-6 text-[13px] text-ink-soft">
+              No inspections recorded yet.
+            </p>
+          )}
+          {recent.error != null && (
+            <p className="border border-line px-5 py-6 text-[13px] text-review">
+              Recent inspections are unavailable.
+            </p>
+          )}
+          {recent.data && recent.data.items.length > 0 && (
           <ul className="border border-line">
-            {recent.map((ins, i) => (
-              <li key={ins.id}>
+            {recent.data.items.map((ins, i) => (
+              <li key={ins.inspection_id}>
                 <Link
-                  to={`/history/${ins.id}`}
+                  to={`/history/${ins.inspection_id}`}
                   className={`flex items-center justify-between gap-4 px-5 py-4 transition-colors hover:bg-surface ${
                     i > 0 ? "border-t border-line" : ""
                   }`}
@@ -254,22 +292,23 @@ export function DashboardView() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <Mono muted className="text-[11px]">
-                        {ins.id}
+                        {ins.inspection_id}
                       </Mono>
                       <span className="truncate text-[13px] font-medium">
-                        {ins.product}
+                        {productLabel(ins)}
                       </span>
                     </div>
-                    <div className="mt-0.5 text-[12px] text-ink-faint">
-                      <Mono muted>{ins.standardNumber}</Mono> ·{" "}
-                      {formatDate(ins.createdAt)}
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-ink-faint">
+                      <Mono muted>{ins.standard_number ?? "no standard"}</Mono> ·{" "}
+                      {formatDate(ins.created_at)} · <OfficerStatusMark status={ins.officer_status} />
                     </div>
                   </div>
-                  <StatusBadge status={ins.status} size="sm" />
+                  <StatusBadge status={ins.system_result} size="sm" />
                 </Link>
               </li>
             ))}
           </ul>
+          )}
         </div>
 
         <div>

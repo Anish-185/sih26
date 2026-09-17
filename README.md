@@ -67,7 +67,38 @@ compliance check. A standard match is retrieval evidence, not a compliance or
 certification decision. Compliance applies only requirements quoted from verified
 knowledge records (`data/inspection_requirements.json`) with deterministic rules; when
 requirements or package evidence are missing the result is `REVIEW`, never a guess.
-The officer report is the next phase (`PENDING`).
+
+### Officer review and inspection history
+
+**Save for officer review** sends the same photos to `POST /inspections`: the backend runs
+its own analysis and stores it in PostgreSQL with the photos, so a saved result can never
+come from the browser. Every saved inspection keeps two things apart:
+
+| | Written by | Changes later? |
+|---|---|---|
+| **System result** — BIS result, Legal Metrology result, combined `system_result`, reasons, full analysis (declarations, OCR regions, checks, evidence, sources) | the deterministic pipeline, once | never — a database trigger rejects any update |
+| **Officer review** — `officer_status`, `officer_decision`, `officer_result` (override only), `officer_note`, review timestamps | the officer | once: `PENDING → IN_REVIEW → COMPLETED`, and a completed review is final |
+
+Combined system result: FAIL if BIS or Legal Metrology FAILs, PASS only if both PASS, otherwise
+REVIEW. REVIEW is expected and not hidden: a label can pass every checkable Legal Metrology rule
+while other requirement areas cannot be established from a photo — that is what the officer
+review is for. Decisions: **Accept** the system result, **Override** it (with the officer's result
+and a required note), or **Manual review** (note required).
+
+- **Review** (`/review`) — inspections that are PENDING or IN_REVIEW.
+- **History** (`/history`) — every saved inspection: date, product, BIS standard, system result,
+  officer status, final decision. `/history/:id` reopens it with the stored photos, OCR boxes,
+  declarations, BIS and Legal Metrology checks, evidence and the review panel.
+- **Dashboard** — counts from the database, with system results (PASS / FAIL / REVIEW) and officer
+  review states (pending / in review / completed) shown separately.
+
+| Endpoint | |
+|---|---|
+| `POST /inspections` | multipart photos (`image` or `images` + `sides`); other fields → 422 |
+| `GET /inspections` | newest first; `?officer_status=PENDING&officer_status=IN_REVIEW` |
+| `GET /inspections/stats` | database counts |
+| `GET /inspections/{id}` · `GET /inspections/{id}/images/{index}` | saved record · stored photo |
+| `POST /inspections/{id}/review` | `{"action":"START"}` or `{"action":"COMPLETE","decision":…,"officer_result":…,"note":…}`; unknown fields (e.g. `system_result`) → 422, wrong state → 409, unknown id → 404, database down → 503 |
 
 ### What the officer sees
 
@@ -161,6 +192,9 @@ backend/                      Python 3.14 · FastAPI
     compliance.py             deterministic compliance engine (PASS / FAIL / REVIEW) + generic declaration rules
     package_label.py          Legal Metrology package-label requirements (separate result from BIS)
     pipeline.py               OCR → declarations → product → standards → BIS compliance + package label
+    db.py, records.py         PostgreSQL session; saved inspections + officer review (SQLAlchemy)
+    records_api.py            /inspections: save, list, stats, detail, stored photos, review
+  migrations/                 Alembic schema migrations (alembic.ini in backend/)
     retrieval/                deterministic lexical search (text.py, engine.py)
     rag.py                    grounded Q&A (/ask)
     product.py                Product → Standard + "Why this result?"
@@ -177,7 +211,7 @@ frontend/                     React 19 · TypeScript · Vite · Tailwind v4
 ```
 
 **Everything runs locally and free.** No OpenAI / Claude / cloud LLM, no paid OCR,
-no paid database. OCR uses the PaddleOCR **PP-OCRv3** weights through ONNX Runtime
+no paid database (a local PostgreSQL stores saved inspections). OCR uses the PaddleOCR **PP-OCRv3** weights through ONNX Runtime
 (`rapidocr-onnxruntime`) because PaddlePaddle publishes no wheels for Python 3.14;
 the models ship in the wheel, so inference is fully offline.
 
@@ -194,6 +228,22 @@ source .venv/bin/activate
 pip install -r requirements.txt          # first OCR call also loads the ONNX models (~13 MB, bundled)
 
 uvicorn app.main:app --reload            # http://127.0.0.1:8000
+```
+
+### Inspection database — PostgreSQL
+
+Saved inspections and officer reviews need a local PostgreSQL (everything else runs without it;
+the `/inspections` endpoints return 503 until it is available). On Arch Linux:
+
+```bash
+sudo pacman -S --needed postgresql
+sudo -iu postgres initdb -D /var/lib/postgres/data
+sudo systemctl enable --now postgresql
+sudo -iu postgres createuser -s "$USER"
+createdb metriq && createdb metriq_test          # app database + test database
+
+cd backend
+./.venv/bin/alembic upgrade head                 # create the schema (DATABASE_URL, default postgresql+psycopg:///metriq)
 ```
 
 - Health: <http://127.0.0.1:8000/health>
@@ -229,7 +279,7 @@ export LM_STUDIO_MODEL=qwen/qwen3-4b                  # default (LLM_MODEL also 
 
 ```bash
 cd backend
-./.venv/bin/python -m pytest -q                 # all suites
+./.venv/bin/python -m pytest -q                 # all suites (needs the metriq_test database)
 ./.venv/bin/python scripts/check_knowledge.py   # knowledge-base validation
 
 cd ../frontend
@@ -250,7 +300,8 @@ Phases 1–14 are complete (see [`CLAUDE.md`](CLAUDE.md) for the full log). What
 - [x] **Compliance engine** — deterministic PASS / FAIL / REVIEW over verified requirements (currently 2 of 36 standards have checkable requirements; everything else is `STANDARD_ONLY` → REVIEW)
 - [x] **Legal Metrology package-label requirements** — 11 requirements from the Legal Metrology (Packaged Commodities) Rules, 2011 and amendments (official Department of Consumer Affairs PDFs); 6 are checked deterministically (MRP, net quantity, manufacturer name + address, commodity name, month and year of manufacture, consumer-care phone + e-mail), 5 cannot be checked from a photo. Reported separately from BIS compliance.
 - [ ] **Requirement coverage** — more verified BIS requirements (still 1 checkable BIS rule)
-- [ ] **Officer review & report** — human sign-off, PDF, inspection history (currently placeholder data)
+- [x] **Officer review & inspection history** — saved inspections in PostgreSQL, immutable system result, officer accept / override / manual review with notes, real History, Review queue and Dashboard
+- [ ] **Officer report** — PDF export of a reviewed inspection
 
 ---
 

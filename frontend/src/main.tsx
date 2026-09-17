@@ -11,6 +11,7 @@ import { LaboratoriesView } from "@/features/LaboratoriesView";
 import { HallmarkingView } from "@/features/HallmarkingView";
 import { HistoryView } from "@/features/HistoryView";
 import { ReviewView } from "@/features/ReviewView";
+import { ReviewQueueView } from "@/features/ReviewQueueView";
 import { NotFoundView } from "@/features/NotFoundView";
 
 const router = createBrowserRouter([
@@ -26,6 +27,7 @@ const router = createBrowserRouter([
       { path: "hallmarking", element: <HallmarkingView /> },
       { path: "history", element: <HistoryView /> },
       { path: "history/:inspectionId", element: <ReviewView /> },
+      { path: "review", element: <ReviewQueueView /> },
       { path: "*", element: <NotFoundView /> },
     ],
   },

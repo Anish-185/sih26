@@ -13,6 +13,7 @@
     POST /ask                (grounded BIS Q&A — used by the Hallmarking view)
     POST /inspection/ocr     (Instant OCR — raw evidence only)
     POST /inspection/analyze (Smart Inspection — OCR + downstream pipeline)
+    /inspections             (saved inspections + officer review; backend computes every result)
 */
 
 const API_BASE = (import.meta.env.VITE_API_BASE ?? "/api").replace(/\/$/, "");
@@ -558,6 +559,56 @@ export interface InspectionAnalysis {
   notes: string[];
 }
 
+/* ------------------------------------------------ saved inspections --- */
+
+export type SystemResult = "PASS" | "FAIL" | "REVIEW";
+export type OfficerStatus = "PENDING" | "IN_REVIEW" | "COMPLETED";
+export type OfficerDecision = "ACCEPT_SYSTEM_RESULT" | "OVERRIDE" | "MANUAL_REVIEW";
+
+/** One saved inspection in a list. `system_result` is fixed when saved; the officer fields come later. */
+export interface InspectionSummary {
+  inspection_id: string;
+  created_at: string;
+  product_status: string;
+  product_name: string | null;
+  product_category: string | null;
+  standard_number: string | null;
+  bis_result: SystemResult;
+  legal_metrology_result: SystemResult;
+  system_result: SystemResult; // never changed by a review
+  officer_status: OfficerStatus;
+  officer_decision: OfficerDecision | null;
+  officer_result: SystemResult | null; // only for an OVERRIDE
+  final_result: SystemResult | "MANUAL_REVIEW" | null; // null until the review is completed
+  review_started_at: string | null;
+  review_completed_at: string | null;
+  image_count: number;
+  sides: PackageSide[];
+}
+
+export interface InspectionRecord extends InspectionSummary {
+  system_reasons: { source: SourceAuthority; result: SystemResult; reason_code: string; reason: string }[];
+  officer_note: string | null;
+  images: { index: number; image_id: string; side: PackageSide; filename: string; content_type: string; url: string }[];
+  analysis: InspectionAnalysis; // the saved deterministic analysis and its evidence
+}
+
+export interface InspectionStats {
+  total: number;
+  system: Record<SystemResult, number>;
+  bis: Record<SystemResult, number>;
+  legal_metrology: Record<SystemResult, number>;
+  officer: Record<OfficerStatus, number>;
+  decisions: Record<OfficerDecision, number>;
+}
+
+export type ReviewInput =
+  | { action: "START" }
+  | { action: "COMPLETE"; decision: OfficerDecision; officer_result?: SystemResult; note?: string };
+
+/** Absolute URL of a stored package photo (the API returns a path). */
+export const inspectionImageUrl = (path: string) => `${API_BASE}${path}`;
+
 function packageForm(uploads: PackageUploadInput[]): FormData {
   const form = new FormData();
   for (const u of uploads) {
@@ -616,4 +667,28 @@ export const api = {
       { method: "POST", body: packageForm(uploads) },
       60_000 + 60_000 * uploads.length,
     ),
+
+  // Save: the backend re-runs the analysis on these photos and stores it for officer review.
+  saveInspection: (uploads: PackageUploadInput[]) =>
+    request<InspectionRecord>(
+      "/inspections",
+      { method: "POST", body: packageForm(uploads) },
+      60_000 + 60_000 * uploads.length,
+    ),
+
+  listInspections: (officerStatuses: OfficerStatus[] = [], limit = 100) => {
+    const q = new URLSearchParams({ limit: String(limit) });
+    officerStatuses.forEach((st) => q.append("officer_status", st));
+    return request<{ items: InspectionSummary[]; total: number }>(`/inspections?${q}`);
+  },
+
+  inspectionStats: () => request<InspectionStats>("/inspections/stats"),
+
+  getInspection: (id: string) => request<InspectionRecord>(`/inspections/${encodeURIComponent(id)}`),
+
+  reviewInspection: (id: string, body: ReviewInput) =>
+    request<InspectionRecord>(`/inspections/${encodeURIComponent(id)}/review`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };

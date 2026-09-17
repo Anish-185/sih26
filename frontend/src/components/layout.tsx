@@ -18,6 +18,7 @@ const NAV = [
   { to: "/certification", label: "Certification" },
   { to: "/laboratories", label: "Laboratories" },
   { to: "/hallmarking", label: "Hallmarking" },
+  { to: "/review", label: "Review" },
   { to: "/history", label: "History" },
 ];
 

@@ -356,6 +356,31 @@ deterministic rules 7. Frontend: "Package label requirements" panel (requirement
 result, evidence + quoted Legal Metrology source), authority-aware source labels. Tests:
 `test_legal_metrology.py` (129 checks).
 
+Milestone 9 (officer review + inspection history): saved inspections live in PostgreSQL
+(`DATABASE_URL`, default `postgresql+psycopg:///metriq`) through SQLAlchemy (`app/db.py`,
+`app/records.py`) with an Alembic migration (`backend/migrations`, `alembic upgrade head`).
+Tables: `inspections` (system result: `bis_result`, `legal_metrology_result`, combined
+`system_result` — FAIL if either FAILs, PASS only if both PASS, else REVIEW — `system_reasons`,
+product fields, `sides`, full `analysis` JSONB; officer review: `officer_status`
+PENDING → IN_REVIEW → COMPLETED, `officer_decision` ACCEPT_SYSTEM_RESULT / OVERRIDE / MANUAL_REVIEW,
+`officer_result` (OVERRIDE only, must differ from the system result), `officer_note`,
+`review_started_at`, `review_completed_at`) and `inspection_images` (photo bytes per upload
+position). Check constraints tie decision/status/timestamps together; triggers reject any update
+of the system columns or stored photos. `app/records_api.py`: `POST /inspections` (multipart
+photos only — the backend re-runs the analysis itself; any other form field → 422),
+`GET /inspections` (`?officer_status=`), `GET /inspections/stats`, `GET /inspections/{id}`,
+`GET /inspections/{id}/images/{index}`, `POST /inspections/{id}/review` (strict body: START, or
+COMPLETE with decision / officer_result / note; unknown field → 422, wrong state or duplicate → 409,
+unknown id → 404, malformed id → 422, database down → 503). OVERRIDE and MANUAL_REVIEW need a note.
+Legal Metrology / BIS aggregation is unchanged: REVIEW stays REVIEW and the UI explains it.
+Frontend: Inspection gains "Save for officer review"; `/review` (ReviewQueueView: PENDING +
+IN_REVIEW), `/history` (real records), `/history/:id` (ReviewView: fixed system result panel,
+officer review panel, and the exported inspection `Workspace` over the stored photos and saved
+analysis), Dashboard counts from `/inspections/stats` with system results and officer states
+separate. `frontend/src/mocks.tsx` is gone — no placeholder data remains. Tests:
+`test_inspection_records.py` (61 checks; needs the `metriq_test` database, refuses any database not
+named `*_test`). Full suite 169 passed.
+
 Only implement the current milestone. Do not start a new phase without being asked.
 
 ## Repository layout
@@ -385,12 +410,17 @@ sih26/
       package_label.py # Milestone 8: Legal Metrology package-label evaluation (scope, exclusions, separate result)
       completeness.py  # declaration completeness: detection status + verified-requirement coverage, never "missing"
       pipeline.py      # OCR -> declarations -> product identification -> standard candidates -> compliance
+      db.py            # Milestone 9: PostgreSQL engine/session (DATABASE_URL)
+      records.py       # Milestone 9: saved inspections + officer review models and workflow
+      records_api.py   # Milestone 9: /inspections save, list, stats, detail, stored photos, review
       knowledge/       # knowledge-base schema + loader
         schema.py      # KnowledgeItem pydantic model + validation rules
         loader.py      # load + validate data/knowledge/, report every problem
       retrieval/       # Phase 3: deterministic lexical search
         text.py        # normalize / tokenize / parse standard numbers
         engine.py      # SearchEngine, scoring, ranking, confidence, abstention
+    alembic.ini            # Alembic config (URL from DATABASE_URL)
+    migrations/            # Alembic migrations (0001_inspection_records)
     scripts/
       check_knowledge.py   # CLI: validate the knowledge base
     tests/                 # plain-Python runners: `./.venv/bin/python tests/<file>`
@@ -414,6 +444,7 @@ sih26/
       test_coverage.py     # Milestone 7: product applicability, coverage matrix, junk-name rejection, real labels
       test_hardening.py    # Milestone 7 hardening: coverage classes, domains, IS/email normalization, brand != product
       test_legal_metrology.py # Milestone 8: Legal Metrology sources, rules, applicability, BIS separation, UI contract
+      test_inspection_records.py # Milestone 9: migration, persistence, officer review, immutability, stats (PostgreSQL)
       test_pipeline.py     # OCR -> standard candidates end-to-end + stage degradation
       test_plain_runners.py # pytest bridge — runs every runner, makes pytest authoritative
       fixtures/broken_kb/  # deliberately invalid KB for the loader tests
