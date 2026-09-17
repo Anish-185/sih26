@@ -531,6 +531,7 @@ function Workspace({
             selected={linkedRegions}
             onSelect={selectRegions}
           />
+          <CoveragePanel compliance={result.compliance} />
           <CompliancePanel
             compliance={result.compliance}
             selected={linkedRegions}
@@ -1381,6 +1382,95 @@ function StandardCandidatesPanel({
   );
 }
 
+const APPLICABILITY_LABEL: Record<ComplianceEvaluation["coverage"]["product_applicability"], string> = {
+  PRODUCT_CONFIRMED: "Product confirmed from the package text",
+  PRODUCT_NOT_MODELLED: "No product-level requirement data for this standard",
+  PRODUCT_NOT_CONFIRMED: "Package text did not confirm a modelled product",
+  PRODUCT_AMBIGUOUS: "Package text names more than one modelled product",
+  NO_STANDARD: "No identified standard",
+};
+
+/** What MetrIQ can currently inspect for the identified standard — a statement of
+ *  coverage, not a result. Shown before the compliance check itself. */
+function CoveragePanel({ compliance }: { compliance: ComplianceEvaluation }) {
+  const cov = compliance.coverage;
+  if (compliance.coverage_status === "NO_STANDARD") return null;
+  const supported = compliance.checks.filter((c) => c.result !== "NOT_SUPPORTED");
+  const unsupported = compliance.checks.filter((c) => c.result === "NOT_SUPPORTED");
+
+  return (
+    <Panel flush>
+      <PanelHeader
+        title="Inspection coverage"
+        meta={compliance.coverage_status === "SUPPORTED_FOR_INSPECTION" ? "inspection supported" : "standard only"}
+      />
+      <dl className="px-5 py-2">
+        <DefinitionRow label="Standard">
+          <Mono className="text-[12px]">{compliance.standard_number}</Mono>
+        </DefinitionRow>
+        <DefinitionRow label="Product">
+          <span className={cov.product_name ? "text-ink" : "text-ink-soft"}>
+            {cov.product_name ?? APPLICABILITY_LABEL[cov.product_applicability]}
+          </span>
+          {cov.product_name && (
+            <Mono muted className="mt-0.5 block text-[10px]">
+              {cov.product_category} · {APPLICABILITY_LABEL[cov.product_applicability].toLowerCase()}
+            </Mono>
+          )}
+          {cov.applicability_source && (
+            <p className="mt-1 text-[11px] italic leading-relaxed text-ink-faint">
+              “{cov.applicability_source.quote}” — {cov.applicability_source.title}
+            </p>
+          )}
+        </DefinitionRow>
+        <DefinitionRow label="Supported checks">
+          <Mono className="text-[12px]">{cov.deterministic_rules}</Mono>
+        </DefinitionRow>
+        <DefinitionRow label="Unsupported areas">
+          <Mono className="text-[12px]">{cov.unsupported_requirements}</Mono>
+        </DefinitionRow>
+      </dl>
+
+      {(supported.length > 0 || unsupported.length > 0) && (
+        <div className="grid gap-4 border-t border-line px-5 py-4 sm:grid-cols-2">
+          <div>
+            <div className="kicker">Supported checks</div>
+            <ul className="mt-1.5 space-y-1 text-[12px] text-ink">
+              {supported.length === 0 && <li className="text-ink-faint">None yet</li>}
+              {supported.map((c) => (
+                <li key={c.rule_id} className="flex gap-2">
+                  <span aria-hidden className="text-accent">✓</span>
+                  {c.requirement}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <div className="kicker">Not yet checkable</div>
+            <ul className="mt-1.5 space-y-1 text-[12px] text-ink-soft">
+              {unsupported.length === 0 && <li className="text-ink-faint">None</li>}
+              {unsupported.map((c) => (
+                <li key={c.rule_id} className="flex gap-2">
+                  <span aria-hidden className="text-ink-faint">○</span>
+                  {c.requirement}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      <p className="border-t border-line px-5 py-3 text-[12px] leading-relaxed text-ink-soft">
+        {cov.explanation}
+      </p>
+      <p className="border-t border-line px-5 py-2.5 text-[11px] leading-relaxed text-ink-faint">
+        Coverage describes what MetrIQ's verified knowledge base can check today. An
+        unchecked area is not a failure of the product.
+      </p>
+    </Panel>
+  );
+}
+
 const COVERAGE_LABEL: Record<ComplianceEvaluation["coverage_status"], string> = {
   SUPPORTED_FOR_INSPECTION: "Supported for inspection",
   STANDARD_ONLY: "Standard only — no checkable requirements",
@@ -1508,13 +1598,15 @@ function CompletenessPanel({
   return (
     <Panel flush>
       <PanelHeader
-        title="Declaration completeness"
+        title="Declaration observations"
         meta={`${completeness.detected} detected · ${completeness.uncertain} uncertain · ${completeness.not_detected} not detected`}
       />
       <p className="border-b border-line px-5 py-2.5 text-[11px] leading-relaxed text-ink-faint">
-        {completeness.note} “Required?” shows whether MetrIQ has a verified requirement for the
-        field{completeness.standard_number ? ` under ${completeness.standard_number}` : ""}; “not established” means
-        MetrIQ does not know.
+        {completeness.note} “Not detected” means not found in the uploaded OCR evidence — it does not
+        mean legally missing.
+        {completeness.with_verified_requirement > 0 && completeness.standard_number
+          ? ` Only fields used by a verified requirement under ${completeness.standard_number} are linked to one.`
+          : " No field is linked to a verified, checkable requirement for this package."}
       </p>
       {completeness.unreadable_images.length > 0 && (
         <p className="border-b border-line px-5 py-2.5 text-[12px] text-review">
@@ -1526,7 +1618,7 @@ function CompletenessPanel({
         <table className="w-full text-left text-[12px]">
           <thead>
             <tr className="border-b border-line">
-              {["Declaration", "Status", "Value / source", "Required?"].map((h) => (
+              {["Declaration", "Observation", "Value / source", "Verified requirement"].map((h) => (
                 <th key={h} className="kicker px-5 py-2 font-normal">
                   {h}
                 </th>
@@ -1574,9 +1666,13 @@ function CompletenessPanel({
                     </div>
                   </td>
                   <td className="px-5 py-2.5">
-                    <Mono className={cn("text-[10px]", item.requirement_coverage === "VERIFIED_REQUIREMENT" ? "text-ink" : "text-ink-faint")}>
-                      {item.requirement_coverage === "VERIFIED_REQUIREMENT" ? "Verified requirement" : "Not established"}
-                    </Mono>
+                    {item.requirement_coverage === "VERIFIED_REQUIREMENT" ? (
+                      <Mono className="text-[10px] text-ink">{item.requirement_ids.join(", ")}</Mono>
+                    ) : (
+                      <Mono className="text-[10px] text-ink-faint">
+                        —
+                      </Mono>
+                    )}
                   </td>
                 </tr>
               );

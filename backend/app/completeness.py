@@ -6,8 +6,10 @@ For every declaration field MetrIQ searches for, report two separate facts:
   extraction: DETECTED, UNCERTAIN (low confidence, a label with no readable
   value, or CONFLICT between photos) or NOT_DETECTED.
 * ``requirement_coverage`` — what MetrIQ knows about whether the field is
-  required: ``VERIFIED_REQUIREMENT`` when a verified, checkable requirement for
-  the identified standard uses this field, otherwise ``NOT_ESTABLISHED``.
+  required: ``VERIFIED_REQUIREMENT`` when a verified, checkable requirement that
+  applies to the identified product and standard uses this field, otherwise
+  ``NOT_ESTABLISHED``. An observation is not a requirement: detecting an MRP
+  does not make MRP required, and not detecting it does not make it missing.
 
 NOT_DETECTED only ever means "not found in the OCR text of the uploaded
 photos". It is never reported as legally missing: no verified requirement in
@@ -56,9 +58,10 @@ class DeclarationCompleteness:
     with_verified_requirement: int
     unreadable_images: list[str] = field(default_factory=list)
     note: str = (
-        "Detection status describes the OCR evidence from the uploaded photos only. "
+        "These are observations of the OCR evidence from the uploaded photos only. "
         "\"Not detected\" only means it was not found in these photos; it is not a finding about the "
-        "package and not a legal determination."
+        "package and not a legal determination. A field is linked to a requirement only where MetrIQ "
+        "holds a verified, checkable requirement for the identified product and standard."
     )
 
 
@@ -73,10 +76,13 @@ def declaration_completeness(
     requirements: RequirementSet,
     standard_number: str | None,
     unreadable_images: list[str] | tuple = (),
+    product_id: str | None = None,
 ) -> DeclarationCompleteness:
+    """``product_id`` is the product confirmed by the compliance engine; only
+    requirements that apply to it (or to every product under the standard) count."""
     unreadable = list(unreadable_images)
     required_by: dict[str, list[str]] = {}
-    for req in requirements.for_standard(standard_number):
+    for req in requirements.for_product(standard_number, product_id):
         if req.supported and req.declaration_field:
             required_by.setdefault(req.declaration_field, []).append(req.id)
 

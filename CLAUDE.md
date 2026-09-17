@@ -300,8 +300,21 @@ a verified requirement covers it (`VERIFIED_REQUIREMENT` / `NOT_ESTABLISHED`). "
 detected" is never reported as legally missing. Compliance coverage is data:
 only standards with verified requirements in `data/inspection_requirements.json` are
 `SUPPORTED_FOR_INSPECTION` (currently IS 14543:2016 and IS 13428:2005); every other
-standard is `STANDARD_ONLY` and returns REVIEW. The remaining work is requirement
-coverage and the officer review / report surface.
+standard is `STANDARD_ONLY` and returns REVIEW. Milestone 7 (knowledge + rule coverage
+foundation): coverage is PRODUCT -> STANDARD -> REQUIREMENT -> RULE -> EVIDENCE.
+`data/inspection_requirements.json` gains a `products` list (each product -> standard link
+quotes a verified record; aliases must be phrases of that standard's KB title/keywords) and
+requirements may set `applies_to_products`. Compliance confirms the modelled product from the
+phrases product identification already matched (`PRODUCT_CONFIRMED` / `PRODUCT_NOT_MODELLED` /
+`PRODUCT_NOT_CONFIRMED` / `PRODUCT_AMBIGUOUS`), applies only that product's requirements, and
+`compliance.coverage` carries requirement / rule counts plus a deterministic `explanation`.
+`GET /inspection/coverage` and `scripts/check_knowledge.py` print the coverage matrix. The
+knowledge base still supports exactly ONE checkable rule (printed IS number, packaged water);
+LED lamps have one verified but uncheckable requirement (CRS registration); every other
+standard has no requirement data. Declaration extraction rejects QR / barcode / website /
+placeholder text as names (UNCERTAIN, value withheld, OCR evidence kept). The frontend adds
+an "Inspection coverage" panel and "Declaration observations" wording. The remaining work is
+verified requirement data and the officer review / report surface.
 
 Only implement the current milestone. Do not start a new phase without being asked.
 
@@ -325,7 +338,8 @@ sih26/
       inspection_api.py# POST /inspection/ocr (Instant OCR) + /inspection/analyze; one package = `image` or `images`+`sides`
       declarations.py  # deterministic declarations: DETECTED / UNCERTAIN / NOT_DETECTED, linked to OCR regions
       product_identification.py # product + standard candidates over the KB (retrieval engine + phrase gate)
-      requirements.py  # verified inspection requirements: load, validate (quote must be in a verified record), coverage
+      requirements.py  # verified products + requirements: load, validate (quotes in verified records),
+                       #   product-specific applicability, coverage matrix
       compliance.py    # deterministic compliance engine: PASS / FAIL / REVIEW / NOT_SUPPORTED, no model;
                        #   every check carries rule_condition + reason_code/category + both evidence chains
       completeness.py  # declaration completeness: detection status + verified-requirement coverage, never "missing"
@@ -356,6 +370,7 @@ sih26/
       test_compliance.py   # compliance rules, aggregation policy, grounding, traceability
       test_multiside.py    # multi-side packages: per-image provenance, duplicates/conflicts, failed sides
       test_why_completeness.py # why PASS/FAIL/REVIEW + declaration completeness, never "legally missing"
+      test_coverage.py     # Milestone 7: product applicability, coverage matrix, junk-name rejection, real labels
       test_pipeline.py     # OCR -> standard candidates end-to-end + stage degradation
       test_plain_runners.py # pytest bridge — runs every runner, makes pytest authoritative
       fixtures/broken_kb/  # deliberately invalid KB for the loader tests
@@ -363,7 +378,7 @@ sih26/
     .env.example
   data/
     knowledge/         # the BIS knowledge base: one JSON file per category (Q&A / retrieval)
-    inspection_requirements.json # compliance requirements, each quoting a verified knowledge record
+    inspection_requirements.json # inspection products + requirements, each quoting a verified knowledge record
   samples/
     ocr-labels/        # sample package images for testing /inspection/analyze
   frontend/            # React + Vite app

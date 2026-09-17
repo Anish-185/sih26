@@ -17,7 +17,9 @@ categories. Regen: `../../backend/.venv/bin/python make_synth_labels.py`.
 | `synth_photo-angled.jpg` | same label, ~3.5° rotation + blur + JPEG | same result; PP-OCRv3 tends to drop spaces (`NetQuantity:200g`) — engine, not pipeline |
 | `synth_low-light-blurry.jpg` | same label, dark / low-contrast / out of focus | quality flagged **low**; text mostly recovered with character errors; usually still MATCHED |
 | `synth_led-lamp.png` | 9 W self-ballasted LED bulb declaration | classified **Self-Ballasted LED Lamp**; standard **MATCHED → IS 16102 (Part 1):2026**. The `BIS CRS Reg. No.` on the label is a registration, not a standard — MetrIQ does not read the IS number off the label. |
-| `synth_electric-kettle.png` | 1.5 L / 1500 W electric kettle declaration | classified **Electric Kettle**; standard **MATCHED → IS 367:1993** |
+| `synth_electric-kettle.png` | 1.5 L / 1500 W electric kettle declaration | classified **Electric Kettle**; standard **MATCHED → IS 367:1993**; compliance STANDARD_ONLY REVIEW (no requirement data) |
+| `synth_packaged-water.png` | 1 L packaged drinking water with `IS 14543` printed on its own line | standard **MATCHED → IS 14543:2016**; product confirmed; printed-IS-number check **PASS**; overall REVIEW (2 verified areas not checkable) |
+| `synth_noisy-qr-label.png` | poor label: `SCAN QR CODE` as the largest line, `Manufactured by:` followed by `SCANQRCODE` | product name + manufacturer **UNCERTAIN** with no value (evidence kept); no product, no standard, REVIEW |
 
 Ground-truth declaration text — chana labels:
 

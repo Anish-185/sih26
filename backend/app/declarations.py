@@ -515,6 +515,46 @@ def _party_name(raw: str) -> str:
     return who.strip(" :.-,")
 
 
+# Package / UI text that OCR reads but that is never a name: QR and barcode
+# prompts, web addresses, emails. Matched on letters only, so OCR-joined text
+# ("SCANQRCODE") is caught too.
+_NOISE_SQUASHED = ("scanqr", "qrcode", "barcode", "scanme", "scanhere", "scanfor", "scantoknow", "http", "www")
+_RE_WEB = re.compile(r"www\.|https?://|@|\.(?:com|in|org|net)\b", re.IGNORECASE)
+# Placeholder words printed where a name is expected ("Manufactured by: see back of pack").
+_GENERIC_NAMES = {"address", "name", "details", "below", "above", "overleaf", "seebelow", "seeabove",
+                  "seeoverleaf", "seeback", "seebackofpack", "referbackofpack", "asbelow", "asabove"}
+# Another declaration's label read in place of a name ("Manufactured by:" + "Net Quantity: 1 L").
+_RE_OTHER_LABEL = re.compile(
+    r"\b(?:net\s*(?:quantity|qty|wt|weight|contents?)|m\.?\s*r\.?\s*p|batch\s*no|lot\s*no|mfg\.?\s*date|"
+    r"best\s*before|expiry|use\s*by|fssai|lic(?:ence|ense)?\.?\s*no|toll\s*free|consumer\s*care)\b",
+    re.IGNORECASE,
+)
+
+
+def noise_reason(text: str) -> str:
+    """Why ``text`` is OCR / packaging noise rather than a name ('' when it is not)."""
+    squashed = re.sub(r"[^a-z]", "", text.lower())
+    if any(n in squashed for n in _NOISE_SQUASHED) or _RE_WEB.search(text):
+        return f"'{text.strip()}' looks like QR-code, barcode or website text, not a name."
+    return ""
+
+
+def _name_problem(name: str) -> str:
+    """Conservative checks for a manufacturer / packer / importer name. '' = looks valid."""
+    if reason := noise_reason(name):
+        return reason
+    letters = re.sub(r"[^A-Za-z]", "", name)
+    if len(letters) < 3:
+        return f"'{name}' is too short to be a company name."
+    if letters.lower() in _GENERIC_NAMES:
+        return f"'{name}' is a placeholder word, not a company name."
+    if _RE_OTHER_LABEL.search(name):
+        return f"'{name}' reads into another declaration's label, not a company name."
+    if len(letters) >= 4 and not re.search(r"[aeiouy]", letters, re.IGNORECASE):
+        return f"'{name}' has no vowels — likely an OCR misread, not a company name."
+    return ""
+
+
 def _parties(regions) -> dict[str, list[_Cand]]:
     out: dict[str, list[_Cand]] = {"manufacturer": [], "packer": [], "importer": []}
     valid = lambda m: len(re.findall(r"[A-Za-z]", _party_name(m.group(2)))) >= 2  # noqa: E731
@@ -522,28 +562,40 @@ def _parties(regions) -> dict[str, list[_Cand]]:
         verb = re.sub(r"\s+", " ", hit.match.group(1).lower())
         name = _party_name(hit.match.group(2))
         c = _Cand(regions=hit.regions, value=name, note=f"declared as '{verb} by'")
+        if problem := _name_problem(name):
+            # Keep the evidence, withhold the value: junk must not read as a name.
+            c = _Cand(regions=hit.regions, value=None, key="rejected",
+                      note=f"declared as '{verb} by'", uncertain=f"Rejected as a name: {problem}")
         if verb.startswith("imported"):
             out["importer"].append(c)
         elif verb.startswith("packed"):
             out["packer"].append(c)
         elif verb.startswith("marketed"):
-            c.uncertain = "The label says 'marketed by' — a marketer is not necessarily the manufacturer."
+            if c.value is not None:
+                c.uncertain = "The label says 'marketed by' — a marketer is not necessarily the manufacturer."
             out["manufacturer"].append(c)
         else:
             out["manufacturer"].append(c)
     return out
 
 
+def _without_rejected(cands: list[_Cand]) -> list[_Cand]:
+    """A rejected reading only stands when no valid reading exists: a real name
+    elsewhere on the package is not put in conflict with QR-code noise."""
+    valid = [c for c in cands if c.value is not None]
+    return valid or cands  # all rejected: one UNCERTAIN field keeping every source region
+
+
 def _manufacturer(regions):
-    return _resolve("manufacturer", _parties(regions)["manufacturer"])
+    return _resolve("manufacturer", _without_rejected(_parties(regions)["manufacturer"]))
 
 
 def _packer(regions):
-    return _resolve("packer", _parties(regions)["packer"])
+    return _resolve("packer", _without_rejected(_parties(regions)["packer"]))
 
 
 def _importer(regions):
-    return _resolve("importer", _parties(regions)["importer"])
+    return _resolve("importer", _without_rejected(_parties(regions)["importer"]))
 
 
 _RE_PIN = re.compile(r"\b(\d{6})\b")
@@ -785,7 +837,8 @@ def _toll_free(regions):
 
 
 _RE_FSSAI = re.compile(
-    r"(?:fssai|f\.?\s*s\.?\s*s\.?\s*a\.?\s*i\.?)\D{0,20}(\d[\d\s]{11,16}\d)",
+    # OCR often reads the final I as l, 1 or | ("FSSAl"); 12+ digits must still follow.
+    r"(?:fssa[il1|]|f\.?\s*s\.?\s*s\.?\s*a\.?\s*[il1|]\.?)\D{0,20}(\d[\d\s]{11,16}\d)",
     re.IGNORECASE,
 )
 
@@ -851,7 +904,7 @@ def _product_name(regions, claimed_region_ids: set[str]):
     for r in regions:
         by_image.setdefault(getattr(r, "image_id", None), []).append(r)
     cands = [c for group in by_image.values() if (c := _product_name_on_image(group, claimed_region_ids))]
-    return _resolve("product_name", cands)
+    return _resolve("product_name", _without_rejected(cands)) if cands else None
 
 
 def _product_name_on_image(regions, claimed_region_ids: set[str]) -> _Cand | None:
@@ -866,6 +919,7 @@ def _product_name_on_image(regions, claimed_region_ids: set[str]) -> _Cand | Non
     median_h = heights[len(heights) // 2] if heights else 0
 
     candidates = []
+    rejected = []  # prominent lines that failed validation — kept as evidence, never as a name
     for i, r in enumerate(regions):
         t = r.text.strip()
         if not t or r.id in claimed_region_ids:
@@ -873,24 +927,40 @@ def _product_name_on_image(regions, claimed_region_ids: set[str]) -> _Cand | Non
         squashed = re.sub(r"\s+", "", t).lower()
         if "principaldisplay" in squashed or _RE_PDP.search(t):
             continue
+        h = _text_size(r) if getattr(r, "bbox", None) is not None else 0
+        size = h / median_h if median_h else 1.0
+        prominent = not median_h or size >= _NAME_MIN_HEIGHT_RATIO
+        letters = re.sub(r"[^A-Za-z]", "", t)
+        problem = noise_reason(t) or (
+            f"'{t}' has no vowels — likely an OCR misread, not a product name."
+            if len(letters) >= 4 and not re.search(r"[aeiouy]", letters, re.IGNORECASE) else ""
+        )
+        if problem:
+            if prominent:
+                rejected.append((size, r, problem))
+            continue
         if _LABEL_WORDS.search(t) or _RE_PARENS.match(t) or re.search(r"\d{3,}|[,%]", t):
             continue
         words = re.findall(r"[A-Za-z][A-Za-z&'-]*", t)
         if not (1 <= len(words) <= 6):
             continue
-        letters = re.sub(r"[^A-Za-z]", "", t)
         if len(letters) < 4:
             continue
         upper_ratio = sum(c.isupper() for c in letters) / len(letters)
-        h = _text_size(r) if getattr(r, "bbox", None) is not None else 0
-        size = h / median_h if median_h else 1.0
-        if median_h and size < _NAME_MIN_HEIGHT_RATIO:
+        if not prominent:
             continue  # not printed noticeably larger than typical text — not offered
         score = size + 0.3 * upper_ratio - 0.02 * i
         candidates.append((score, size, r, t, len(words)))
 
     if not candidates:
-        return None
+        if not rejected:
+            return None
+        _, r, problem = max(rejected, key=lambda x: x[0])
+        return _Cand(
+            regions=[r], value=None, key="rejected",
+            uncertain=f"Product name uncertain: the most prominent line was rejected. {problem}",
+            note="most prominent unlabelled line on the panel failed validation",
+        )
     candidates.sort(key=lambda c: -c[0])
     _, size, r, t, word_count = candidates[0]
     runner_up = candidates[1][1] if len(candidates) > 1 else 0.0
@@ -900,6 +970,11 @@ def _product_name_on_image(regions, claimed_region_ids: set[str]) -> _Cand | Non
         uncertain = "No text sizes available, so the product name cannot be told apart from other lines."
     elif runner_up and size < runner_up * _NAME_MIN_MARGIN:
         uncertain = f"Another unlabelled line is printed at a similar size ('{candidates[1][3]}')."
+    elif runner_up:
+        # A second prominent unlabelled line ("AQUA SPRING" over "PACKAGED DRINKING WATER"):
+        # the largest one is often the brand, so the choice is not confident.
+        uncertain = (f"Another unlabelled line is also printed prominently ('{candidates[1][3]}'); "
+                     "the largest line could be the brand rather than the product name.")
     elif word_count == 1:
         uncertain = "The most prominent line is a single word — it could be the brand rather than the product name."
 

@@ -69,6 +69,36 @@ ELECTRIC_KETTLE: list[Line] = [
     ("Toll Free 1800-300-7788", 24, False),
 ]
 
+PACKAGED_WATER: list[Line] = [
+    ("AQUA SPRING", 54, True),
+    ("PACKAGED DRINKING WATER", 40, True),
+    ("", 14, False),
+    ("Net Quantity: 1 L", 40, True),
+    ("M.R.P. Rs. 20.00  (inclusive of all taxes)", 34, True),
+    ("", 12, False),
+    ("Packed by: CLEARFLOW BEVERAGES PVT LTD", 28, False),
+    ("Plot 9, GIDC Industrial Estate, Vapi 396195, Gujarat", 24, False),
+    ("Pkd Date: 05/2026        Batch No: CF-0526-B", 26, False),
+    ("Best Before: 6 months from packaging", 26, False),
+    ("", 12, False),
+    ("ISI Mark", 24, False),
+    ("IS 14543", 34, True),
+    ("CM/L-7654321", 24, False),
+    ("FSSAI Lic. No. 10099999000456", 24, False),
+    ("Consumer Care: care@clearflow.example", 24, False),
+]
+
+# Poor OCR / packaging noise: the 'Manufactured by' value is a QR prompt, and the
+# largest line on the panel is the QR prompt, not the product name.
+NOISY_LABEL: list[Line] = [
+    ("SCAN QR CODE", 60, True),
+    ("Net Quantity: 500 g", 34, True),
+    ("M.R.P. Rs. 60.00", 30, True),
+    ("Manufactured by:", 26, False),
+    ("SCANQRCODE", 26, False),
+    ("www.example-foods.example", 22, False),
+]
+
 PRODUCTS: dict[str, list[Line]] = {
     "chana": CHANA,
     "led-lamp": LED_LAMP,
@@ -122,6 +152,8 @@ def main() -> None:
     # One clean declaration panel per additional product.
     save(render_base(LED_LAMP), "synth_led-lamp.png", format="PNG")
     save(render_base(ELECTRIC_KETTLE), "synth_electric-kettle.png", format="PNG")
+    save(render_base(PACKAGED_WATER), "synth_packaged-water.png", format="PNG")
+    save(render_base(NOISY_LABEL, height=620), "synth_noisy-qr-label.png", format="PNG")
 
 
 if __name__ == "__main__":

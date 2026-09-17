@@ -108,10 +108,11 @@ def run_downstream(
     # 4) declaration completeness — detection status + whether a verified
     #    requirement covers the field; never "legally missing" ---------------
     standard = product.standard_number if product.status == MATCHED else None
+    confirmed = compliance.inspection_coverage.product_id if compliance.inspection_coverage else None
     try:
         completeness = declaration_completeness(
             decl, requirements if requirements is not None else RequirementSet((), ()),
-            standard, unreadable_images,
+            standard, unreadable_images, product_id=confirmed,
         )
     except Exception as exc:  # noqa: BLE001
         completeness = declaration_completeness(decl, RequirementSet((), ()), None, unreadable_images)

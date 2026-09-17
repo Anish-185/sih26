@@ -15,6 +15,10 @@ Both endpoints take ONE package, photographed from one or more sides
     POST /inspection/analyze   -> InspectionAnalysisOut
          (the same evidence + product identification + verified Indian Standard
           candidates + deterministic compliance over all images)
+
+    GET  /inspection/coverage  -> CoverageMatrixOut
+         (what MetrIQ can currently inspect: product | standard | requirement |
+          rule | status, derived from the verified data — not a compliance result)
 """
 
 from __future__ import annotations
@@ -26,13 +30,17 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from app.api import get_product_finder
 from app.inspection import (
     MAX_BYTES,
+    CoverageMatrixOut,
+    CoverageRowOut,
     ImageError,
     InspectionAnalysisOut,
     InspectionAnalyzer,
     InstantOcrOut,
     PackageUpload,
+    StandardCoverageOut,
 )
 from app.llm import LocalLLM
+from app.requirements import coverage_by_standard, coverage_matrix, load_requirements
 from app.ocr import OcrError
 
 router = APIRouter(prefix="/inspection", tags=["inspection"])
@@ -134,3 +142,15 @@ async def analyze(
     deterministic compliance over the combined evidence."""
     uploads = await _package(image, side, images, sides)
     return _run(get_analyzer().analyze_package, uploads)
+
+
+@router.get("/coverage", response_model=CoverageMatrixOut)
+def coverage() -> CoverageMatrixOut:
+    """MetrIQ's inspection coverage matrix, read from the verified data files."""
+    items = get_product_finder().search_engine.items
+    requirements = load_requirements(items)
+    return CoverageMatrixOut(
+        standards=[StandardCoverageOut(**c.__dict__) for c in coverage_by_standard(items, requirements)],
+        rows=[CoverageRowOut(**r.__dict__) for r in coverage_matrix(items, requirements)],
+        errors=list(requirements.errors),
+    )

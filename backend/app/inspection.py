@@ -359,6 +359,64 @@ class ComplianceCoverageOut(BaseModel):
     failed: int
     review: int
     not_supported: int
+    # Product-specific coverage: product -> standard -> requirements -> rules.
+    product_applicability: str = Field(
+        default="NO_STANDARD",
+        description='"PRODUCT_CONFIRMED" | "PRODUCT_NOT_MODELLED" | "PRODUCT_NOT_CONFIRMED" | '
+        '"PRODUCT_AMBIGUOUS" | "NO_STANDARD"',
+    )
+    product_id: str | None = None
+    product_name: str | None = Field(default=None, description="Modelled inspection product, when confirmed.")
+    product_category: str | None = None
+    applicability_source: RequirementSourceOut | None = Field(
+        default=None, description="Verified record that links the confirmed product to the standard."
+    )
+    verified_requirements: int = 0
+    deterministic_rules: int = 0
+    unsupported_requirements: int = 0
+    not_applied_requirements: list[str] = Field(
+        default_factory=list,
+        description="Product-limited requirements under this standard that were not applied (product not confirmed).",
+    )
+    explanation: str = Field(default="", description="Deterministic: what MetrIQ can and cannot inspect here.")
+
+
+class CoverageRowOut(BaseModel):
+    """One row of MetrIQ's coverage matrix: product | standard | requirement | rule | evidence | status."""
+
+    standard_number: str
+    standard_knowledge_id: str
+    standard_title: str
+    product_id: str | None = None
+    product_name: str | None = None
+    product_category: str | None = None
+    applicability_source: str | None = None
+    requirement_id: str | None = None
+    requirement: str | None = None
+    rule_type: str | None = None
+    declaration_field: str | None = None
+    requirement_source: str | None = None
+    status: str = Field(description='"SUPPORTED" | "UNSUPPORTED" | "NO_REQUIREMENT_DATA"')
+    standard_coverage: str = Field(description='"SUPPORTED_FOR_INSPECTION" | "STANDARD_ONLY"')
+
+
+class StandardCoverageOut(BaseModel):
+    standard_number: str
+    knowledge_id: str
+    title: str
+    products: list[str]
+    verified_requirements: int
+    deterministic_rules: int
+    unsupported_requirements: int
+    inspection_status: str
+
+
+class CoverageMatrixOut(BaseModel):
+    """What MetrIQ can currently inspect, derived from the verified data — not a compliance result."""
+
+    standards: list[StandardCoverageOut]
+    rows: list[CoverageRowOut]
+    errors: list[str] = Field(default_factory=list, description="Requirement data rejected by the loader.")
 
 
 class ComplianceOut(BaseModel):
@@ -927,6 +985,23 @@ def _candidate_out(candidate) -> StandardCandidateOut:
     )
 
 
+def _coverage_out(ev) -> ComplianceCoverageOut:
+    counts = dict(supported_checks=ev.supported_checks, passed=ev.passed, failed=ev.failed,
+                  review=ev.review, not_supported=ev.not_supported)
+    ic = getattr(ev, "inspection_coverage", None)
+    if ic is None:
+        return ComplianceCoverageOut(**counts)
+    return ComplianceCoverageOut(
+        **counts,
+        product_applicability=ic.product_applicability, product_id=ic.product_id,
+        product_name=ic.product_name, product_category=ic.product_category,
+        applicability_source=RequirementSourceOut(**ic.applicability_source.__dict__) if ic.applicability_source else None,
+        verified_requirements=ic.verified_requirements, deterministic_rules=ic.deterministic_rules,
+        unsupported_requirements=ic.unsupported_requirements,
+        not_applied_requirements=list(ic.not_applied_requirements), explanation=ic.explanation,
+    )
+
+
 def _compliance_out(ev) -> ComplianceOut:
     return ComplianceOut(
         overall_status=ev.overall_status,
@@ -936,10 +1011,7 @@ def _compliance_out(ev) -> ComplianceOut:
         product_name=ev.product_name,
         standard_number=ev.standard_number,
         knowledge_id=ev.knowledge_id,
-        coverage=ComplianceCoverageOut(
-            supported_checks=ev.supported_checks, passed=ev.passed, failed=ev.failed,
-            review=ev.review, not_supported=ev.not_supported,
-        ),
+        coverage=_coverage_out(ev),
         checks=[
             ComplianceCheckOut(
                 rule_id=c.rule_id, requirement=c.requirement, rule_type=c.rule_type,

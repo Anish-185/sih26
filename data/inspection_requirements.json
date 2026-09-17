@@ -1,9 +1,54 @@
 {
-  "_comment": "Inspection requirements used by the deterministic compliance engine (backend/app/requirements.py, backend/app/compliance.py). Every requirement must quote, word for word, a sentence from a VERIFIED record in data/knowledge/ (source_knowledge_id + source_quote) and apply only to standard numbers that exist in data/knowledge/indian_standards.json. The loader rejects anything else. rule_type is either a rule the engine implements or \"not_supported\" (a verified requirement that cannot be checked from a package image; it is shown, never scored). Do not add a requirement that is not stated in the knowledge base.",
+  "_comment": "Inspection coverage data used by the deterministic compliance engine (backend/app/requirements.py, backend/app/compliance.py). PRODUCT -> STANDARD -> REQUIREMENT -> RULE -> EVIDENCE. Every product -> standard link and every requirement must quote, word for word, a sentence from a VERIFIED record in data/knowledge/, and name standard numbers that exist in data/knowledge/indian_standards.json. Product aliases must be phrases of that standard record's title or keywords. applies_to_products limits a requirement to some products; without it a requirement applies to every product under its standards. rule_type is either a rule the engine implements or \"not_supported\" (a verified requirement that cannot be checked from a package image; it is shown, never scored). The loader rejects anything else. Do not add a product, link or requirement that is not stated in the knowledge base. Print the resulting coverage matrix with backend/scripts/check_knowledge.py (or GET /inspection/coverage).",
+  "products": [
+    {
+      "id": "packaged-drinking-water",
+      "name": "Packaged Drinking Water",
+      "aliases": ["packaged drinking water", "drinking water"],
+      "category": "Packaged water",
+      "standards": [
+        {
+          "standard_number": "IS 14543:2016",
+          "applicability_status": "VERIFIED",
+          "source_knowledge_id": "packaged-drinking-water-certification",
+          "source_quote": "packaged drinking water (other than natural mineral water) as per IS 14543:2016"
+        }
+      ]
+    },
+    {
+      "id": "packaged-natural-mineral-water",
+      "name": "Packaged Natural Mineral Water",
+      "aliases": ["packaged natural mineral water", "natural mineral water", "mineral water"],
+      "category": "Packaged water",
+      "standards": [
+        {
+          "standard_number": "IS 13428:2005",
+          "applicability_status": "VERIFIED",
+          "source_knowledge_id": "packaged-drinking-water-certification",
+          "source_quote": "packaged natural mineral water as per IS 13428:2005"
+        }
+      ]
+    },
+    {
+      "id": "self-ballasted-led-lamp",
+      "name": "Self-ballasted LED lamp",
+      "aliases": ["self-ballasted led lamp", "led lamp"],
+      "category": "Lighting (electronics and IT goods, Compulsory Registration Scheme)",
+      "standards": [
+        {
+          "standard_number": "IS 16102 (Part 1)",
+          "applicability_status": "VERIFIED",
+          "source_knowledge_id": "is-16102-part-1-self-ballasted-led-lamps",
+          "source_quote": "LED lamps of this type are a notified product under the Compulsory Registration Scheme (Scheme II)"
+        }
+      ]
+    }
+  ],
   "requirements": [
     {
       "id": "packaged-water-label-shows-is-number",
       "applies_to": ["IS 14543:2016", "IS 13428:2005"],
+      "applies_to_products": ["packaged-drinking-water", "packaged-natural-mineral-water"],
       "description": "The package shows the IS number of its Indian Standard (IS 14543 or IS 13428) with the BIS Certification Mark.",
       "rule_type": "printed_standard_number",
       "declaration_field": "standard_number",
@@ -17,6 +62,7 @@
     {
       "id": "packaged-water-bis-certification-mark",
       "applies_to": ["IS 14543:2016", "IS 13428:2005"],
+      "applies_to_products": ["packaged-drinking-water", "packaged-natural-mineral-water"],
       "description": "The product is manufactured and sold under the BIS Certification Mark (ISI Mark).",
       "rule_type": "not_supported",
       "unsupported_reason": "The ISI Mark is a printed graphic, and holding a valid licence is not visible on a package. MetrIQ reads package text with OCR and does not detect marks or check licences, so this cannot be decided from the image.",
@@ -26,11 +72,22 @@
     {
       "id": "packaged-drinking-water-quality-limits",
       "applies_to": ["IS 14543:2016"],
+      "applies_to_products": ["packaged-drinking-water"],
       "description": "The water meets the physical, microbiological, chemical, pesticide and radioactive residue limits of IS 14543.",
       "rule_type": "not_supported",
       "unsupported_reason": "These are laboratory test parameters. They cannot be observed on a package image, and the knowledge base does not hold the numeric limits.",
       "source_knowledge_id": "is-14543-2016-packaged-drinking-water",
       "source_quote": "the standard specifies limits for physical parameters (such as TDS and turbidity), microbiological parameters (such as E. coli, yeast and mould), chemical parameters (such as pH), and pesticide and radioactive residue levels"
+    },
+    {
+      "id": "led-lamp-crs-registration",
+      "applies_to": ["IS 16102 (Part 1)"],
+      "applies_to_products": ["self-ballasted-led-lamp"],
+      "description": "The LED lamp is registered with BIS under the Compulsory Registration Scheme (Scheme II) before it is sold.",
+      "rule_type": "not_supported",
+      "unsupported_reason": "Registration is held in BIS records, not on the package. OCR can read a registration number printed on a label, but MetrIQ does not check registrations, and the knowledge base does not say how a registration must be shown on the package, so this cannot be decided from the image.",
+      "source_knowledge_id": "products-under-compulsory-registration-scheme-ii",
+      "source_quote": "BIS publishes a list of electronics and IT goods that require BIS registration under the Compulsory Registration Scheme (Scheme II) before they can be sold in India."
     }
   ]
 }

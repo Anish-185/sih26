@@ -16,7 +16,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.knowledge.loader import DEFAULT_KNOWLEDGE_DIR, load_knowledge_base, main  # noqa: E402
-from app.requirements import SUPPORTED_FOR_INSPECTION, load_requirements  # noqa: E402
+from app.requirements import (  # noqa: E402
+    SUPPORTED_FOR_INSPECTION,
+    coverage_by_standard,
+    coverage_matrix,
+    load_requirements,
+)
 
 
 def check_requirements(argv: list[str]) -> int:
@@ -29,13 +34,23 @@ def check_requirements(argv: list[str]) -> int:
     print(f"  accepted               {len(requirements.requirements)} "
           f"({supported} checkable, {len(requirements.requirements) - supported} not_supported)")
 
-    standards = sorted({i.standard_number for i in items if i.category == "indian_standards"})
-    covered = [s for s in standards if requirements.coverage(s) == SUPPORTED_FOR_INSPECTION]
-    print(f"\nInspection coverage: {len(covered)} of {len(standards)} standards")
-    for s in covered:
-        ids = ", ".join(r.id for r in requirements.for_standard(s))
-        print(f"  SUPPORTED_FOR_INSPECTION  {s:24} {ids}")
-    print(f"  STANDARD_ONLY             {len(standards) - len(covered)} others")
+    print(f"  products               {len(requirements.products)} modelled "
+          f"({', '.join(p.name for p in requirements.products) or 'none'})")
+
+    by_standard = coverage_by_standard(items, requirements)
+    covered = [c for c in by_standard if c.inspection_status == SUPPORTED_FOR_INSPECTION]
+    print(f"\nInspection coverage: {len(covered)} of {len(by_standard)} standards supported for inspection")
+    print(f"  {'STANDARD':30} {'PRODUCT / CATEGORY':46} {'REQS':>4} {'RULES':>5}  STATUS")
+    for c in by_standard:
+        product = ", ".join(c.products) or c.title.split(" — ", 1)[-1] + " (product not modelled)"
+        print(f"  {c.standard_number:30} {product[:46]:46} {c.verified_requirements:>4} "
+              f"{c.deterministic_rules:>5}  {c.inspection_status}")
+
+    print("\nCoverage matrix rows with requirement data (product | standard | requirement | rule | status):")
+    for r in coverage_matrix(items, requirements):
+        if r.requirement_id:
+            print(f"  {r.product_name or '(any product)'} | {r.standard_number} | {r.requirement_id} | "
+                  f"{r.rule_type} | {r.status}")
 
     if requirements.errors:
         print(f"\nRequirement errors: {len(requirements.errors)}")

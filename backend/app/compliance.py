@@ -15,6 +15,16 @@ that was not detected, is UNCERTAIN, or was read below the rule's OCR-confidence
 threshold gives REVIEW — never PASS or FAIL. "Not detected" is never "missing":
 the text may be on another side of the package or unreadable.
 
+Product-specific applicability: the identified standard is only half the key.
+The engine confirms which modelled product (``app.requirements`` products) the
+package is, using the phrases product identification already matched — no new
+scoring. Standard-wide requirements always apply; product-limited requirements
+apply only to a confirmed product. ``InspectionCoverage`` records the result
+(PRODUCT_CONFIRMED / PRODUCT_NOT_MODELLED / PRODUCT_NOT_CONFIRMED /
+PRODUCT_AMBIGUOUS), the counts of verified requirements and deterministic rules
+applied, and a deterministic ``explanation`` of what MetrIQ can and cannot
+inspect here — so a REVIEW says *why* coverage is limited.
+
 Overall aggregation policy (``AGGREGATION_POLICY``), in order:
   1. no identified standard                     -> REVIEW
   2. no supported (checkable) requirement       -> REVIEW
@@ -43,6 +53,7 @@ from app.product_identification import MATCHED, ProductIdentification
 from app.requirements import (
     STANDARD_ONLY,
     SUPPORTED_FOR_INSPECTION,
+    InspectionProduct,
     Requirement,
     RequirementSet,
 )
@@ -54,6 +65,12 @@ REVIEW = "REVIEW"
 NOT_SUPPORTED_RESULT = "NOT_SUPPORTED"
 
 NO_STANDARD = "NO_STANDARD"
+
+# Which modelled product the package is, under the identified standard.
+PRODUCT_CONFIRMED = "PRODUCT_CONFIRMED"  # the package text names exactly one modelled product
+PRODUCT_NOT_MODELLED = "PRODUCT_NOT_MODELLED"  # no product record for this standard (standard-level data only)
+PRODUCT_NOT_CONFIRMED = "PRODUCT_NOT_CONFIRMED"  # products are modelled, the package text names none of them
+PRODUCT_AMBIGUOUS = "PRODUCT_AMBIGUOUS"  # the package text names more than one modelled product
 
 # reason_code -> reason_category. Stable, machine-readable groups for the UI and
 # a later explanation layer; a model may reword them but never change them.
@@ -132,6 +149,23 @@ class ComplianceCheck:
 
 
 @dataclass(frozen=True)
+class InspectionCoverage:
+    """What MetrIQ can inspect for this package: product -> standard -> requirements -> rules."""
+
+    standard_number: str | None
+    product_applicability: str  # PRODUCT_* | NO_STANDARD
+    product_id: str | None
+    product_name: str | None
+    product_category: str | None
+    applicability_source: RequirementSource | None  # verified record linking product -> standard
+    verified_requirements: int  # applied to this package
+    deterministic_rules: int
+    unsupported_requirements: int
+    not_applied_requirements: list[str]  # product-limited requirements the package did not confirm
+    explanation: str  # deterministic: why coverage is what it is
+
+
+@dataclass(frozen=True)
 class ComplianceEvaluation:
     overall_status: str  # PASS | FAIL | REVIEW
     coverage_status: str  # SUPPORTED_FOR_INSPECTION | STANDARD_ONLY | NO_STANDARD
@@ -150,6 +184,7 @@ class ComplianceEvaluation:
     notes: list[str] = field(default_factory=list)
     summary: list[str] = field(default_factory=list)  # deterministic, one fact per line
     unreadable_images: list[str] = field(default_factory=list)  # photos that gave no usable OCR
+    inspection_coverage: InspectionCoverage | None = None
 
 
 # ------------------------------------------------------------------------ engine
@@ -173,15 +208,24 @@ def evaluate_compliance(
             "No product and standard were identified with enough support, so no verified "
             "requirement can be applied. Standard candidates are not used for compliance."
         )
+        coverage_info = InspectionCoverage(
+            standard_number=None, product_applicability=NO_STANDARD, product_id=None, product_name=None,
+            product_category=None, applicability_source=None, verified_requirements=0,
+            deterministic_rules=0, unsupported_requirements=0, not_applied_requirements=[],
+            explanation="No standard was identified, so MetrIQ's inspection coverage does not apply.",
+        )
         return ComplianceEvaluation(
             overall_status=REVIEW, coverage_status=NO_STANDARD, reason_code="NO_STANDARD_IDENTIFIED",
             reason=reason, product_name=None, standard_number=None, knowledge_id=None, checks=[],
             notes=notes, summary=[reason, *_unreadable_lines(unreadable)], unreadable_images=unreadable,
+            inspection_coverage=coverage_info,
         )
 
     standard = product.standard_number
     items = {i.id: i for i in knowledge_items}
-    applicable = requirements.for_standard(standard)
+    applicability, confirmed, candidates = _confirm_product(product, requirements)
+    applicable = requirements.for_product(standard, confirmed.id if confirmed else None)
+    not_applied = [r for r in requirements.for_standard(standard) if r not in applicable]
     checks = [_check(req, standard, declarations, items, unreadable) for req in applicable]
 
     supported = [c for c in checks if c.result != NOT_SUPPORTED_RESULT]
@@ -192,14 +236,100 @@ def evaluate_compliance(
         "review": sum(c.result == REVIEW for c in supported),
         "not_supported": sum(c.result == NOT_SUPPORTED_RESULT for c in checks),
     }
-    coverage = requirements.coverage(standard)
-    status, code, reason = _aggregate(standard, coverage, counts)
+    coverage = requirements.coverage(standard, confirmed.id if confirmed else None)
+    if coverage == STANDARD_ONLY and any(r.supported for r in not_applied):
+        status, code, reason = REVIEW, "PRODUCT_NOT_CONFIRMED", (
+            f"Standard {standard} identified, but no supported deterministic inspection requirements "
+            "are available for this package: MetrIQ's checkable requirements for it are limited to "
+            f"specific products, and the package text did not confirm one of them."
+        )
+    else:
+        status, code, reason = _aggregate(standard, coverage, counts)
+
+    coverage_info = InspectionCoverage(
+        standard_number=standard, product_applicability=applicability,
+        product_id=confirmed.id if confirmed else None,
+        product_name=confirmed.name if confirmed else None,
+        product_category=confirmed.category if confirmed else None,
+        applicability_source=_link_source(confirmed, standard, items),
+        verified_requirements=len(applicable),
+        deterministic_rules=counts["supported_checks"],
+        unsupported_requirements=counts["not_supported"],
+        not_applied_requirements=[r.id for r in not_applied],
+        explanation=_coverage_explanation(standard, applicability, confirmed, candidates, applicable,
+                                          requirements.products_for_standard(standard)),
+    )
+    summary = _summary(reason, counts, unreadable)
+    summary.insert(len(summary) - len(_unreadable_lines(unreadable)), coverage_info.explanation)
     return ComplianceEvaluation(
         overall_status=status, coverage_status=coverage, reason_code=code, reason=reason,
         product_name=product.name, standard_number=standard, knowledge_id=product.knowledge_id,
-        checks=checks, notes=notes, summary=_summary(reason, counts, unreadable),
-        unreadable_images=unreadable, **counts,
+        checks=checks, notes=notes, summary=summary,
+        unreadable_images=unreadable, inspection_coverage=coverage_info, **counts,
     )
+
+
+def _confirm_product(product: ProductIdentification, requirements: RequirementSet):
+    """Which modelled product is this package? Uses only the phrases and label text
+    that product identification already matched — deterministic containment."""
+    standard = product.standard_number
+    modelled = requirements.products_for_standard(standard)
+    if not modelled:
+        return PRODUCT_NOT_MODELLED, None, []
+    phrases: list[str] = []
+    for ev in product.evidence:
+        if ev.match in ("product", "alias"):
+            phrases.extend(t for t in (ev.matched_phrase, ev.clue.text, ev.clue.search_text) if t)
+    matched = requirements.match_products(standard, phrases)
+    if len(matched) == 1:
+        return PRODUCT_CONFIRMED, matched[0], matched
+    if len(matched) > 1:
+        return PRODUCT_AMBIGUOUS, None, matched
+    return PRODUCT_NOT_CONFIRMED, None, modelled
+
+
+def _link_source(confirmed: InspectionProduct | None, standard: str, items) -> RequirementSource | None:
+    link = confirmed.link(standard) if confirmed else None
+    item = items.get(link.source_knowledge_id) if link else None
+    if item is None:
+        return None
+    return RequirementSource(
+        knowledge_id=item.id, title=item.title, quote=link.source_quote, source_url=item.source_url,
+        document_name=item.document_name, reference=item.reference,
+        verification_status=item.verification_status,
+        last_verified=item.last_verified.isoformat() if item.last_verified else None,
+    )
+
+
+_LIMIT = "This is a limit of MetrIQ's current knowledge base, not a finding about the package."
+
+
+def _coverage_explanation(standard, applicability, confirmed, candidates, applicable, modelled) -> str:
+    """Deterministic, counts-based: what MetrIQ can and cannot inspect for this package."""
+    rules = sum(r.supported for r in applicable)
+    unsupported = len(applicable) - rules
+    names = " / ".join(p.name for p in candidates or modelled)
+    if applicability == PRODUCT_NOT_CONFIRMED:
+        lead = (f"MetrIQ has product-specific requirement data under {standard} for {names}, but the "
+                "package text did not name that product, so those requirements were not applied.")
+    elif applicability == PRODUCT_AMBIGUOUS:
+        lead = (f"The package text names more than one modelled product under {standard} ({names}), "
+                "so product-specific requirements were not applied.")
+    else:
+        lead = ""
+    who = f"{confirmed.name} under {standard}" if confirmed else standard
+    if not applicable:
+        body = (f"{standard} is a verified standard in the knowledge base, but MetrIQ does not yet have "
+                f"structured verified requirement data that applies here, so no deterministic inspection "
+                f"is possible. {_LIMIT}")
+    elif rules == 0:
+        body = (f"MetrIQ holds {_plural(len(applicable), 'verified requirement', 'verified requirements')} for "
+                f"{who}, but none can be checked deterministically from package text. {_LIMIT}")
+    else:
+        body = (f"MetrIQ's knowledge base contains {_plural(rules, 'deterministic inspection rule', 'deterministic inspection rules')} "
+                f"for {who}, out of {_plural(len(applicable), 'verified requirement', 'verified requirements')}"
+                + (f"; {unsupported} cannot be checked from a package image." if unsupported else "."))
+    return f"{lead} {body}".strip()
 
 
 def _plural(n: int, one: str, many: str) -> str:

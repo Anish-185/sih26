@@ -344,6 +344,30 @@ export interface ComplianceCheck {
   source: RequirementSource | null;
 }
 
+/** What MetrIQ can inspect for this package: product -> standard -> requirements -> rules. */
+export interface InspectionCoverage {
+  supported_checks: number;
+  passed: number;
+  failed: number;
+  review: number;
+  not_supported: number;
+  product_applicability:
+    | "PRODUCT_CONFIRMED"
+    | "PRODUCT_NOT_MODELLED"
+    | "PRODUCT_NOT_CONFIRMED"
+    | "PRODUCT_AMBIGUOUS"
+    | "NO_STANDARD";
+  product_id: string | null;
+  product_name: string | null; // modelled inspection product, when confirmed
+  product_category: string | null;
+  applicability_source: RequirementSource | null; // verified record linking product -> standard
+  verified_requirements: number;
+  deterministic_rules: number;
+  unsupported_requirements: number;
+  not_applied_requirements: string[];
+  explanation: string; // deterministic: why coverage is what it is
+}
+
 /** Deterministic compliance evaluation — never decided by a model. */
 export interface ComplianceEvaluation {
   overall_status: "PASS" | "FAIL" | "REVIEW";
@@ -353,13 +377,7 @@ export interface ComplianceEvaluation {
   product_name: string | null;
   standard_number: string | null;
   knowledge_id: string | null;
-  coverage: {
-    supported_checks: number;
-    passed: number;
-    failed: number;
-    review: number;
-    not_supported: number;
-  };
+  coverage: InspectionCoverage;
   checks: ComplianceCheck[];
   policy: string;
   notes: string[];
