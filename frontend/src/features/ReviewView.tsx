@@ -27,6 +27,7 @@ import {
 } from "@/lib/api";
 import { useAsyncTask } from "@/lib/hooks";
 import { formatDateTime } from "@/lib/format";
+import { CopilotPanel } from "./CopilotPanel";
 import { Workspace } from "./inspection/InspectionView";
 import { DECISION_LABEL, EscalationPanel, OFFICER_STATUS_LABEL, OfficerStatusMark, productLabel } from "./records";
 
@@ -125,6 +126,12 @@ export function ReviewView() {
         <OfficerReviewPanel record={record} onSaved={setRecord} />
       </div>
 
+      <CopilotPanel
+        inspectionId={record.inspection_id}
+        systemResult={record.system_result}
+        hasHallmark={Boolean(analysis.hallmark?.detected)}
+      />
+
       <Workspace
         result={analysis}
         urls={record.images.map((i) => inspectionImageUrl(i.url))}
@@ -135,6 +142,7 @@ export function ReviewView() {
         linkedRegions={selection}
         selectRegions={selectRegions}
         hideEscalation
+        hideCopilot
         intro={
           <Callout>
             <span className="font-medium">Saved evidence.</span> Everything below is the deterministic

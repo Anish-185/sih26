@@ -318,6 +318,40 @@ export LM_STUDIO_MODEL=qwen/qwen3-4b                  # default (LLM_MODEL also 
 > label names nothing in the knowledge base, the local model is asked for a search
 > term (never a verdict), which can take ~25 s on first call.
 
+
+### MetrIQ Copilot — grounded explanations (optional)
+
+An optional explanation layer: it reads a **finished** inspection and puts it into
+plain language. It never retrieves a standard, never runs a check and never decides
+PASS / FAIL / REVIEW — the deterministic result is shown beside every answer and
+comes from the record. With no key configured, everything else works exactly as
+before; only the explanation is unavailable.
+
+The API key stays on the server. The browser talks to MetrIQ, MetrIQ talks to
+OpenRouter — there is deliberately no `VITE_` variable for it.
+
+```bash
+# backend/.env  (gitignored — never commit it, never put it in the frontend)
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_MODEL=google/gemma-4-31b-it:free
+```
+
+`backend/.env` is read at startup; an exported variable always wins. Optional:
+`OPENROUTER_BASE_URL`, `OPENROUTER_TIMEOUT`, and the free-tier guards
+`OPENROUTER_DAILY_LIMIT` (45) / `OPENROUTER_MINUTE_LIMIT` (15), which refuse a
+request locally before it reaches the network. A request the provider never served
+does not consume the day's allowance.
+
+Where it appears: the **Inspection** workspace and the **officer review** page, as a
+"MetrIQ Copilot" panel. A request is sent only when you press a question — never on
+page load, never in the background, never from the pipeline. Automated tests stub
+the provider, so running the suite costs nothing.
+
+If MetrIQ finds that a generated answer cites a standard, HUID or URL that is not in
+the record, claims a hallmark was authenticated, or states a result other than the
+deterministic one, the answer is **withheld** and MetrIQ's own sentence is shown
+instead.
+
 ---
 
 ## Tests

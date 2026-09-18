@@ -47,6 +47,7 @@ import {
 } from "@/components/decor";
 import { PackageImages, RegionSides, regionSides, useWhere } from "./PackageImages";
 import { EscalationPanel } from "../records";
+import { CopilotPanel } from "../CopilotPanel";
 import { HallmarkEvidencePanel, showHallmark } from "../HallmarkEvidence";
 
 // upload (stage photos) -> ocr (Instant OCR running) -> evidence (raw OCR shown)
@@ -448,6 +449,7 @@ export function Workspace({
   actions,
   intro,
   hideEscalation,
+  hideCopilot,
 }: {
   result: InspectionAnalysis;
   urls: string[];
@@ -460,6 +462,7 @@ export function Workspace({
   actions?: ReactNode;
   intro?: ReactNode; // replaces the live-pipeline callout, e.g. for a saved inspection
   hideEscalation?: boolean; // a saved inspection shows its stored escalation instead
+  hideCopilot?: boolean; // the officer review page places the copilot next to the decision instead
 }) {
   const { image, quality, ocr, declaration_stage, product, standards, images } = result;
   const activeImage = images.find((i) => i.image_id === activeImageId);
@@ -616,6 +619,14 @@ export function Workspace({
           <DownstreamPanel result={result} />
         </div>
       </div>
+
+      {!hideCopilot && result.escalation && (
+        <CopilotPanel
+          analysis={result}
+          systemResult={result.escalation.system_result}
+          hasHallmark={Boolean(result.hallmark?.detected)}
+        />
+      )}
     </div>
     </RegionSides.Provider>
   );

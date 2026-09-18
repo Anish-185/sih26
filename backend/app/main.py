@@ -3,16 +3,27 @@
 Exposes:
   - GET /health         liveness check
   - GET/POST /search    deterministic lexical retrieval over the BIS knowledge base
+  - the grounded Q&A, inspection, records and copilot routers
 
-The LLM / RAG layer is added in a later phase.
+Every result MetrIQ reports is produced by deterministic code. The copilot
+router is an optional explanation layer: if it is unconfigured or unavailable,
+nothing else changes.
 """
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import router as search_router
-from app.inspection_api import router as inspection_router
-from app.records_api import router as records_router
+from app.openrouter import load_env_file
+
+# backend/.env (gitignored) -> process environment, before any service reads it.
+# A variable already exported always wins. This is how the OpenRouter key stays
+# server-side and out of git.
+load_env_file()
+
+from app.api import router as search_router  # noqa: E402
+from app.copilot_api import router as copilot_router  # noqa: E402
+from app.inspection_api import router as inspection_router  # noqa: E402
+from app.records_api import router as records_router  # noqa: E402
 
 app = FastAPI(
     title="BIS Assistant API",
@@ -42,3 +53,4 @@ def health() -> dict:
 app.include_router(search_router)
 app.include_router(inspection_router)
 app.include_router(records_router)
+app.include_router(copilot_router)

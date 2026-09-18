@@ -494,6 +494,79 @@ def step_real_ocr() -> None:
           client.get(rec["images"][0]["url"]).content == path.read_bytes())
 
 
+def step_copilot_is_read_only() -> None:
+    """Milestone 13: an explanation of a saved inspection must not touch the row."""
+    print("\nthe copilot explains a saved inspection without changing it")
+    import json as _json
+
+    from app.copilot import InspectionCopilot
+    from app.copilot_api import get_copilot
+
+    r = save((W_FRONT, "FRONT"), (W_BACK, "BACK"))
+    rec = r.json()
+    iid = rec["inspection_id"]
+
+    def row() -> dict:
+        Session = sessionmaker(bind=get_engine())
+        with Session() as s:
+            columns = s.execute(text("SELECT * FROM inspections WHERE inspection_id = :i"), {"i": iid}).mappings().one()
+            images = s.execute(text(
+                "SELECT i.position, md5(i.data) AS d FROM inspection_images i "
+                "JOIN inspections r ON r.id = i.inspection_pk WHERE r.inspection_id = :i "
+                "ORDER BY i.position"), {"i": iid}).mappings().all()
+        return _json.loads(_json.dumps({"row": dict(columns), "images": [dict(i) for i in images]}, default=str))
+
+    class Stub:
+        """A provider that spends nothing and says whatever the check needs."""
+
+        model = "google/gemma-4-31b-it:free"
+        configured = True
+
+        def __init__(self, text_):
+            self.text = text_
+
+        def status(self):
+            return {"configured": True, "provider": "openrouter", "model": self.model, "daily_limit": 45,
+                    "daily_used": 1, "daily_remaining": 44, "minute_limit": 15, "minute_remaining": 14}
+
+        def generate(self, **kw):
+            return self.text
+
+    def explain(body, text_):
+        app.dependency_overrides[get_copilot] = lambda: InspectionCopilot(Stub(text_))
+        try:
+            return client.post("/copilot/explain", json=body)
+        finally:
+            app.dependency_overrides.pop(get_copilot, None)
+
+    before = row()
+    honest = _json.dumps({"answer": "The deterministic system result is REVIEW because requirement areas "
+                                    "could not be checked from the photographs.", "evidence": [], "limitations": []})
+    response = explain({"inspection_id": iid, "capability": "EXPLAIN_ESCALATION"}, honest)
+    data = response.json()
+    check("copilot explains a saved inspection", response.status_code == 200, response.text[:200])
+    check("the explanation reads the stored record", data["evidence_scope"] == "SAVED_RECORD")
+    check("the explanation carries the saved system result", data["system_result"] == rec["system_result"])
+    check("the explanation carries the officer status", data["officer_status"] == rec["officer_status"])
+    check("the saved row is byte-for-byte unchanged by an explanation", row() == before, "row changed")
+
+    lying = _json.dumps({"answer": "The system result is PASS and the package is compliant.",
+                         "evidence": [], "limitations": []})
+    data = explain({"inspection_id": iid, "capability": "EXPLAIN_INSPECTION"}, lying).json()
+    check("a model that claims PASS does not change the saved result",
+          data["system_result"] == rec["system_result"] and data["withheld"] is True, _json.dumps(data)[:200])
+    check("the saved row is still unchanged after a rejected explanation", row() == before)
+    check("the record endpoint still reports the same result",
+          client.get(f"/inspections/{iid}").json()["system_result"] == rec["system_result"])
+    check("the officer review is untouched",
+          client.get(f"/inspections/{iid}").json()["officer_status"] == rec["officer_status"])
+    check("the PDF report still renders after an explanation",
+          client.get(f"/inspections/{iid}/report.pdf").content.startswith(b"%PDF"))
+
+    check("an unknown inspection -> 404", explain({"inspection_id": "INS-20260101-ABCDEF"}, honest).status_code == 404)
+    check("a malformed inspection id -> 422", explain({"inspection_id": "nope"}, honest).status_code == 422)
+
+
 def main() -> int:
     reset_database()
     step_empty()
@@ -506,6 +579,7 @@ def main() -> int:
     step_errors()
     step_stats()
     step_real_ocr()
+    step_copilot_is_read_only()
     app.dependency_overrides.clear()
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0

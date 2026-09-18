@@ -14,6 +14,11 @@
     POST /inspection/ocr     (Instant OCR — raw evidence only)
     POST /inspection/analyze (Smart Inspection — OCR + downstream pipeline)
     /inspections             (saved inspections + officer review; backend computes every result)
+    /copilot/status          (is the grounded explanation layer configured? — never a key)
+    /copilot/explain         (an explanation of one finished inspection; it never changes a result)
+
+  The OpenRouter API key lives ONLY on the backend. The browser talks to MetrIQ,
+  MetrIQ talks to OpenRouter. There is deliberately no VITE_ variable for it.
 */
 
 const API_BASE = (import.meta.env.VITE_API_BASE ?? "/api").replace(/\/$/, "");
@@ -695,6 +700,75 @@ export interface InspectionStats {
   decisions: Record<OfficerDecision, number>;
 }
 
+
+/* ------------------------------------------------- MetrIQ Copilot (grounded) --- */
+
+/**
+ * The optional explanation layer. It reads a finished inspection and puts it into
+ * words; it cannot retrieve, decide or change anything. `system_result` below is
+ * always the deterministic result read from the record — never the model's.
+ */
+export type CopilotCapability =
+  | "EXPLAIN_INSPECTION"
+  | "SUMMARIZE"
+  | "EXPLAIN_ESCALATION"
+  | "EXPLAIN_CHECKS"
+  | "EXPLAIN_EVIDENCE"
+  | "EXPLAIN_UNCERTAINTY"
+  | "EXPLAIN_HALLMARK"
+  | "MANUAL_VERIFICATION"
+  | "QUESTION";
+
+export interface CopilotStatus {
+  configured: boolean; // the server has a key; the key itself is never sent here
+  provider: string;
+  model: string;
+  daily_limit: number;
+  daily_used: number;
+  daily_remaining: number;
+  minute_limit: number;
+  minute_remaining: number;
+  capabilities: { code: CopilotCapability; label: string; question: string }[];
+  note: string;
+}
+
+export interface CopilotSource {
+  title: string;
+  authority: string;
+  reference: string | null;
+  quote: string | null;
+  document_name: string | null;
+  source_url: string | null;
+}
+
+export interface CopilotAnswer {
+  capability: CopilotCapability;
+  question: string;
+  evidence_scope: "SAVED_RECORD" | "LIVE_ANALYSIS";
+  inspection_id: string | null;
+  system_result: SystemResult | null; // deterministic, read from the record
+  escalation_required: boolean | null;
+  officer_status: OfficerStatus | null;
+  answer: string;
+  evidence: { claim: string; source: string }[];
+  limitations: string[];
+  sources: CopilotSource[];
+  grounded: boolean;
+  withheld: boolean; // MetrIQ rejected the generated text
+  withheld_reason: string;
+  structured: boolean;
+  model: string;
+  usage: Record<string, unknown>;
+}
+
+export interface CopilotInput {
+  capability: CopilotCapability;
+  question?: string;
+  inspection_id?: string; // a saved inspection …
+  analysis?: InspectionAnalysis; // … or the one currently on screen
+  rule_id?: string;
+}
+
 export type ReviewInput =
   | { action: "START" }
   | { action: "COMPLETE"; decision: OfficerDecision; officer_result?: SystemResult; note?: string };
@@ -782,6 +856,13 @@ export const api = {
   inspectionStats: () => request<InspectionStats>("/inspections/stats"),
 
   getInspection: (id: string) => request<InspectionRecord>(`/inspections/${encodeURIComponent(id)}`),
+
+  // Copilot: is an explanation service configured, and how much free budget is left?
+  copilotStatus: () => request<CopilotStatus>("/copilot/status", undefined, 10_000),
+
+  // Copilot: ONE explanation for ONE user action. Never called automatically.
+  copilotExplain: (body: CopilotInput) =>
+    request<CopilotAnswer>("/copilot/explain", { method: "POST", body: JSON.stringify(body) }, 90_000),
 
   reviewInspection: (id: string, body: ReviewInput) =>
     request<InspectionRecord>(`/inspections/${encodeURIComponent(id)}/review`, {
