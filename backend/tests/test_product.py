@@ -56,7 +56,15 @@ def test_real_products_are_matched() -> None:
 
 
 def test_single_word_products_still_work() -> None:
-    check("cement -> IS 269", "IS 269" in standards("cement"))
+    # "cement" names 13 verified cement standards that score identically. Picking
+    # one of them would be false precision, so the check is that every candidate
+    # really is a cement standard and that the query does not resolve to "high".
+    out = FINDER.find("cement", limit=6)
+    check("cement -> only cement standards, none of them arbitrarily preferred",
+          out.results and all("cement" in r.item.title.lower() for r in out.results),
+          str([r.item.standard_number for r in out.results]))
+    check("cement stays ambiguous — a one-word category is never high confidence",
+          out.confidence != "high", out.confidence)
     check("battery -> IS 16046", "IS 16046" in standards("battery"))
     check("tyre -> a tyre standard",
           any(s in standards("tyre") for s in ("IS 15627", "IS 15633")))
@@ -70,9 +78,16 @@ def test_stainless_steel_water_bottle_has_coverage() -> None:
     check("stainless steel water bottle is grounded", out.grounded)
     check("stainless steel water bottle -> IS 17526:2021",
           "IS 17526:2021" in standards("stainless steel water bottle"))
-    check("every result is a stainless-steel / water-bottle standard",
-          all(r.item.standard_number in ("IS 17526:2021", "IS 17803:2022")
-              for r in out.results))
+    # With a larger knowledge base other steel/water standards can also match a
+    # word, so the guarantee is about ranking: the two standards that actually
+    # describe this product come first, far ahead of any word-level match. The
+    # explicit "not returned" checks below still bar unrelated domains.
+    check("the two water-bottle standards rank first and second",
+          [r.item.standard_number for r in out.results[:2]] == ["IS 17526:2021", "IS 17803:2022"],
+          str([r.item.standard_number for r in out.results]))
+    check("and they outrank every other candidate by a clear margin",
+          len(out.results) < 3 or out.results[1].score > out.results[2].score * 1.5,
+          str([(r.item.standard_number, r.score) for r in out.results[:3]]))
 
     # "steel water bottle" (no "stainless") should also reach the same standards.
     check("steel water bottle -> IS 17526:2021",

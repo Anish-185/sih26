@@ -1,8 +1,15 @@
 import { type FormEvent, useState } from "react";
 import { ArrowUpRight, Search } from "lucide-react";
-import { ApiError, api, type ProductStandardResult } from "@/lib/api";
-import { useAsyncTask } from "@/lib/hooks";
+import {
+  ApiError,
+  api,
+  type CoverageStatus,
+  type ProductStandardResult,
+  type StandardCoverage,
+} from "@/lib/api";
+import { useAsyncTask, useOnMount } from "@/lib/hooks";
 import { standardTitle } from "@/lib/format";
+import { cn } from "@/lib/cn";
 import {
   Button,
   Callout,
@@ -28,9 +35,21 @@ const EXAMPLES = [
   "electric iron",
 ];
 
+/** What MetrIQ can do with a standard once it has been retrieved. */
+const COVERAGE_LABEL: Record<CoverageStatus, string> = {
+  INSPECTION_SUPPORTED: "Inspection supported",
+  STANDARD_ONLY: "Standard only",
+  UNSUPPORTED: "Not package-inspectable",
+};
+
 export function StandardsView() {
   const [query, setQuery] = useState("");
   const task = useAsyncTask(api.productStandard);
+  // Loaded once: it is the same data-derived matrix for every search.
+  const coverage = useOnMount(api.inspectionCoverage);
+  const coverageBy = new Map(
+    (coverage.data?.standards ?? []).map((s) => [s.standard_number, s]),
+  );
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -113,7 +132,12 @@ export function StandardsView() {
           {res.grounded ? (
             <ol className="space-y-4">
               {res.results.map((r, i) => (
-                <StandardResult key={r.id} result={r} rank={i + 1} />
+                <StandardResult
+                  key={r.id}
+                  result={r}
+                  rank={i + 1}
+                  coverage={coverageBy.get(r.standard_number)}
+                />
               ))}
             </ol>
           ) : (
@@ -151,9 +175,11 @@ export function StandardsView() {
 
 function StandardResult({
   result,
+  coverage,
   rank,
 }: {
   result: ProductStandardResult;
+  coverage?: StandardCoverage;
   rank: number;
 }) {
   const topReasons = [...result.reasons]
@@ -183,6 +209,25 @@ function StandardResult({
             {result.document_name ? ` · ${result.document_name}` : ""}
             {result.last_verified ? ` · verified ${result.last_verified}` : ""}
           </p>
+          {coverage && (
+            <p className="mt-1.5 text-[12px] leading-relaxed text-ink-soft">
+              <Mono
+                muted
+                className={cn(
+                  "mr-2 text-[10px] uppercase tracking-[0.12em]",
+                  coverage.coverage_status === "INSPECTION_SUPPORTED" && "text-accent",
+                )}
+              >
+                {COVERAGE_LABEL[coverage.coverage_status]}
+              </Mono>
+              {coverage.certification_route
+                ? `Certification route recorded in the knowledge base: ${coverage.certification_route}. `
+                : ""}
+              {coverage.coverage_status === "INSPECTION_SUPPORTED"
+                ? `${coverage.deterministic_rules} deterministic label check${coverage.deterministic_rules === 1 ? "" : "s"} available.`
+                : "MetrIQ can identify and explain this standard; it has no verified image-checkable rule."}
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 flex-row items-center gap-4 sm:flex-col sm:items-end">
           <ConfidenceMeter confidence={result.confidence} />

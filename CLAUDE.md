@@ -491,6 +491,46 @@ copilot read-only checks in `test_inspection_records.py`. With no key configured
 every result, check, source, escalation, officer decision and PDF report is unchanged.
 
 
+Milestone 14 (verified BIS knowledge + product → standard coverage): the knowledge base grew from 36 to
+**97 verified Indian Standards** (161 records in total), every one of them carrying an official
+`bis.gov.in` source, a source document, and a verification date. The 61 new records are transcribed from
+three official BIS "Products under Compulsory Certification" pages — Scheme I (ISI Mark), Scheme II
+(Compulsory Registration Scheme) and Scheme IV (Certificate of Conformity) — so the product ↔ standard
+relationship IS the BIS listing; nothing is inferred. Each record's `content` quotes BIS's own product
+description verbatim and states plainly that it is the listing's wording, not the catalogue title, and
+that being listed is not a statement about any particular item. Four existing records that BIS lists
+against MANY products (notably `IS/IEC 62368 (Part 1)`, which covers 31 notified products from laptops
+to power banks to CCTV cameras) gained those product names, so "power bank" or "smart watch" now reaches
+the standard BIS names for it. **Keyword policy:** a keyword may only be BIS's own wording or a common
+name for the SAME product, and every common name is declared in the record's own text
+("Common names used for searching this product: …"); sector guesses ("cooking appliance", "construction
+material", "gi pipe") are banned and tested for — an early draft of this milestone added "cooking stove"
+to the oil-pressure-stove record and made "cooking oil" match it with high confidence, which is exactly
+the false precision this project forbids. **Retrieval:** unchanged engine, one precision fix —
+`RetrievalConfig.min_terms_for_high` makes "high" mean what the thresholds always claimed (a title AND a
+keyword match, i.e. two pieces of evidence), so a single common word counted twice in two fields can no
+longer resolve an ambiguous query; a standard-number match is exempt. "cement" now returns 13 equally
+scored cement standards at `medium` instead of arbitrarily preferring one. **Nothing else grew:**
+requirements stay 15 (7 checkable), deterministic rules stay 7, INSPECTION_SUPPORTED stays 2 (packaged
+water only) and UNSUPPORTED stays 4 (the hallmarking standards); every added standard is STANDARD_ONLY —
+identified, explained and sourced, with no invented image rule. Product identification improves for free:
+`_vocabulary` is built from titles and keywords, so the richer vocabulary splits more OCR-joined words
+and recognises more prominent lines as product names ("LED BULB 9W" is now read as the product). Coverage
+report: `scripts/check_knowledge.py` gains a "Product → Standard coverage" table (CATEGORY | PRODUCT |
+STANDARD | REQ | IMG | RULES | STATUS) and a `--json` mode for the machine-readable matrix; the frontend
+Standards page shows each candidate's coverage status and its KB-recorded certification route, loaded
+once from the existing `GET /inspection/coverage`. Measured on a fixed 30-query consumer probe, candidates
+went from 11 to 15; the 15 remaining misses (toaster, ceiling fan, refrigerator, pressure cooker, helmet,
+school bag, cooking oil, biscuits, shampoo, paint, plywood, solar panel, gas stove, mixer grinder,
+bicycle) are real coverage gaps — those products are not on the BIS pages used here and were deliberately
+not guessed. Tests: `test_standards_coverage.py` (81 checks: provenance, no invented rules, banned
+keyword categories, 20 product → standard pairs, common names, OCR splitting, ambiguity, unknown
+products, explanations, domain separation). Count-based assertions in `test_coverage.py`,
+`test_hardening.py` and `test_legal_metrology.py` now assert the invariant ("every standard appears",
+"2 supported / 4 unsupported / the rest STANDARD_ONLY") instead of a literal 36, so the knowledge base
+can grow without rewriting tests.
+
+
 Only implement the current milestone. Do not start a new phase without being asked.
 
 ## Repository layout
@@ -566,6 +606,7 @@ sih26/
       test_report.py       # Milestone 11: PDF report content, honesty, escaping, read-only endpoint (PostgreSQL)
       test_hallmark_inspection.py # Milestone 12: HUID / purity extraction, untrusted text, escalation, report
       test_copilot.py      # Milestone 13: provider, grounding, injection defence, withheld answers, independence
+      test_standards_coverage.py # Milestone 14: standard provenance, product→standard retrieval, no invented rules
       test_pipeline.py     # OCR -> standard candidates end-to-end + stage degradation
       test_plain_runners.py # pytest bridge — runs every runner, makes pytest authoritative
       fixtures/broken_kb/  # deliberately invalid KB for the loader tests

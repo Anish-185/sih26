@@ -362,6 +362,39 @@ the record, claims a hallmark was authenticated, or states a result other than t
 deterministic one, the answer is **withheld** and MetrIQ's own sentence is shown
 instead.
 
+
+### Knowledge coverage
+
+97 verified Indian Standards, each transcribed from an official BIS "Products under
+Compulsory Certification" page (Scheme I / Scheme II / Scheme IV) with its source
+URL and verification date. The product ↔ standard relationship is the BIS listing
+itself — MetrIQ does not infer one.
+
+Three capabilities are deliberately distinct, and the Standards page labels each
+candidate with which one applies:
+
+| Status | What MetrIQ can do | Count |
+|---|---|---:|
+| `INSPECTION_SUPPORTED` | identify, explain **and** run deterministic image checks | 2 |
+| `STANDARD_ONLY` | identify and explain from official evidence; no image-checkable rule | 91 |
+| `UNSUPPORTED` | outside package-label inspection (jewellery hallmarking) | 4 |
+
+A larger knowledge base did **not** create rules: requirements stay at 15 (7
+checkable) and deterministic rules at 7. A standard is only inspection-supported
+when official, image-observable requirement evidence exists.
+
+```bash
+cd backend
+./.venv/bin/python scripts/check_knowledge.py            # validation + coverage table
+./.venv/bin/python scripts/check_knowledge.py --json     # machine-readable matrix
+```
+
+**Known coverage gaps.** Common consumer products that are not on the BIS pages
+used here have no standard in the knowledge base, and MetrIQ returns nothing
+rather than guessing: toaster, ceiling fan, refrigerator, pressure cooker, helmet,
+school bag, cooking oil, biscuits, shampoo, paint, plywood, solar panel, gas stove,
+mixer grinder, bicycle.
+
 ---
 
 ## Tests
@@ -386,7 +419,7 @@ authoritative gate. Model-dependent tests use a stub — no LM Studio needed.
 
 Phases 1–14 are complete (see [`CLAUDE.md`](CLAUDE.md) for the full log). What remains:
 
-- [x] **Compliance engine** — deterministic PASS / FAIL / REVIEW over verified requirements (currently 2 of 36 standards have checkable requirements; everything else is `STANDARD_ONLY` → REVIEW)
+- [x] **Compliance engine** — deterministic PASS / FAIL / REVIEW over verified requirements (currently 2 of 97 standards have checkable requirements; everything else is `STANDARD_ONLY` → REVIEW)
 - [x] **Legal Metrology package-label requirements** — 11 requirements from the Legal Metrology (Packaged Commodities) Rules, 2011 and amendments (official Department of Consumer Affairs PDFs); 6 are checked deterministically (MRP, net quantity, manufacturer name + address, commodity name, month and year of manufacture, consumer-care phone + e-mail), 5 cannot be checked from a photo. Reported separately from BIS compliance.
 - [x] **Hallmark / HUID evidence** — potential HUID and purity extraction, observed vs not verified, officer escalation, report section
 - [ ] **Requirement coverage** — more verified BIS requirements (still 1 checkable BIS rule)

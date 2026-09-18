@@ -4,12 +4,19 @@ Usage:
 
     cd backend
     ./.venv/bin/python scripts/check_knowledge.py [path/to/knowledge/dir]
+    ./.venv/bin/python scripts/check_knowledge.py --json    # machine-readable coverage
 
 Exit code 0 = valid, 1 = problems found.
+
+The report answers the question the assistant exists for: for each product BIS
+names, which Indian Standard applies, where that came from, and how far MetrIQ
+can go with it — retrieval and explanation only (STANDARD_ONLY), or also
+deterministic image checks (INSPECTION_SUPPORTED).
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -28,10 +35,56 @@ from app.requirements import (  # noqa: E402
 )
 
 
+
+def _product_rows(items, requirements) -> list[dict]:
+    """One row per verified standard: the product BIS names, and what MetrIQ can do.
+
+    Everything is read from the knowledge base and the requirement data — nothing
+    is counted that is not backed by a record.
+    """
+    coverage = {c.standard_number: c for c in coverage_by_standard(items, requirements)}
+    rows = []
+    for item in items:
+        if item.category != "indian_standards":
+            continue
+        cov = coverage.get(item.standard_number)
+        product = item.title.split(" — ", 1)[1] if " — " in item.title else item.title
+        group = (item.reference or "").split(";")[-1].strip() or "—"
+        rows.append({
+            "category": group,
+            "product": product,
+            "standard": item.standard_number,
+            "source": item.document_name or "",
+            "source_url": item.source_url or "",
+            "last_verified": str(item.last_verified) if item.last_verified else "",
+            "requirements": cov.verified_requirements if cov else 0,
+            "image_checkable_requirements": cov.deterministic_rules if cov else 0,
+            "rules": cov.deterministic_rules if cov else 0,
+            "status": cov.coverage_status if cov else UNSUPPORTED,
+        })
+    return sorted(rows, key=lambda r: (r["category"], r["product"]))
+
+
+def print_product_coverage(items, requirements) -> None:
+    rows = _product_rows(items, requirements)
+    print("\nProduct -> Standard coverage (what the assistant can answer)")
+    print(f"  {'CATEGORY':<34} {'PRODUCT':<52} {'STANDARD':<30} {'REQ':>3} {'IMG':>3} {'RULES':>5}  STATUS")
+    for row in rows:
+        print(f"  {row['category'][:33]:<34} {row['product'][:51]:<52} {row['standard'][:29]:<30} "
+              f"{row['requirements']:>3} {row['image_checkable_requirements']:>3} {row['rules']:>5}  {row['status']}")
+    by_status: dict[str, int] = {}
+    for row in rows:
+        by_status[row["status"]] = by_status.get(row["status"], 0) + 1
+    print(f"  {len(rows)} products with a verified standard — "
+          + ", ".join(f"{n} {s}" for s, n in sorted(by_status.items())))
+
+
 def check_requirements(argv: list[str]) -> int:
     knowledge_dir = Path(argv[0]) if argv else DEFAULT_KNOWLEDGE_DIR
     items = load_knowledge_base(knowledge_dir).items
     requirements = load_requirements(items)
+
+    print_product_coverage(items, requirements)
 
     print("\nInspection requirements (data/inspection_requirements.json):")
     supported = sum(r.supported for r in requirements.requirements)
@@ -98,7 +151,25 @@ def check_requirements(argv: list[str]) -> int:
     return 0
 
 
+def emit_json(argv: list[str]) -> int:
+    """Machine-readable coverage: the same rows, plus the totals."""
+    knowledge_dir = Path(argv[0]) if argv else DEFAULT_KNOWLEDGE_DIR
+    items = load_knowledge_base(knowledge_dir).items
+    requirements = load_requirements(items)
+    totals = coverage_totals(items, requirements)
+    print(json.dumps({
+        "generated_from": str(knowledge_dir),
+        "totals": totals.__dict__,
+        "products": _product_rows(items, requirements),
+        "legal_metrology_requirements": [r.__dict__ for r in package_requirement_rows(requirements)],
+        "errors": list(requirements.errors),
+    }, indent=1, default=str))
+    return 1 if requirements.errors else 0
+
+
 if __name__ == "__main__":
-    args = sys.argv[1:]
+    args = [a for a in sys.argv[1:] if a != "--json"]
+    if "--json" in sys.argv[1:]:
+        raise SystemExit(emit_json(args))
     status = main(args)
     raise SystemExit(status or check_requirements(args))

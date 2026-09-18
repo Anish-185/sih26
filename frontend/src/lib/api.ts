@@ -701,6 +701,33 @@ export interface InspectionStats {
 }
 
 
+
+/* ------------------------------------------- inspection coverage (read-only) --- */
+
+/**
+ * What MetrIQ can do with a standard, derived from the verified data:
+ *   INSPECTION_SUPPORTED — it also has image-checkable requirements and rules
+ *   STANDARD_ONLY        — identified and explained from official evidence, no image rule
+ *   UNSUPPORTED          — outside package-label inspection (e.g. jewellery hallmarking)
+ * Retrieval and explanation work for all three; only the inspection engine differs.
+ */
+export type CoverageStatus = "INSPECTION_SUPPORTED" | "STANDARD_ONLY" | "UNSUPPORTED";
+
+export interface StandardCoverage {
+  standard_number: string;
+  title: string;
+  coverage_status: CoverageStatus;
+  reason: string;
+  certification_route: string | null;
+  verified_requirements: number;
+  deterministic_rules: number;
+}
+
+export interface CoverageMatrix {
+  standards: StandardCoverage[];
+  errors: string[];
+}
+
 /* ------------------------------------------------- MetrIQ Copilot (grounded) --- */
 
 /**
@@ -856,6 +883,9 @@ export const api = {
   inspectionStats: () => request<InspectionStats>("/inspections/stats"),
 
   getInspection: (id: string) => request<InspectionRecord>(`/inspections/${encodeURIComponent(id)}`),
+
+  // What MetrIQ can do with each verified standard (data-derived, no model).
+  inspectionCoverage: () => request<CoverageMatrix>("/inspection/coverage", undefined, 20_000),
 
   // Copilot: is an explanation service configured, and how much free budget is left?
   copilotStatus: () => request<CopilotStatus>("/copilot/status", undefined, 10_000),

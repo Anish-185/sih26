@@ -244,7 +244,10 @@ def dataclass_replace_evidence(product):
 def test_matrix() -> None:
     by_std = {c.standard_number: c for c in coverage_by_standard(ITEMS, REAL)}
     standards = [i for i in ITEMS if i.category == "indian_standards"]
-    check("matrix covers every verified standard", len(by_std) == len(standards) == 36, str(len(by_std)))
+    # The invariant is "every standard in the knowledge base appears in the matrix",
+    # not a fixed count — the knowledge base grows. The floor guards against it shrinking.
+    check("matrix covers every verified standard",
+          len(by_std) == len(standards) and len(standards) >= 36, str(len(by_std)))
     supported = sorted(s for s, c in by_std.items() if c.coverage_status == "INSPECTION_SUPPORTED")
     check("matrix: only packaged water is supported for inspection",
           supported == ["IS 13428:2005", "IS 14543:2016"], str(supported))
@@ -264,7 +267,8 @@ def test_matrix() -> None:
 
     body = TestClient(app).get("/inspection/coverage").json()
     check("GET /inspection/coverage returns standards + rows + no errors",
-          len(body["standards"]) == 36 and body["rows"] and body["errors"] == [], str(body.get("errors")))
+          len(body["standards"]) == len(standards) and body["rows"] and body["errors"] == [],
+          str(body.get("errors")))
 
 
 # ------------------------------------------------------------------ 8-13 extraction

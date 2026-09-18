@@ -60,6 +60,13 @@ class RetrievalConfig:
     # confidence is capped at "low" (the query is only partly covered).
     coverage_floor: float = 0.34
 
+    # "high" is meant to mean a title AND a keyword match (see the thresholds
+    # above) — two pieces of evidence, not one word counted twice in two fields.
+    # A single common word ("oil", "cement", "steel") can otherwise reach 7.5 on
+    # its own and name one arbitrary standard out of many that share it, so a
+    # one-term match is capped at "medium" unless the term is a standard number.
+    min_terms_for_high: int = 2
+
     # How many results to return.
     top_k: int = 5
 
@@ -383,6 +390,10 @@ class SearchEngine:
             coverage = len(result.matched_terms) / total_terms
             if coverage < cfg.coverage_floor:
                 level = _cap_confidence(level, "low")
+
+        names_standard = any(r.field == "standard_number" for r in result.reasons)
+        if len(result.matched_terms) < cfg.min_terms_for_high and not names_standard:
+            level = _cap_confidence(level, "medium")
         return level
 
 

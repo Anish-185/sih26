@@ -177,9 +177,16 @@ def test_product_name() -> None:
     check("4 product line with product words is offered, uncertain",
           f["product_name"].value == "Packaged Drinking Water" and "brand" in f["product_name"].reason)
     led = fields(["LED BULB 9W", "Self-ballasted LED lamp, Cool Daylight 6500K", "Net Quantity: 1 N"])
+    # The safety property is unchanged: a prominent descriptor is never offered as
+    # a brand. Since Milestone 14 added "led bulb" to the verified BIS vocabulary
+    # (BIS lists Self-Ballasted LED Lamps under the Compulsory Registration
+    # Scheme), the prominent line is now recognised as the product name itself.
     check("4 a prominent descriptor sharing words with the product line is not offered as a brand",
-          led["brand"].status == "NOT_DETECTED" and led["product_name"].status == "UNCERTAIN"
-          and "brand" not in led["product_name"].reason, str(led["product_name"]))
+          led["brand"].status == "NOT_DETECTED" and "brand" not in led["product_name"].reason,
+          str(led["product_name"]))
+    check("4 a prominent line made of knowledge-base product words is read as the product",
+          led["product_name"].status == "DETECTED" and led["product_name"].value == "Led Bulb 9W",
+          str(led["product_name"]))
     alone = fields(["AQUA SPRING", "Net Quantity: 1 L", "MRP Rs 20"])["product_name"]
     check("4 only a brand-like phrase -> product name UNCERTAIN with no value",
           alone.status == "UNCERTAIN" and alone.value is None and alone.raw_text == "AQUA SPRING", str(alone))
@@ -278,8 +285,13 @@ def test_knowledge() -> None:
     check("hallmarking standard -> UNSUPPORTED for package inspection",
           gold.coverage_status == "UNSUPPORTED" and gold.domain == "JEWELLERY_HALLMARKING" and "jewellery" in gold.reason)
     counts = {s: sum(c.coverage_status == s for c in by_std.values()) for s in ("INSPECTION_SUPPORTED", "STANDARD_ONLY", "UNSUPPORTED")}
-    check("coverage totals 2 / 30 / 4 of 36, no fake rules",
-          (len(by_std), counts["INSPECTION_SUPPORTED"], counts["STANDARD_ONLY"], counts["UNSUPPORTED"]) == (36, 2, 30, 4),
+    # The knowledge base grows; what must not change is that coverage is earned
+    # from data. Only packaged water has image-checkable requirements, only the
+    # four hallmarking standards are UNSUPPORTED, and every other standard is
+    # STANDARD_ONLY — retrievable and explainable, with no invented rule.
+    check("coverage classes stay data-derived: 2 inspection-supported, 4 hallmarking-unsupported",
+          (counts["INSPECTION_SUPPORTED"], counts["UNSUPPORTED"]) == (2, 4)
+          and counts["STANDARD_ONLY"] == len(by_std) - 6 and len(by_std) >= 36,
           str(counts))
     check("only one checkable BIS rule exists in the data (nothing invented)",
           [r.id for r in REAL.requirements if r.supported and r.scope == "STANDARD"]
@@ -288,10 +300,12 @@ def test_knowledge() -> None:
         check(f"coverage row has a reason and source ({c.standard_number})", bool(c.reason) and bool(c.source_document))
 
     body = TestClient(app).get("/inspection/coverage").json()
+    totals = body["totals"]
     check("GET /inspection/coverage exposes totals + reasons",
-          {k: body["totals"][k] for k in ("total", "inspection_supported", "standard_only", "unsupported")}
-          == {"total": 36, "inspection_supported": 2, "standard_only": 30, "unsupported": 4}
-          and all(s["reason"] for s in body["standards"]), str(body.get("totals")))
+          totals["total"] == len(body["standards"])
+          and (totals["inspection_supported"], totals["unsupported"]) == (2, 4)
+          and totals["standard_only"] == totals["total"] - 6
+          and all(s["reason"] for s in body["standards"]), str(totals))
 
     _, water_product, stage = evaluate(WATER + ["IS 14543"])
     gold_record = KB["is-1417-2016-gold-hallmarking-fineness"]

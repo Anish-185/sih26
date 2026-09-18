@@ -410,9 +410,12 @@ def test_regressions() -> None:
     print("\nregressions")
     by_std = coverage_by_standard(ITEMS, REAL)
     counts = {s: sum(c.coverage_status == s for c in by_std) for s in ("INSPECTION_SUPPORTED", "STANDARD_ONLY", "UNSUPPORTED")}
-    check("17 BIS coverage classes unchanged: 36 = 2 / 30 / 4",
-          (len(by_std), counts["INSPECTION_SUPPORTED"], counts["STANDARD_ONLY"], counts["UNSUPPORTED"]) == (36, 2, 30, 4),
-          str(counts))
+    # Adding BIS standards must not create BIS inspection rules: only packaged
+    # water is inspection-supported and only hallmarking standards are unsupported,
+    # whatever the size of the knowledge base.
+    check("17 BIS coverage classes unchanged by knowledge growth: 2 supported / 4 unsupported",
+          (counts["INSPECTION_SUPPORTED"], counts["UNSUPPORTED"]) == (2, 4)
+          and counts["STANDARD_ONLY"] == len(by_std) - 6, str(counts))
 
     stage = extract_declarations(regions(WATER + ["ISTIS 14543"]))
     std = next(d for d in stage.fields if d.field == "standard_number")
@@ -424,7 +427,7 @@ def test_regressions() -> None:
 
     t = coverage_totals(ITEMS, REAL)
     check("coverage report separates BIS standards from Legal Metrology requirements",
-          (t.bis_standards, t.bis_inspection_supported, t.bis_standard_only) == (36, 2, 30)
+          (t.bis_inspection_supported, t.bis_standard_only) == (2, t.bis_standards - 6)
           and t.legal_metrology_requirements == 11 and t.legal_metrology_rules == 6
           and t.package_label_checkable_requirements == t.bis_rules + t.legal_metrology_rules == 7
           and t.deterministic_rules == 7, str(t))
@@ -503,7 +506,7 @@ def test_http() -> None:
     body = client.get("/inspection/coverage").json()
     totals = body["totals"]
     check("GET /inspection/coverage reports BIS and Legal Metrology separately",
-          totals["total"] == 36 and totals["legal_metrology_requirements"] == 11
+          totals["total"] == len(body["standards"]) and totals["legal_metrology_requirements"] == 11
           and totals["legal_metrology_rules"] == 6 and totals["deterministic_rules"] == 7
           and len(body["legal_metrology"]["requirements"]) == 11
           and all(r["source_category"] == "LEGAL_METROLOGY" for r in body["legal_metrology"]["requirements"]),
