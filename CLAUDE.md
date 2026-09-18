@@ -531,6 +531,50 @@ products, explanations, domain separation). Count-based assertions in `test_cove
 can grow without rewriting tests.
 
 
+Milestone 15 (vision-assisted product identification + OCR evidence fusion): an OPTIONAL second evidence
+source for ONE question — what product is this? `app/vision.py` is the only module that talks to the
+vision model (`QwenVision`, OpenRouter multimodal, default `qwen/qwen3.8-27b:free`, verified
+`input_modalities: ['text','image','video']`). It uses a **separate OpenRouter key**
+(`OPENROUTER_VISION_API_KEY`, never the copilot's `OPENROUTER_API_KEY`), its own model (`VISION_MODEL`),
+its own budget (`VISION_MAX_IMAGES` 2, `VISION_DAILY_LIMIT` 40, `VISION_MINUTE_LIMIT` 10) and its own
+failure path, so a vision outage cannot touch the DeepSeek copilot and vice versa. Requests send
+`reasoning: {"enabled": false}` (Qwen reasons by default) and a base64 `image_url` content part; identical
+image bytes are answered from an in-process cache, so saving an inspection — which re-runs the analysis
+server-side — never spends the quota twice.
+
+**A visual observation is deliberately weaker than OCR, and that is enforced, not hoped for.** `_scrub`
+deletes any IS number, licence number, HUID, FSSAI number, price, quantity, date or certification claim
+the model writes *before* the observation reaches the application, and records `scrubbed: true` plus a
+limitation saying so; a `product_label` containing a digit is rejected outright. Declarations are
+unreachable from here: `app/declarations.py` and `app/compliance.py` do not import vision at all, and
+vision output never becomes a declaration. Vision cannot name a standard either — like the existing
+`_model_hint`, it produces a product *clue* that goes through the same phrase gate and the same
+deterministic `ProductStandardFinder`, so it can only ever retrieve records the knowledge base already
+holds.
+
+**Evidence fusion** (`_fuse` in `app/product_identification.py`, deterministic, no model): the result
+carries `signals` (`ocr_supported` / `vision_supported` / `knowledge_supported` / `agreement` /
+`conflicts`) and `vision_status` (`OK` | `UNAVAILABLE` | `NOT_RUN`). Outcomes — OCR and vision agree →
+MATCHED, agreement stated in the reason, **retrieval confidence unchanged** (agreement is not verified
+evidence); they disagree → REVIEW with the conflict quoted in full, MetrIQ never chooses; no OCR product
+evidence but vision has some → REVIEW, `method: vision_assisted`, needs officer confirmation; photos of
+one package that appear to show different products → a cross-side conflict; vision unavailable or
+unconfigured → byte-for-byte the pre-Milestone-15 result. The "the label text names more than one
+product" rule now counts only OCR-supported candidates, so a vision-derived candidate can never be
+blamed on the label.
+
+Multi-side: every readable photo is observed independently (up to the cap) and keeps its own
+`image_id` / `side`; a failed side is reported, never treated as absent. Persistence needs **no
+migration** — the analysis is stored as JSONB and both new fields are defaulted, so inspections saved
+before this milestone still load (tested). Report: a separate numbered "Visual product observations"
+section, never under BIS evidence, labelled "Unverified visual observation" with the model named.
+Copilot: the observations enter the grounded context labelled UNVERIFIED and the system prompt ranks them
+BELOW every other source and forbids calling them verified; DeepSeek is never sent an image. Frontend:
+the existing Product identification panel gains a "Visual observation" block, a Support row
+(OCR text / Visual / Knowledge base) and the conflict text — no redesign. Tests:
+`test_vision_fusion.py` (155 checks, every provider call stubbed — no tokens spent).
+
+
 Only implement the current milestone. Do not start a new phase without being asked.
 
 ## Repository layout
@@ -545,6 +589,7 @@ sih26/
       api.py           # /search, /ask, /product-standard, /certification-guidance
       llm.py           # LM Studio / Qwen3-4B local LLM adapter (used by /ask — unchanged)
       openrouter.py    # Milestone 13: the ONLY OpenRouter surface, key stays server-side
+      vision.py        # Milestone 15: visual product understanding (separate key/model/budget)
       copilot.py       # Milestone 13: grounded context + system prompt + answer verification (guard)
       copilot_api.py   # Milestone 13: GET /copilot/status, POST /copilot/explain (read-only)
       rag.py           # grounded BIS question-answering pipeline (/ask)
@@ -607,6 +652,7 @@ sih26/
       test_hallmark_inspection.py # Milestone 12: HUID / purity extraction, untrusted text, escalation, report
       test_copilot.py      # Milestone 13: provider, grounding, injection defence, withheld answers, independence
       test_standards_coverage.py # Milestone 14: standard provenance, product→standard retrieval, no invented rules
+      test_vision_fusion.py # Milestone 15: vision adapter, scrubbing, OCR/vision fusion, graceful failure
       test_pipeline.py     # OCR -> standard candidates end-to-end + stage degradation
       test_plain_runners.py # pytest bridge — runs every runner, makes pytest authoritative
       fixtures/broken_kb/  # deliberately invalid KB for the loader tests

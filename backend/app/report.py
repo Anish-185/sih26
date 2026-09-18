@@ -619,6 +619,65 @@ def _hallmark(d: _Doc, an: dict) -> list:
     return out
 
 
+def _vision(d: _Doc, an: dict) -> list:
+    """Visual product observations — deliberately its own section, never under BIS evidence.
+
+    These are AI observations about what a photo appears to show. They are not
+    verified evidence, not declarations and not a compliance result, and the
+    section says so in the words a reader will act on.
+    """
+    observations = an.get("vision") or []
+    if not observations:
+        return []
+
+    usable = [o for o in observations if o.get("status") == "OK"]
+    out = d.section(0, "Visual product observations",
+                    "What the photographs APPEAR to show, produced by an AI vision model. This is an "
+                    "unverified observation used only to help identify the product. It is not BIS "
+                    "evidence, not a declaration and not a compliance result; no value below was read "
+                    "from the label.")
+
+    for o in observations:
+        where = f"{_t(o.get('side') or 'UNKNOWN')} · {_t(o.get('image_id') or '')}"
+        if o.get("status") != "OK":
+            out.append(d.definitions([
+                (where, f"Not available — {_t(o.get('reason') or 'the visual model did not answer.')}"),
+            ]))
+            continue
+        rows = [
+            ("Photo", where),
+            ("Vision model", f"<font name='Mono'>{_t(o.get('model') or '')}</font>"),
+            ("Appears to be", _t(o.get("product_label") or "not determined")),
+            ("Apparent category", _t(o.get("product_category") or "not determined")),
+            ("Model confidence", f"{float(o.get('confidence') or 0.0):.2f} — the model's own confidence, "
+                                 "not retrieval confidence and not verification"),
+            ("Status", "Unverified visual observation"),
+        ]
+        if o.get("visual_features"):
+            rows.append(("Visible features", _t(", ".join(o["visual_features"]))))
+        if o.get("packaging_type"):
+            rows.append(("Packaging", _t(o["packaging_type"])))
+        for line in o.get("visual_observations") or []:
+            rows.append(("Observation", _t(line)))
+        for line in o.get("limitations") or []:
+            rows.append(("Limitation", _t(line)))
+        if o.get("scrubbed"):
+            rows.append(("Withheld", "The model wrote something resembling a declared or legal value. "
+                                     "MetrIQ removed it: only OCR evidence may report such values."))
+        out.append(d.definitions(rows))
+
+    signals = (an.get("product") or {}).get("signals") or {}
+    if usable:
+        if signals.get("conflicts"):
+            out.append(d.callout("The package text and the visual observation disagree. MetrIQ does not "
+                                 "choose between them; the product is reported as needing review."))
+        elif signals.get("agreement"):
+            out.append(d.callout("The visual observation agrees with the product read from the label text. "
+                                 "Agreement supports the identification but adds no verified evidence, and "
+                                 "did not change any result."))
+    return out
+
+
 def _compliance(d: _Doc, an: dict) -> list:
     out = d.section(8, "Compliance results", "Each row is one deterministic rule applied to the stored OCR evidence "
                     "and a verified requirement. No language model produced or changed these results. UNSUPPORTED "
@@ -797,6 +856,7 @@ def build_story(record: dict, images: dict[int, bytes], generated_at: datetime) 
     story += _bis(d, record, an)
     story += _legal_metrology(d, an)
     story += _hallmark(d, an)
+    story += _vision(d, an)
     story += _compliance(d, an)
     story += _system_result(d, record, an)
     story += _officer(d, record)

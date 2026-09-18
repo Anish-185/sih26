@@ -44,6 +44,7 @@ from app.inspection import (
     StandardCoverageOut,
 )
 from app.llm import LocalLLM
+from app.vision import QwenVision
 from app.requirements import (
     coverage_by_standard,
     coverage_matrix,
@@ -62,7 +63,17 @@ def get_analyzer() -> InspectionAnalyzer:
     # The model is only asked for a search term when the package text identified
     # nothing; a short timeout keeps the request responsive, and if LM Studio is
     # down identification is simply deterministic-only.
-    return InspectionAnalyzer(llm=LocalLLM(timeout=45.0), product_finder=get_product_finder())
+    # Visual understanding uses its OWN OpenRouter key (OPENROUTER_VISION_API_KEY),
+    # separate from the DeepSeek copilot's. Unconfigured = identification is
+    # deterministic + OCR only, exactly as before.
+    return InspectionAnalyzer(llm=LocalLLM(timeout=45.0), product_finder=get_product_finder(),
+                              vision=get_vision())
+
+
+@lru_cache(maxsize=1)
+def get_vision() -> QwenVision:
+    """One client per process, so its free-tier counter and image cache are shared."""
+    return QwenVision()
 
 
 @lru_cache(maxsize=1)

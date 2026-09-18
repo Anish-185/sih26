@@ -395,6 +395,47 @@ rather than guessing: toaster, ceiling fan, refrigerator, pressure cooker, helme
 school bag, cooking oil, biscuits, shampoo, paint, plywood, solar panel, gas stove,
 mixer grinder, bicycle.
 
+
+### Visual product understanding (optional)
+
+A second evidence source for one question only — **what product is this?** OCR
+reads the label; a vision model says what the package looks like. They are not
+equal, and the code enforces that rather than trusting the model:
+
+| | PaddleOCR | Vision model |
+|---|---|---|
+| Authority | **authoritative** for printed text | never authoritative |
+| Produces | text, boxes, confidence, declarations | a product impression |
+| May report MRP, quantity, IS number, licence, HUID | yes | **never** — deleted before the app sees it |
+| May name a BIS standard | via deterministic retrieval | **never** — it only supplies a product clue |
+| May decide compliance | no (rules do) | **never** |
+
+Its key is deliberately **separate** from the copilot's, so the two quotas and
+outages are independent:
+
+```bash
+# backend/.env  (gitignored — never commit it, never put it in the frontend)
+OPENROUTER_VISION_API_KEY=sk-or-v1-...     # NOT the same as OPENROUTER_API_KEY
+VISION_MODEL=qwen/qwen3.8-27b:free
+```
+
+Optional: `VISION_BASE_URL`, `VISION_TIMEOUT`, and the free-tier guards
+`VISION_MAX_IMAGES` (2 images per inspection), `VISION_DAILY_LIMIT`,
+`VISION_MINUTE_LIMIT`. Identical images are answered from a cache, so saving an
+inspection does not spend the quota again.
+
+**Evidence fusion.** The two signals are compared deterministically, never merged
+into a prompt:
+
+| OCR | Vision | Result |
+|---|---|---|
+| names the product | agrees | identified; agreement stated, **confidence unchanged** |
+| names the product | disagrees | **REVIEW** — the conflict is quoted, MetrIQ does not choose |
+| unreadable | names a product | **REVIEW** — needs officer confirmation against the label |
+| names the product | unavailable / not configured | unchanged, OCR only |
+
+Without a key, MetrIQ behaves exactly as it did before this feature existed.
+
 ---
 
 ## Tests

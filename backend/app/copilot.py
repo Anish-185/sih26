@@ -52,6 +52,13 @@ SOURCE OF TRUTH, in order:
 6. the officer's own note, when one is supplied
 Your pretrained knowledge NEVER overrides these and is never evidence.
 
+A VISUAL OBSERVATION (what a photo appears to show, produced by a vision model)
+ranks BELOW all of the above. It is an unverified observation used only to help
+identify the product. Never call it verified, and never say it established a
+standard, a declaration or a compliance result. Say "the visual observation
+suggests…" or "the image appears to show…", and when it agrees with the label
+text say they agree — not that either one was confirmed.
+
 YOU MUST NOT:
 - invent or guess an Indian Standard number, a clause, a requirement, a rule, a
   product identity, a HUID, a test result, a certification status, a fee, a
@@ -385,8 +392,16 @@ def build_context(
         }
 
     if "product" in sections:
+        signals = product.get("signals") or {}
         ctx["product"] = {
             "status": product.get("status"),
+            "evidence_sources": {
+                "ocr_text_supported": signals.get("ocr_supported"),
+                "visual_observation_supported": signals.get("vision_supported"),
+                "knowledge_base_supported": signals.get("knowledge_supported"),
+                "ocr_and_vision_agree": signals.get("agreement"),
+                "conflicts": [_clean(c, 300) for c in (signals.get("conflicts") or [])[:3]],
+            },
             "name": product.get("name"),
             "standard_number": product.get("standard_number"),
             "retrieval_confidence": product.get("confidence"),
@@ -399,6 +414,30 @@ def build_context(
             "standard_numbers_printed_but_not_in_knowledge_base":
                 product.get("unverified_standard_numbers", [])[:5],
         }
+        vision = [o for o in (analysis.get("vision") or []) if o.get("status") == "OK"]
+        if vision or analysis.get("vision"):
+            ctx["visual_observations"] = {
+                "what_this_is": "An AI vision model's impression of the photographs. UNVERIFIED — it is "
+                                "not evidence, not a declaration and not a compliance result. It may not "
+                                "report any declared or legal value.",
+                "status": product.get("vision_status"),
+                "observations": [
+                    {
+                        "side": o.get("side"),
+                        "image_id": o.get("image_id"),
+                        "appears_to_be": o.get("product_label"),
+                        "apparent_category": o.get("product_category"),
+                        "model_confidence": o.get("confidence"),
+                        "visible_features": (o.get("visual_features") or [])[:6],
+                        "notes": [_clean(x, 160) for x in (o.get("visual_observations") or [])[:2]],
+                    }
+                    for o in vision[:3]
+                ],
+                "unavailable": [
+                    {"side": o.get("side"), "reason": _clean(o.get("reason"), 160)}
+                    for o in (analysis.get("vision") or []) if o.get("status") != "OK"
+                ][:3],
+            }
 
     if "standards" in sections:
         ctx["bis_standards_retrieved"] = [

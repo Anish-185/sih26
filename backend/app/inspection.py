@@ -37,6 +37,8 @@ from app.api import ReasonOut, WhyOut
 from app.declarations import extract_declarations, has_reliable_text
 from app.escalation import assess as assess_escalation
 from app.hallmark import HallmarkOut, evaluate_hallmark
+from app.vision import QwenVision, VisionObservation
+from app.vision import unavailable as vision_unavailable
 from app.llm import LocalLLM
 from app.product import ProductStandardFinder
 from app.product_identification import RETRIEVAL_NOTE, product_name_of
@@ -262,6 +264,44 @@ class ProductEvidenceOut(BaseModel):
     retrieval_score: float
 
 
+class VisionObservationOut(BaseModel):
+    """What one photo APPEARS to show. An AI visual observation, never verified evidence.
+
+    It can never carry a declared or legal value: app/vision.py deletes any price,
+    quantity, date, licence, IS number or HUID the model writes before it gets here.
+    """
+
+    image_id: str
+    side: str
+    status: str = Field(description='"OK" | "UNAVAILABLE"')
+    model: str = Field(default="", description="The vision model that produced it.")
+    evidence_type: str = Field(default="AI_VISUAL_OBSERVATION",
+                               description="Never BIS evidence and never a declaration.")
+    product_candidate: str = ""
+    product_label: str = Field(default="", description="Everyday product name the image suggests.")
+    product_category: str = ""
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0,
+                              description="The model's own confidence — not retrieval confidence.")
+    visual_features: list[str] = Field(default_factory=list)
+    packaging_type: str = ""
+    visual_observations: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    scrubbed: bool = Field(default=False, description="The model wrote a legal value; MetrIQ removed it.")
+    reason_code: str = ""
+    reason: str = Field(default="", description="Why it is UNAVAILABLE, in plain words.")
+
+
+class FusionSignalsOut(BaseModel):
+    """Which evidence sources supported the identified product (deterministic)."""
+
+    ocr_supported: bool = False
+    vision_supported: bool = False
+    knowledge_supported: bool = False
+    agreement: bool = False
+    conflicts: list[str] = Field(default_factory=list,
+                                 description="OCR and the image disagree; MetrIQ does not choose.")
+
+
 class ProductIdentificationOut(BaseModel):
     status: str = Field(description='"MATCHED" | "REVIEW"')
     name: str | None = Field(
@@ -272,9 +312,12 @@ class ProductIdentificationOut(BaseModel):
     confidence: str = Field(
         description="Retrieval confidence (high | medium | low | none) — not compliance."
     )
-    method: str = Field(description='"deterministic" | "model_assisted"')
+    method: str = Field(description='"deterministic" | "model_assisted" | "vision_assisted"')
     reason: str
     evidence: list[ProductEvidenceOut] = Field(default_factory=list)
+    signals: FusionSignalsOut = Field(default_factory=FusionSignalsOut,
+                                      description="Evidence fusion: which sources supported this product.")
+    vision_status: str = Field(default="NOT_RUN", description='"OK" | "UNAVAILABLE" | "NOT_RUN"')
     unverified_standard_numbers: list[str] = Field(
         default_factory=list,
         description="IS numbers printed on the label with no verified knowledge-base record.",
@@ -624,6 +667,10 @@ class InspectionAnalysisOut(BaseModel):
     pipeline: PipelineStagesOut
     notes: list[str] = Field(default_factory=list)
     inspection_type: str = Field(default="PACKAGE", description='"PACKAGE" | "HALLMARK" (jewellery hallmark photo)')
+    vision: list[VisionObservationOut] = Field(
+        default_factory=list,
+        description="Visual observations of the photos — AI observations, never verified evidence.",
+    )
     hallmark: HallmarkOut | None = Field(
         default=None, description="Hallmark / HUID evidence observed in the photos — never an authentication."
     )
@@ -650,6 +697,11 @@ class InspectionAnalyzer:
 
     ``ocr_engine`` defaults to the real local engine (``app.ocr.run_ocr``);
     tests pass a stand-in to exercise failure handling without the model.
+
+    ``vision`` is an optional visual-understanding client. It runs only in Smart
+    Inspection (never Instant OCR), only on readable images, at most
+    ``vision.max_images`` of them, and any failure leaves the inspection working
+    on OCR alone.
     """
 
     def __init__(
@@ -657,10 +709,14 @@ class InspectionAnalyzer:
         llm: LocalLLM | None = None,
         ocr_engine: OcrEngine = run_ocr,
         product_finder: ProductStandardFinder | None = None,
+        vision: QwenVision | None = None,
     ) -> None:
         self._llm = llm
         self._ocr_engine = ocr_engine
         self._product_finder = product_finder
+        # Optional visual understanding. None (or an unconfigured client) means
+        # identification is exactly what it was before Milestone 15.
+        self._vision = vision
 
     def ocr(self, data: bytes, filename: str, side: str | None = None) -> InstantOcrOut:
         """Instant OCR of one image (see ``ocr_package``)."""
@@ -765,9 +821,16 @@ class InspectionAnalyzer:
         gaps = package.images_failed + package.images_no_text + package.images_no_reliable_text
         unreadable = gaps if len(evidence.images) > 1 else []
 
+        # ---- visual understanding (optional, isolated, quota-guarded) ----
+        # Runs alongside OCR on the same photos and only refines product
+        # identification. Any failure leaves an UNAVAILABLE observation and the
+        # inspection continues exactly as it would without vision.
+        vision_observations = self._observe(uploads, evidence.images)
+
         try:
             downstream = run_downstream(regions, self._llm, self._product_finder, unreadable_images=unreadable,
-                                        inspection_type=inspection_type)
+                                        inspection_type=inspection_type,
+                                        vision_observations=vision_observations)
             declaration_stage, product, standards, compliance, package_label, completeness, pipeline = (
                 _declaration_stage_out(downstream.declaration_stage),
                 _product_out(downstream.product),
@@ -805,6 +868,7 @@ class InspectionAnalyzer:
             package_label.notes.append(gap_note)
 
         analysis = InspectionAnalysisOut(
+            vision=[_vision_out(o) for o in vision_observations],
             inspection_id=evidence.inspection_id,
             created_at=evidence.created_at,
             image=evidence.image,
@@ -864,6 +928,27 @@ class InspectionAnalyzer:
                 raise ImageError("The same image was uploaded more than once.")
             seen.add(key)
         return sides
+
+
+    _MEDIA_TYPES = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp",
+                    "BMP": "image/bmp", "TIFF": "image/tiff", "MPO": "image/jpeg"}
+
+    def _observe(self, uploads: list[PackageUpload], images: list[PackageImageOut]) -> list[VisionObservation]:
+        """Visual observations of the readable photos. Never raises, never required."""
+        if self._vision is None or not self._vision.configured:
+            return []
+        readable = [
+            (img.image_id, img.side, upload.data, self._MEDIA_TYPES.get(img.format or "", "image/png"))
+            for upload, img in zip(uploads, images)
+            if img.status != "FAILED" and upload.data
+        ]
+        if not readable:
+            return []
+        try:
+            return self._vision.observe_package(readable)
+        except Exception:  # noqa: BLE001 — vision is never a single point of failure
+            return [vision_unavailable(img_id, side, "PROVIDER_ERROR", self._vision.model)
+                    for img_id, side, _, _ in readable]
 
     def _read_image(self, upload: PackageUpload, index: int, side: str, prefix: str) -> PackageImageOut:
         """Validate, measure and OCR one image. Raises ImageError / OcrError."""
@@ -1112,9 +1197,15 @@ def _product_out(product) -> ProductIdentificationOut:
         method=product.method,
         reason=product.reason,
         evidence=[_evidence_out(ev) for ev in product.evidence],
+        signals=FusionSignalsOut(**product.signals.__dict__),
+        vision_status=product.vision_status,
         unverified_standard_numbers=list(product.unverified_standard_numbers),
         notes=list(product.notes),
     )
+
+
+def _vision_out(observation) -> VisionObservationOut:
+    return VisionObservationOut(**observation.__dict__)
 
 
 def _candidate_out(candidate) -> StandardCandidateOut:

@@ -19,6 +19,7 @@ import {
   type ProductEvidence,
   type ProductIdentification,
   type StandardCandidate,
+  type VisionObservation,
 } from "@/lib/api";
 import { standardTitle } from "@/lib/format";
 import { useAsyncTask } from "@/lib/hooks";
@@ -577,6 +578,7 @@ export function Workspace({
             onSelect={selectRegions}
           />
           <ProductPanel
+            vision={result.vision}
             product={product}
             selected={linkedRegions}
             onSelect={selectRegions}
@@ -1256,14 +1258,18 @@ function EvidenceRow({
 
 function ProductPanel({
   product,
+  vision = [],
   selected,
   onSelect,
 }: {
   product: ProductIdentification;
+  vision?: VisionObservation[];
   selected: string[];
   onSelect: (ids: string[]) => void;
 }) {
   const matched = product.status === "MATCHED";
+  const seen = vision.filter((v) => v.status === "OK" && v.product_label);
+  const signals = product.signals;
   return (
     <Panel flush>
       <PanelHeader
@@ -1299,6 +1305,73 @@ function ProductPanel({
             ))}
           </ul>
         </div>
+      )}
+
+      {product.vision_status !== "NOT_RUN" && (
+        <div className="border-t border-line px-5 py-3">
+          <div className="kicker mb-2">Visual observation</div>
+          {seen.length === 0 ? (
+            <p className="text-[12px] leading-relaxed text-ink-faint">
+              {/* The backend reason already ends with what was used instead. */}
+              {vision[0]?.reason ??
+                "Visual understanding unavailable — OCR and deterministic identification were used."}
+            </p>
+          ) : (
+            <>
+              {seen.map((v) => (
+                <div key={v.image_id + v.side} className="mb-2 last:mb-0">
+                  <p className="text-[13px] leading-relaxed text-ink">
+                    {v.visual_observations[0] ?? `Appears to be ${v.product_label.toLowerCase()}.`}
+                  </p>
+                  <Mono muted className="mt-0.5 block text-[10px] uppercase tracking-[0.1em]">
+                    {v.side} · unverified AI observation · {v.model}
+                    {v.confidence ? ` · model confidence ${v.confidence.toFixed(2)}` : ""}
+                  </Mono>
+                  {v.scrubbed && (
+                    <p className="mt-1 text-[11px] leading-relaxed text-review">
+                      The model wrote something resembling a declared value; MetrIQ removed it. Only OCR
+                      evidence may report such values.
+                    </p>
+                  )}
+                </div>
+              ))}
+              <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
+                {signals.conflicts.length > 0
+                  ? "This disagrees with the package text, so the product is left for officer review."
+                  : signals.agreement
+                    ? "Agrees with the product read from the package text. Agreement supports the identification; it adds no verified evidence."
+                    : "Used only to help identify the product. It is not evidence, not a declaration and not a compliance result."}
+              </p>
+            </>
+          )}
+        </div>
+      )}
+
+      {(signals.ocr_supported || signals.vision_supported) && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-line px-5 py-2.5">
+          <span className="kicker">Support</span>
+          {[
+            ["OCR text", signals.ocr_supported],
+            ["Visual", signals.vision_supported],
+            ["Knowledge base", signals.knowledge_supported],
+          ].map(([label, on]) => (
+            <Mono
+              key={String(label)}
+              muted
+              className={cn("text-[10px] uppercase tracking-[0.1em]", on && "text-accent")}
+            >
+              {on ? "✓" : "—"} {label}
+            </Mono>
+          ))}
+        </div>
+      )}
+
+      {signals.conflicts.length > 0 && (
+        <ul className="space-y-1 border-t border-line px-5 py-3 text-[12px] leading-relaxed text-review">
+          {signals.conflicts.map((c, i) => (
+            <li key={i}>· {c}</li>
+          ))}
+        </ul>
       )}
 
       {product.notes.length > 0 && (

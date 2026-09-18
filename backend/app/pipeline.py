@@ -26,6 +26,7 @@ from app.llm import LocalLLM
 from app.package_label import PackageLabelEvaluation, evaluate_package_label
 from app.product import ProductStandardFinder
 from app.product_identification import MATCHED, ProductIdentification, identify_product
+from app.vision import VisionObservation
 from app.requirements import RequirementSet, load_requirements
 
 
@@ -108,10 +109,13 @@ def run_downstream(
     requirements: RequirementSet | None = None,
     unreadable_images: list[str] | tuple = (),
     inspection_type: str = "PACKAGE",
+    vision_observations: list[VisionObservation] | tuple = (),
 ) -> DownstreamResult:
     """``unreadable_images`` labels photos of this package that gave no usable OCR.
     ``inspection_type`` HALLMARK (a jewellery hallmark photo) does not apply the Legal Metrology
-    packaged-commodity rules: they are reported as not applied, never evaluated."""
+    packaged-commodity rules: they are reported as not applied, never evaluated.
+    ``vision_observations`` are optional visual observations of the package; they refine product
+    identification only, and their absence changes nothing else."""
     notes: list[str] = []
 
     # 1) declaration extraction ------------------------------------------
@@ -127,7 +131,7 @@ def run_downstream(
             from app.api import get_product_finder  # shared, already-loaded knowledge base
 
             finder = get_product_finder()
-        product = identify_product(decl, regions, finder, llm=llm)
+        product = identify_product(decl, regions, finder, llm=llm, vision=vision_observations)
     except Exception as exc:  # noqa: BLE001
         product = _review_product(f"Product identification failed: {exc}")
         notes.append(str(exc))

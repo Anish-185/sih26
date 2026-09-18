@@ -34,6 +34,22 @@ The optional local model is only asked for a generic product name when the
 package text identified nothing. Its suggestion is run through the same
 retrieval and gate, can never produce a standard that is not in the knowledge
 base, and never makes the product MATCHED.
+
+EVIDENCE FUSION (Milestone 15). A visual observation of the package
+(``app/vision.py``) is a second, weaker evidence source. It enters here exactly
+like the model hint — as a product *clue* that goes through the same phrase gate
+and the same deterministic retrieval — so vision can never name a standard the
+knowledge base does not hold, and never populates a declaration. What it adds is
+an independent signal about the same question:
+
+    OCR product evidence + vision product evidence -> the SAME record   agreement
+    OCR product evidence + vision product evidence -> DIFFERENT records conflict -> REVIEW
+    no OCR product evidence + vision product evidence                   REVIEW, vision_assisted
+    vision unavailable                                                  unchanged, OCR only
+
+Agreement never raises confidence: retrieval confidence still says how well the
+*label text* matched a record. Conflict lowers the outcome to REVIEW, because two
+disagreeing sources are not a decision.
 """
 
 from __future__ import annotations
@@ -47,6 +63,8 @@ from app.llm import LLMError, LocalLLM
 from app.product import ProductStandardFinder, WhyThisResult, explain_candidate
 from app.retrieval.engine import RetrievalResult
 from app.retrieval.text import normalize
+from app.vision import OK as VISION_OK
+from app.vision import VisionObservation
 
 MATCHED = "MATCHED"
 REVIEW = "REVIEW"
@@ -72,7 +90,9 @@ _MAX_CATEGORY_SPREAD = 3
 class ProductClue:
     """One piece of package text used to look for a product."""
 
-    kind: str  # "product_name" | "product_description" | "brand" | "standard_number" | "ocr_text" | "model_hint"
+    # "product_name" | "product_description" | "brand" | "standard_number" | "ocr_text"
+    # | "model_hint" (local text model) | "vision" (visual observation of the package)
+    kind: str
     text: str
     # What was actually searched when OCR had run words together
     # ("DRINKINGWATEROZONISED" -> "drinking water ozonised"); empty when identical.
@@ -111,6 +131,17 @@ class StandardCandidate:
 
 
 @dataclass(frozen=True)
+class FusionSignals:
+    """Which evidence sources supported the identified product, and where they disagree."""
+
+    ocr_supported: bool = False       # label text matched the record's product phrase
+    vision_supported: bool = False    # the visual observation retrieved the same record
+    knowledge_supported: bool = False # the record exists in the verified knowledge base
+    agreement: bool = False           # OCR and vision pointed at the same record
+    conflicts: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class ProductIdentification:
     status: str  # MATCHED | REVIEW
     name: str | None  # BIS product description from the knowledge base
@@ -123,6 +154,9 @@ class ProductIdentification:
     candidates: list[StandardCandidate]
     unverified_standard_numbers: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    signals: FusionSignals = field(default_factory=FusionSignals)
+    vision_status: str = "NOT_RUN"  # OK | UNAVAILABLE | NOT_RUN
+    vision_observations: list[VisionObservation] = field(default_factory=list)
 
 
 # ------------------------------------------------------------------ product phrases
@@ -257,7 +291,10 @@ def identify_product(
     regions,
     finder: ProductStandardFinder,
     llm: LocalLLM | None = None,
+    vision: list[VisionObservation] | tuple = (),
 ) -> ProductIdentification:
+    """``vision`` is optional visual evidence. It is never required, never
+    authoritative, and its absence leaves identification exactly as it was."""
     regions = [r for r in (regions or []) if r is not None]
     engine = finder.search_engine
     phrases = _phrase_index(engine.items)
@@ -295,17 +332,96 @@ def identify_product(
             for n in unverified
         )
 
+    def product_ids(kinds: set[str]) -> set[str]:
+        """Records that a clue of these kinds supported at product/alias level."""
+        return {
+            item_id for item_id, evs in evidence_by_id.items()
+            if any(ev.clue.kind in kinds and ev.match in ("product", "alias") for ev in evs)
+        }
+
+    ocr_product_ids = product_ids(_OCR_CLUE_KINDS)
     method = "deterministic"
-    if not any(ev.match in ("product", "alias") for evs in evidence_by_id.values() for ev in evs) and llm is not None:
+
+    # --- visual evidence: the same gate, the same retrieval, a separate signal ---
+    observations = [o for o in (vision or []) if o is not None]
+    usable_vision = [o for o in observations if o.status == VISION_OK and o.product_label]
+    vision_status = _vision_status(observations)
+    vision_ids_by_label: dict[str, set[str]] = {}
+    for observation in usable_vision:
+        before = product_ids({"vision"})
+        clue = _with_search_text(
+            ProductClue(kind="vision", text=observation.product_label, image_id=observation.image_id),
+            vocab,
+        )
+        _text_clue(clue, finder, phrases, keep)
+        after = product_ids({"vision"})
+        vision_ids_by_label.setdefault(observation.product_label, set()).update(after - before)
+    vision_product_ids = product_ids({"vision"})
+
+    # --- the local model is still the last resort, and only when nothing else spoke ---
+    if not ocr_product_ids and not vision_product_ids and llm is not None:
         hint = _model_hint(llm, stage, regions, notes)
         if hint is not None:
             before = set(evidence_by_id)
             _text_clue(hint, finder, phrases, keep)
             if set(evidence_by_id) != before:
                 method = "model_assisted"
+    elif not ocr_product_ids and vision_product_ids:
+        method = "vision_assisted"
 
     candidates = _rank(evidence_by_id, best_result)
-    return _decide(candidates, unverified, method, notes)
+    fusion = _fuse(ocr_product_ids, vision_product_ids, evidence_by_id, best_result, usable_vision,
+                   vision_ids_by_label)
+    return _decide(candidates, unverified, method, notes, fusion, vision_status, observations,
+                   ocr_product_ids)
+
+
+_OCR_CLUE_KINDS = {"product_name", "product_description", "brand", "ocr_text", "standard_number"}
+
+
+def _vision_status(observations) -> str:
+    if not observations:
+        return "NOT_RUN"
+    return VISION_OK if any(o.status == VISION_OK for o in observations) else "UNAVAILABLE"
+
+
+def _product_of(item_id: str, best_result) -> str:
+    result = best_result.get(item_id)
+    return product_name_of(result.item) if result is not None else item_id
+
+
+def _fuse(ocr_ids, vision_ids, evidence_by_id, best_result, usable_vision, vision_ids_by_label=None) -> FusionSignals:
+    """Deterministic comparison of the two evidence sources. No model involved."""
+    agreement = bool(ocr_ids & vision_ids)
+    conflicts: list[str] = []
+
+    # Photos of one package that appear to show different products.
+    by_label = {label: ids for label, ids in (vision_ids_by_label or {}).items() if ids}
+    if len(by_label) > 1 and len(set(map(frozenset, by_label.values()))) > 1:
+        sides = sorted(
+            f"{o.side}: {o.product_label}" for o in usable_vision if o.product_label in by_label
+        )
+        conflicts.append(
+            "The photographs of this package appear to show different products ("
+            + "; ".join(sides) + "). MetrIQ does not choose between them."
+        )
+
+    if ocr_ids and vision_ids and not agreement:
+        ocr_names = sorted(_product_of(i, best_result) for i in ocr_ids)
+        vision_names = sorted(_product_of(i, best_result) for i in vision_ids)
+        seen = sorted({o.product_label for o in usable_vision})
+        conflicts.append(
+            f"The package text points to {', '.join(ocr_names)}, but the image appears to show "
+            f"{', '.join(seen) or 'a different product'} "
+            f"({', '.join(vision_names)}). MetrIQ does not choose between them."
+        )
+    return FusionSignals(
+        ocr_supported=bool(ocr_ids),
+        vision_supported=bool(vision_ids),
+        knowledge_supported=bool(evidence_by_id),
+        agreement=agreement,
+        conflicts=conflicts,
+    )
 
 
 _KIND_STRENGTH = {"product": 2, "alias": 1, "category": 0}
@@ -404,7 +520,11 @@ def _rank(evidence_by_id, best_result) -> list[StandardCandidate]:
     return candidates[:MAX_CANDIDATES]
 
 
-def _decide(candidates, unverified, method, notes) -> ProductIdentification:
+def _decide(candidates, unverified, method, notes, fusion=None, vision_status="NOT_RUN",
+            observations=(), ocr_product_ids=None) -> ProductIdentification:
+    fusion = fusion or FusionSignals()
+    extra = {"signals": fusion, "vision_status": vision_status,
+             "vision_observations": list(observations)}
     if not candidates:
         reason = "No sufficiently supported product match in the verified knowledge base."
         if unverified:
@@ -412,7 +532,7 @@ def _decide(candidates, unverified, method, notes) -> ProductIdentification:
                 "Standard number detected in package text, but no matching verified "
                 "knowledge-base record was found; no product text matched a knowledge-base product."
             )
-        return _review(reason, unverified=unverified, notes=notes)
+        return _review(reason, unverified=unverified, notes=notes, **extra)
 
     top = candidates[0]
     product_tier = [c for c in candidates if c.tier == "product"]
@@ -422,7 +542,22 @@ def _decide(candidates, unverified, method, notes) -> ProductIdentification:
         return ProductIdentification(
             status=REVIEW, name=None, knowledge_id=None, standard_number=None,
             confidence="none", method=method, reason=reason, evidence=[],
-            candidates=candidates, unverified_standard_numbers=unverified, notes=notes,
+            candidates=candidates, unverified_standard_numbers=unverified, notes=notes, **extra,
+        )
+
+    # Two evidence sources that disagree are not a decision (Milestone 15).
+    if fusion.conflicts:
+        return review(
+            fusion.conflicts[0]
+            + " The package text and the visual observation must be reconciled by an officer."
+        )
+
+    if method == "vision_assisted":
+        seen = sorted({o.product_label for o in observations if o.status == VISION_OK and o.product_label})
+        return review(
+            "No product text on the label matched the knowledge base. The image appears to show "
+            f"{', '.join(seen) or 'a product'}, which retrieves {top.standard_number}. A visual "
+            "observation is not verified evidence, so this needs officer confirmation against the label."
         )
 
     if method == "model_assisted":
@@ -450,8 +585,13 @@ def _decide(candidates, unverified, method, notes) -> ProductIdentification:
             "knowledge base, but no product text on the label corroborates it."
         )
 
-    if len(product_tier) > 1:
-        a, b = product_tier[0], product_tier[1]
+    # Only records the LABEL TEXT supports can make the label ambiguous; a
+    # vision-derived candidate is reported through the fusion conflicts instead,
+    # so this rule keeps the exact meaning it had before visual evidence existed.
+    label_tier = ([c for c in product_tier if c.result.item.id in ocr_product_ids]
+                  if ocr_product_ids is not None else product_tier)
+    if len(label_tier) > 1:
+        a, b = label_tier[0], label_tier[1]
         a_clues = len({ev.clue.text for ev in a.evidence if ev.match in ("product", "alias")})
         b_clues = len({ev.clue.text for ev in b.evidence if ev.match in ("product", "alias")})
         if (a_clues, a.printed_on_label) == (b_clues, b.printed_on_label):
@@ -478,6 +618,14 @@ def _decide(candidates, unverified, method, notes) -> ProductIdentification:
     # Once a product is identified, weaker category / keyword-only hits for other
     # products (a kettle's "stainless steel body" -> steel bottles) are noise.
     candidates = [c for c in candidates if c.tier == "product" or c.printed_on_label]
+    agreed = fusion.agreement and item.id in {
+        c.result.item.id for c in candidates
+    }
+    agreement_note = (
+        " The visual observation of the package independently points at the same product; "
+        "that agreement supports the identification but is not itself verified evidence."
+        if agreed else ""
+    )
     return ProductIdentification(
         status=MATCHED,
         name=product_name_of(item),
@@ -488,20 +636,22 @@ def _decide(candidates, unverified, method, notes) -> ProductIdentification:
         reason=(
             f"The {' and '.join(signals)} on the package matched the knowledge-base product "
             f"'{product_name_of(item)}'. This is the best-supported standard candidate, not a "
-            "compliance or certification decision."
+            "compliance or certification decision." + agreement_note
         ),
         evidence=product_evidence,
         candidates=candidates,
         unverified_standard_numbers=unverified,
         notes=notes,
+        **extra,
     )
 
 
-def _review(reason: str, unverified: list[str] | None = None, notes: list[str] | None = None) -> ProductIdentification:
+def _review(reason: str, unverified: list[str] | None = None, notes: list[str] | None = None,
+            **extra) -> ProductIdentification:
     return ProductIdentification(
         status=REVIEW, name=None, knowledge_id=None, standard_number=None, confidence="none",
         method="deterministic", reason=reason, evidence=[], candidates=[],
-        unverified_standard_numbers=list(unverified or []), notes=list(notes or []),
+        unverified_standard_numbers=list(unverified or []), notes=list(notes or []), **extra,
     )
 
 

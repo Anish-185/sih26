@@ -277,15 +277,50 @@ export interface ProductEvidence {
 }
 
 /** Product identification — retrieval over the verified BIS knowledge base, not compliance. */
+/**
+ * What a photo APPEARS to show, from an AI vision model. Deliberately weaker than
+ * OCR: it never carries a declared or legal value (the backend deletes any the
+ * model writes), never names a standard and never decides compliance.
+ */
+export interface VisionObservation {
+  image_id: string;
+  side: PackageSide;
+  status: "OK" | "UNAVAILABLE";
+  model: string;
+  evidence_type: string; // AI_VISUAL_OBSERVATION
+  product_candidate: string;
+  product_label: string;
+  product_category: string;
+  confidence: number; // the model's own confidence — not retrieval confidence
+  visual_features: string[];
+  packaging_type: string;
+  visual_observations: string[];
+  limitations: string[];
+  scrubbed: boolean; // the model wrote a legal value; MetrIQ removed it
+  reason_code: string;
+  reason: string; // why it is UNAVAILABLE
+}
+
+/** Which evidence sources supported the identified product (deterministic). */
+export interface FusionSignals {
+  ocr_supported: boolean;
+  vision_supported: boolean;
+  knowledge_supported: boolean;
+  agreement: boolean;
+  conflicts: string[];
+}
+
 export interface ProductIdentification {
   status: "MATCHED" | "REVIEW";
   name: string | null; // BIS product description from the knowledge base
   knowledge_id: string | null;
   standard_number: string | null;
   confidence: string; // retrieval confidence: high | medium | low | none
-  method: "deterministic" | "model_assisted";
+  method: "deterministic" | "model_assisted" | "vision_assisted";
   reason: string;
   evidence: ProductEvidence[];
+  signals: FusionSignals;
+  vision_status: "OK" | "UNAVAILABLE" | "NOT_RUN";
   unverified_standard_numbers: string[];
   notes: string[];
 }
@@ -634,6 +669,8 @@ export interface Escalation {
 export interface InspectionAnalysis {
   inspection_id: string;
   created_at: string;
+  /** Visual observations of the photos — AI observations, never verified evidence. */
+  vision?: VisionObservation[];
   image: InspectionImage;
   quality: ImageQuality;
   ocr: OcrResult;
