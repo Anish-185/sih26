@@ -449,18 +449,22 @@ IMAGE | VERIFICATION STATUS) in the workspace; Hallmarking page gains "Inspect a
 to officer review, HUID reference field = text comparison only). Sample `synth_hallmark-closeup.png`. Tests:
 `test_hallmark_inspection.py` (58).
 
-Milestone 13 (grounded Gemma 4 copilot via OpenRouter): an OPTIONAL explanation layer over a finished
+Milestone 13 (grounded copilot via OpenRouter): an OPTIONAL explanation layer over a finished
 inspection. It explains the record; it never produces it. `app/openrouter.py` is the only module that
 talks to OpenRouter (`OpenRouterLLM`, same `generate(system_prompt=, user_prompt=)` surface as
 `app/llm.py`'s `LocalLLM`, which is untouched and still serves `/ask`): env `OPENROUTER_API_KEY` /
-`OPENROUTER_MODEL` (default `google/gemma-4-31b-it:free`, verified against OpenRouter's model list) /
+`OPENROUTER_MODEL` (default `deepseek/deepseek-v4-flash-0731:free`, verified against OpenRouter's model
+list and end to end; the model is configuration — no caller hardcodes it, so any OpenRouter chat model
+works) /
 `OPENROUTER_BASE_URL` / `OPENROUTER_TIMEOUT` / `OPENROUTER_DAILY_LIMIT` (45) / `OPENROUTER_MINUTE_LIMIT`
 (15), read from a gitignored `backend/.env` by `load_env_file()` (an exported variable always wins);
 the key is server-side only — never in the frontend, never in a response, never in an error. Failures
 become `CopilotUnavailable` with a stable code (NOT_CONFIGURED / DAILY_LIMIT / RATE_LIMITED / TIMEOUT /
 PROVIDER_ERROR / BAD_RESPONSE) and a short user-facing sentence; no automatic retry; `UsageLimiter`
 refuses a request locally before it reaches the network, and refunds the daily slot when the provider
-never served it. `app/copilot.py`: `build_context` turns the finished analysis (live or persisted) into
+never served it. The payload sends `reasoning: {"enabled": false}` (OpenRouter normalises it per model
+and ignores it where reasoning does not apply) — without it a reasoning model spends the whole budget
+thinking about the long grounded prompt and returns empty content. `app/copilot.py`: `build_context` turns the finished analysis (live or persisted) into
 a compact grounded context — only the sections the question needs, a `SourceBook` so each verified quote
 is sent once, NOT_DETECTED declarations and unsupported checks reduced to one line (~23k characters,
 about 6k tokens); OCR / package text goes last, inside `<<<UNTRUSTED_PACKAGE_TEXT>>>` markers, with
@@ -471,7 +475,9 @@ The model is not trusted to have obeyed: `guard()` re-reads the generated text d
 WITHHOLDS it (replacing it with MetrIQ's own sentence) when it cites an IS number, HUID or URL that is
 not in the context, claims an authentication, or states an overall verdict other than the deterministic
 one — a check-level PASS inside a REVIEW case is not a contradiction. `system_result` in the response is
-always read from the record. `app/copilot_api.py`: `GET /copilot/status` (configured flag, model,
+always read from the record. `parse_response` also salvages a reply cut short by the token limit — the
+complete `answer` and evidence entries are recovered and the officer is told it was cut short, so raw
+JSON is never shown. `app/copilot_api.py`: `GET /copilot/status` (configured flag, model,
 remaining free budget, capabilities — no key) and `POST /copilot/explain` (strict body: exactly one of
 `inspection_id` or `analysis`, one of nine capabilities, optional question/rule_id; 422 on anything else,
 404 unknown id, 429 on a free-tier limit, 503 otherwise). Read-only: the session is rolled back and never
@@ -480,7 +486,7 @@ committed, nothing is recomputed, and the copilot imports no pipeline module. Fr
 evidence, limitations and the sources stored with the evidence, the deterministic result shown beside it,
 and the free budget in the footer; in the inspection workspace and on the officer review page
 (`hideCopilot` keeps it in one place there). One request per user action; nothing is ever called
-automatically. Tests: `test_copilot.py` (199 checks, every provider call stubbed — no tokens spent) plus
+automatically. Tests: `test_copilot.py` (204 checks, every provider call stubbed — no tokens spent) plus
 copilot read-only checks in `test_inspection_records.py`. With no key configured, or with OpenRouter down,
 every result, check, source, escalation, officer decision and PDF report is unchanged.
 
@@ -498,7 +504,7 @@ sih26/
       main.py          # FastAPI app: /health + the api.py router
       api.py           # /search, /ask, /product-standard, /certification-guidance
       llm.py           # LM Studio / Qwen3-4B local LLM adapter (used by /ask — unchanged)
-      openrouter.py    # Milestone 13: the ONLY OpenRouter surface (Gemma 4), key stays server-side
+      openrouter.py    # Milestone 13: the ONLY OpenRouter surface, key stays server-side
       copilot.py       # Milestone 13: grounded context + system prompt + answer verification (guard)
       copilot_api.py   # Milestone 13: GET /copilot/status, POST /copilot/explain (read-only)
       rag.py           # grounded BIS question-answering pipeline (/ask)

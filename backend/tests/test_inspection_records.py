@@ -519,7 +519,7 @@ def step_copilot_is_read_only() -> None:
     class Stub:
         """A provider that spends nothing and says whatever the check needs."""
 
-        model = "google/gemma-4-31b-it:free"
+        model = "deepseek/deepseek-v4-flash-0731:free"
         configured = True
 
         def __init__(self, text_):

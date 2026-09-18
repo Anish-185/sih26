@@ -1,4 +1,4 @@
-"""OpenRouter provider for the grounded explanation layer (Gemma 4).
+"""OpenRouter provider for the grounded explanation layer.
 
 MetrIQ's results are produced by the deterministic pipeline. This module is the
 only place that talks to OpenRouter, and NOTHING in the inspection pipeline
@@ -8,7 +8,7 @@ mis-configured or out of free quota, every one of those still works — only the
 optional explanation is unavailable.
 
     app/llm.py       LocalLLM           -> LM Studio (unchanged, used by /ask)
-    app/openrouter.py OpenRouterLLM     -> OpenRouter -> Gemma 4
+    app/openrouter.py OpenRouterLLM     -> OpenRouter -> the configured model
 
 Both expose the same ``generate(system_prompt=..., user_prompt=...) -> str``
 surface, so the explanation layer stays provider-replaceable.
@@ -16,7 +16,7 @@ surface, so the explanation layer stays provider-replaceable.
 Configuration (environment; ``backend/.env`` is read by ``load_env_file()``):
 
     OPENROUTER_API_KEY       required — server-side only, never sent to the browser
-    OPENROUTER_MODEL         default "google/gemma-4-31b-it:free"
+    OPENROUTER_MODEL         default "deepseek/deepseek-v4-flash-0731:free"
     OPENROUTER_BASE_URL      default "https://openrouter.ai/api/v1"
     OPENROUTER_TIMEOUT       seconds, default 60
     OPENROUTER_DAILY_LIMIT   default 45  (free tier allows ~50/day — headroom kept)
@@ -40,7 +40,7 @@ import httpx
 
 from app.llm import LLMError
 
-DEFAULT_MODEL = "google/gemma-4-31b-it:free"
+DEFAULT_MODEL = "deepseek/deepseek-v4-flash-0731:free"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_TIMEOUT = 60.0
 DEFAULT_DAILY_LIMIT = 45
@@ -236,7 +236,7 @@ class OpenRouterLLM:
         system_prompt: str,
         user_prompt: str,
         temperature: float = 0.0,
-        max_tokens: int = 700,
+        max_tokens: int = 1600,
     ) -> str:
         if not self.configured:
             raise CopilotUnavailable("NOT_CONFIGURED")
@@ -251,6 +251,11 @@ class OpenRouterLLM:
             ],
             "temperature": temperature,
             "max_tokens": max_tokens,
+            # A reasoning model would otherwise spend the whole budget thinking
+            # about a long grounded prompt and return empty content. MetrIQ wants
+            # the explanation, not the deliberation; OpenRouter normalises this
+            # field per model and ignores it where reasoning does not apply.
+            "reasoning": {"enabled": False},
         }
 
         try:

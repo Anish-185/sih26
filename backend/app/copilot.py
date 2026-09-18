@@ -2,7 +2,7 @@
 
     verified evidence + deterministic rules -> SYSTEM RESULT -> officer
                                                      |
-                                                     +--> Gemma explains the record
+                                                     +--> the model explains the record
 
 The copilot NEVER retrieves standards, NEVER evaluates a requirement and NEVER
 decides PASS / FAIL / REVIEW. It receives an inspection that the deterministic
@@ -84,9 +84,11 @@ ANSWER FORMAT: reply with ONE JSON object and nothing else:
 {"answer": "...", "evidence": [{"claim": "...", "source": "..."}],
  "limitations": ["..."]}
 "answer" is plain text for an inspection officer (no markdown headings, at most
-about 180 words). "evidence" ties each significant statement to something in the
+about 150 words). "evidence" ties each significant statement to something in the
 context (a rule id, a declaration field, an OCR region id, a quoted source or a
-URL from the context). "limitations" lists what the record cannot establish.
+URL from the context) — at most 4 entries, each one short line. "limitations"
+lists what the record cannot establish — at most 3 short entries. Keep the whole
+JSON object under 350 words so it is never cut off.
 """
 
 # ------------------------------------------------------------------ capabilities
@@ -604,6 +606,9 @@ def parse_response(text: str) -> CopilotAnswer:
     if data is None:
         if not raw:
             raise CopilotUnavailable("BAD_RESPONSE")
+        salvaged = _salvage(raw)
+        if salvaged is not None:
+            return salvaged
         return CopilotAnswer(
             answer=raw,
             limitations=["The explanation service did not return structured evidence for this answer."],
@@ -630,6 +635,46 @@ def parse_response(text: str) -> CopilotAnswer:
     ]
 
     return CopilotAnswer(answer=answer.strip(), evidence=evidence[:8], limitations=limitations[:6])
+
+
+
+# A reply cut off by the token limit is still valid text up to the cut. Rather
+# than showing the officer raw JSON, pull out the complete fields and say plainly
+# that the rest was lost.
+_JSON_STRING = r'"((?:[^"\\]|\\.)*)"'
+_ANSWER_FIELD = re.compile(r'"answer"\s*:\s*' + _JSON_STRING)
+_EVIDENCE_ITEM = re.compile(
+    r'\{\s*"claim"\s*:\s*' + _JSON_STRING + r'\s*,\s*"source"\s*:\s*' + _JSON_STRING + r'\s*\}'
+)
+
+
+def _decode(raw: str) -> str:
+    try:
+        return json.loads(f'"{raw}"')
+    except ValueError:
+        return raw
+
+
+def _salvage(raw: str) -> CopilotAnswer | None:
+    """Recover a truncated JSON answer, or None when there is nothing to recover."""
+    if not raw.lstrip().startswith("{"):
+        return None
+    match = _ANSWER_FIELD.search(raw)
+    if not match:
+        return None
+    answer = _decode(match.group(1)).strip()
+    if not answer:
+        return None
+    evidence = [
+        {"claim": _clean(_decode(c), 300), "source": _clean(_decode(src), 200)}
+        for c, src in _EVIDENCE_ITEM.findall(raw)
+    ]
+    return CopilotAnswer(
+        answer=answer,
+        evidence=evidence[:8],
+        limitations=["The explanation service's reply was cut short; only the complete part is shown."],
+        structured=False,
+    )
 
 
 # --------------------------------------------------------------------- guards
@@ -838,7 +883,7 @@ class InspectionCopilot:
             system_prompt=SYSTEM_PROMPT,
             user_prompt=prompt,
             temperature=0.0,
-            max_tokens=700,
+            max_tokens=1600,
         )
 
         answer = guard(parse_response(text), prompt, system_result)

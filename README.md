@@ -333,8 +333,18 @@ OpenRouter — there is deliberately no `VITE_` variable for it.
 ```bash
 # backend/.env  (gitignored — never commit it, never put it in the frontend)
 OPENROUTER_API_KEY=sk-or-v1-...
-OPENROUTER_MODEL=google/gemma-4-31b-it:free
+OPENROUTER_MODEL=deepseek/deepseek-v4-flash-0731:free
 ```
+
+The model id is configuration, not code — any OpenRouter chat model works.
+`deepseek/deepseek-v4-flash-0731:free` is the default and is verified end to end.
+If a free model starts returning HTTP 429, check
+`curl https://openrouter.ai/api/v1/key -H "Authorization: Bearer $OPENROUTER_API_KEY"`
+before assuming your allowance is spent — a provider's shared free pool can refuse
+while your own quota is untouched. Reasoning models are handled: the provider
+sends `reasoning: {"enabled": false}`, so the budget goes to the explanation rather
+than to deliberation, and a reply cut short by the token limit is salvaged into
+plain text instead of raw JSON.
 
 `backend/.env` is read at startup; an exported variable always wins. Optional:
 `OPENROUTER_BASE_URL`, `OPENROUTER_TIMEOUT`, and the free-tier guards

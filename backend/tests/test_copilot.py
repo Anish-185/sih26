@@ -1,4 +1,4 @@
-"""Checks for Milestone 13 — the grounded MetrIQ Copilot (Gemma 4 via OpenRouter).
+"""Checks for Milestone 13 — the grounded MetrIQ Copilot (OpenRouter).
 
 NO OpenRouter request is ever made here: the provider is either a stub object or
 the real ``OpenRouterLLM`` with ``httpx.post`` swapped out, so running the suite
@@ -245,17 +245,17 @@ def test_model_and_endpoint_configuration() -> None:
         for key in saved:
             os.environ.pop(key, None)
         p = OpenRouterLLM(api_key="test-key")
-        check("default model is the free Gemma 4 the project was given",
-              p.model == "google/gemma-4-31b-it:free", p.model)
+        check("default model is the free model the copilot is configured for",
+              p.model == "deepseek/deepseek-v4-flash-0731:free", p.model)
         check("default base url is OpenRouter", p.base_url == DEFAULT_BASE_URL, p.base_url)
-        check("DEFAULT_MODEL constant matches", DEFAULT_MODEL == "google/gemma-4-31b-it:free")
+        check("DEFAULT_MODEL constant matches", DEFAULT_MODEL == "deepseek/deepseek-v4-flash-0731:free")
 
-        os.environ["OPENROUTER_MODEL"] = "google/gemma-4-26b-a4b-it:free"
+        os.environ["OPENROUTER_MODEL"] = "some-other/model:free"
         os.environ["OPENROUTER_BASE_URL"] = "https://example.invalid/v1"
         os.environ["OPENROUTER_TIMEOUT"] = "12"
         p = OpenRouterLLM(api_key="test-key")
         check("model is configurable through the environment",
-              p.model == "google/gemma-4-26b-a4b-it:free", p.model)
+              p.model == "some-other/model:free", p.model)
         check("base url is configurable", p.base_url == "https://example.invalid/v1")
         check("timeout is configurable", p.timeout == 12.0)
         check("an explicit argument still wins", OpenRouterLLM(api_key="k", model="m").model == "m")
@@ -341,6 +341,9 @@ def test_successful_request() -> None:
           seen["headers"]["Authorization"] == "Bearer sk-or-v1-key"
           and "sk-or" not in json.dumps(seen["body"]))
     check("temperature is 0 for a deterministic explanation", seen["body"]["temperature"] == 0.0)
+    check("reasoning is disabled so a reasoning model returns the answer, not its deliberation",
+          seen["body"]["reasoning"] == {"enabled": False})
+    check("the answer budget fits a full grounded reply", seen["body"]["max_tokens"] >= 1000)
     check("a timeout is always set", seen["timeout"] > 0)
 
 
@@ -664,6 +667,15 @@ def test_answer_parsing() -> None:
     check("limitations are kept", ok.limitations == ["Nothing else."])
     fenced = parse_response("```json\n" + reply("Fenced.") + "\n```")
     check("a fenced JSON block is parsed", fenced.answer == "Fenced.")
+    truncated = parse_response('{"answer": "Two declarations are uncertain.", "evidence": '
+                               '[{"claim": "MRP uncertain", "source": "OCR-005"}], "limitations": ["the res')
+    check("a reply cut off by the token limit is salvaged, not shown as raw JSON",
+          truncated.answer == "Two declarations are uncertain." and not truncated.answer.startswith("{"))
+    check("complete evidence entries survive the salvage",
+          truncated.evidence == [{"claim": "MRP uncertain", "source": "OCR-005"}])
+    check("and the officer is told the reply was cut short",
+          any("cut short" in x for x in truncated.limitations) and truncated.structured is False)
+
     prose = parse_response("The record shows two uncertain declarations.")
     check("unstructured prose is accepted but flagged", prose.structured is False and prose.answer.startswith("The record"))
     check("and it says the evidence was not structured", any("structured" in x for x in prose.limitations))
@@ -778,11 +790,11 @@ def test_explaining_changes_nothing() -> None:
     check("the copilot rolls the read-only session back", "session.rollback()" in source)
 
 
-# ------------------------------------------------- 28-30  MetrIQ without Gemma
+# ------------------------------- 28-30  MetrIQ without the explanation service
 
 
 def test_inspection_works_without_the_explanation_service() -> None:
-    print("\nMetrIQ works with zero Gemma requests")
+    print("\nMetrIQ works with zero explanation requests")
     saved = os.environ.pop("OPENROUTER_API_KEY", None)
     try:
         calls = []
