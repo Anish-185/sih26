@@ -118,5 +118,83 @@
     "document_name": "BIS: Hallmarking FAQ",
     "verification_status": "verified",
     "last_verified": "2026-09-07"
+  },
+  {
+    "id": "scheme-i-licence-process-guidelines",
+    "title": "Scheme I: the official BIS guidelines that govern a Standard Mark licence",
+    "category": "certification",
+    "content": "BIS operates product certification for the Standard Mark under Scheme-I of the BIS (Conformity Assessment) Regulations, 2018. On its Product Certification Process page BIS publishes the guideline documents that govern the licence: Guidelines for Grant of Licence, Additional Guidelines for Scheme-I, Guidelines for Dealing With Product Non-Conformity, Guidelines for Dealing With Unsatisfactory Performance (Other Than Product Non-Conformity), Guidelines for Change in Scope of Licence, Guidelines for Renewal of Licence, Guidelines for Retesting of samples, Guidelines for Factory Surveillance, Guidelines for Market Surveillance, and Guidelines for utilisation of Cluster Based Test Facility (CBTF) by MSMEs. This record names the documents BIS publishes; it does not reproduce their contents, and the detailed procedure, documents and timelines are stated only in those guidelines themselves.",
+    "keywords": ["scheme i", "grant of licence", "renewal of licence", "guidelines", "conformity assessment regulations 2018", "factory surveillance", "certification process"],
+    "source_organization": "Bureau of Indian Standards (BIS)",
+    "source_url": "https://www.bis.gov.in/product-certification/product-certification-process/?lang=en",
+    "document_name": "BIS: Product Certification Process",
+    "reference": "Scheme-I of BIS (Conformity Assessment) Regulations, 2018",
+    "verification_status": "verified",
+    "last_verified": "2026-09-19"
+  },
+  {
+    "id": "scheme-iv-coc-process-guidelines",
+    "title": "Scheme IV: the official BIS guidelines that govern a Certificate of Conformity",
+    "category": "certification",
+    "content": "BIS operates the Certificate of Conformity route under Scheme-IV of the BIS (Conformity Assessment) Regulations, 2018. On its Product Certification Process page BIS publishes the guideline documents for this route: Guidelines for grant of certificate of conformity, Guidelines for renewal of certificate of conformity, and Guidelines for surveillance (Stampings/Laminations/Core of Transformers). This record names the documents BIS publishes; the procedure itself is stated only in those guidelines.",
+    "keywords": ["scheme iv", "certificate of conformity", "coc", "guidelines", "conformity assessment regulations 2018", "certification process"],
+    "source_organization": "Bureau of Indian Standards (BIS)",
+    "source_url": "https://www.bis.gov.in/product-certification/product-certification-process/?lang=en",
+    "document_name": "BIS: Product Certification Process",
+    "reference": "Scheme-IV of BIS (Conformity Assessment) Regulations, 2018",
+    "verification_status": "verified",
+    "last_verified": "2026-09-19"
+  },
+  {
+    "id": "crs-legal-basis-and-registration-mark",
+    "title": "CRS: legal basis and what registration grants",
+    "category": "certification",
+    "content": "The BIS CRS portal states that the Compulsory Registration Scheme is operated under the Bureau of Indian Standards (Conformity Assessment) Regulations, 2018 (Scheme II of Schedule II), as per the BIS Act 2016. Products are brought under the scheme by Compulsory Registration Orders notified by the Ministry of Electronics and Information Technology (MeitY), the Ministry of New and Renewable Energy (MNRE), the Ministry of Chemicals and Fertilizers and the Ministry of Textiles. BIS states: \"As per the Orders, no person shall manufacture or store for sale, import, sell or distribute goods which do not conform to the Indian standard specified in the order and do not bear the Standard Mark with unique registration number obtained from BIS.\" BIS grants a licence to manufacturers to use the Standard Mark with a unique R-number through registration based on self-declaration of conformity.",
+    "keywords": ["crs", "compulsory registration scheme", "scheme ii", "r-number", "registration mark", "compulsory registration order", "meity", "self-declaration of conformity"],
+    "source_organization": "Bureau of Indian Standards (BIS)",
+    "source_url": "https://www.crsbis.in/BIS/about-crs.do",
+    "document_name": "BIS CRS portal: About CRS",
+    "reference": "Scheme II of Schedule II, BIS (Conformity Assessment) Regulations, 2018",
+    "verification_status": "verified",
+    "last_verified": "2026-09-19"
+  },
+  {
+    "id": "crs-who-can-apply",
+    "title": "CRS: who can apply for registration",
+    "category": "certification",
+    "content": "The BIS CRS portal states who may apply: \"Manufacturer (factory owner) of any product, which comes under the ambit of the Compulsory Registration Order (CRO) notified by Ministry of Electronics and Information Technology (MeitY), Ministry of New and Renewable Energy (MNRE), Ministry of Chemicals and Fertilizers and Ministry of Textiles.\" For applicants located outside India, BIS publishes guidelines for nomination of an Authorized Indian Representative, a nomination format, and a model affidavit cum undertaking to be furnished by the manufacturer.",
+    "keywords": ["crs", "who can apply", "manufacturer", "authorized indian representative", "foreign applicant", "compulsory registration order"],
+    "source_organization": "Bureau of Indian Standards (BIS)",
+    "source_url": "https://www.crsbis.in/BIS/about-crs.do",
+    "document_name": "BIS CRS portal: About CRS",
+    "reference": "Who can apply for CRS",
+    "verification_status": "verified",
+    "last_verified": "2026-09-19"
+  },
+  {
+    "id": "bis-certification-fee-is-published-by-bis",
+    "title": "Where BIS publishes product certification fees",
+    "category": "certification",
+    "content": "BIS publishes its fees rather than quoting them case by case. The Product Certification Fee page offers a search facility for the marking fee for an Indian Standard, a download of the marking fee for all products under certification (Scheme-I), and the Notification of Marking Fee for use of the Standard Mark dated 05.08.2021 together with its subsequent amendments. The CRS portal publishes a separate revised fee structure for registration. Amounts are stated only in those BIS documents and are not reproduced here.",
+    "keywords": ["fee", "certification fee", "fee structure", "fees", "product certification fee", "crs fee"],
+    "source_organization": "Bureau of Indian Standards (BIS)",
+    "source_url": "https://www.bis.gov.in/product-certification/product-certification-fee/?lang=en",
+    "document_name": "BIS: Product Certification Fee",
+    "reference": "Fee search, Scheme-I fee list, and fee notifications",
+    "verification_status": "verified",
+    "last_verified": "2026-09-19"
+  },
+  {
+    "id": "bis-certification-online-application-portals",
+    "title": "The official BIS portals for certification applications",
+    "category": "certification",
+    "content": "BIS takes certification applications online through its own portals. The Product Certification \"Apply Online\" page links to the BIS Manak Online portal at manakonline.in, which BIS also uses for the Foreign Manufacturers Certification Scheme and for searching granted licences. Registration under the Compulsory Registration Scheme is applied for through the separate BIS CRS portal at crsbis.in. These are the official application routes; MetrIQ does not submit applications and does not know the status of any application or licence.",
+    "keywords": ["apply online", "manakonline", "crsbis", "application portal", "bis portal", "how to apply"],
+    "source_organization": "Bureau of Indian Standards (BIS)",
+    "source_url": "https://www.bis.gov.in/product-certification/apply-online/?lang=en",
+    "document_name": "BIS: Product Certification — Apply Online",
+    "reference": "Apply Online",
+    "verification_status": "verified",
+    "last_verified": "2026-09-19"
   }
 ]

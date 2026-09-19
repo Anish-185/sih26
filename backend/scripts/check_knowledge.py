@@ -23,6 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.knowledge.loader import DEFAULT_KNOWLEDGE_DIR, load_knowledge_base, main  # noqa: E402
+from app.certification_journey import SCHEME_NAMES, certification_coverage
 from app.requirements import (  # noqa: E402
     INSPECTION_SUPPORTED,
     STANDARD_ONLY,
@@ -140,6 +141,16 @@ def check_requirements(argv: list[str]) -> int:
     print(f"  Total package-label checkable requirements: {t.package_label_checkable_requirements}")
     print(f"  Total deterministic rules:              {t.deterministic_rules} "
           f"(rule types: {', '.join(t.rule_types)})")
+
+    # Milestone 16 — certification guidance is knowledge coverage, not a rule.
+    c = certification_coverage(items)
+    print("\nCertification guidance coverage (verified BIS standards)")
+    print(f"  Total verified standards:               {c.total_standards}")
+    print(f"  With full certification guidance:       {c.verified}")
+    print(f"  With partial certification guidance:    {c.partial}")
+    print(f"  Without sufficient guidance:            {c.insufficient}")
+    for scheme, count in sorted(c.by_scheme.items()):
+        print(f"    {SCHEME_NAMES[scheme]:56} {count}")
 
     if requirements.errors:
         print(f"\nRequirement errors: {len(requirements.errors)}")

@@ -48,6 +48,7 @@ import {
 } from "@/components/decor";
 import { PackageImages, RegionSides, regionSides, useWhere } from "./PackageImages";
 import { EscalationPanel } from "../records";
+import { CertificationJourney } from "@/components/CertificationJourney";
 import { CopilotPanel } from "../CopilotPanel";
 import { HallmarkEvidencePanel, showHallmark } from "../HallmarkEvidence";
 
@@ -590,6 +591,9 @@ export function Workspace({
             selected={linkedRegions}
             onSelect={selectRegions}
           />
+          {result.certification && (
+            <CertificationJourney journey={result.certification} />
+          )}
           <CoveragePanel compliance={result.compliance} />
           <CompliancePanel
             compliance={result.compliance}

@@ -11,6 +11,7 @@ import { useAsyncTask, useOnMount } from "@/lib/hooks";
 import { standardTitle } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import {
+  ArrowLink,
   Button,
   Callout,
   Chip,
@@ -279,17 +280,26 @@ function StandardResult({
             </ul>
           </>
         )}
-        {result.source_url && (
-          <a
-            href={result.source_url}
-            target="_blank"
-            rel="noreferrer"
-            className="group/src mt-4 inline-flex items-center gap-1.5 text-[12px] font-medium text-accent hover:text-accent-hover"
-          >
-            Official BIS source
-            <ArrowUpRight className="h-3.5 w-3.5 transition-transform group-hover/src:translate-x-0.5" />
-          </a>
-        )}
+        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2">
+          {result.source_url && (
+            <a
+              href={result.source_url}
+              target="_blank"
+              rel="noreferrer"
+              className="group/src inline-flex items-center gap-1.5 text-[12px] font-medium text-accent hover:text-accent-hover"
+            >
+              Official BIS source
+              <ArrowUpRight className="h-3.5 w-3.5 transition-transform group-hover/src:translate-x-0.5" />
+            </a>
+          )}
+          {result.standard_number && (
+            <ArrowLink
+              to={`/certification?standard=${encodeURIComponent(result.standard_number)}`}
+            >
+              Certification journey
+            </ArrowLink>
+          )}
+        </div>
       </div>
     </li>
   );

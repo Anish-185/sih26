@@ -1,4 +1,5 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useAsyncTask } from "@/lib/hooks";
 import {
@@ -15,6 +16,7 @@ import {
   HeaderMotif,
 } from "@/components/decor";
 import { GroundedAnswer } from "@/components/GroundedAnswer";
+import { CertificationJourney } from "@/components/CertificationJourney";
 import { ErrorNote } from "@/features/StandardsView";
 
 const EXAMPLES = [
@@ -24,14 +26,26 @@ const EXAMPLES = [
 ];
 
 export function CertificationView() {
+  const [params, setParams] = useSearchParams();
   const [question, setQuestion] = useState("");
   const [product, setProduct] = useState("");
   const task = useAsyncTask(api.certificationGuidance);
 
+  // Deep link from the Standards page or an inspection: ?standard=IS 302.
+  // The journey is retrieval-only, so this never waits on the local model.
+  const deepLink = params.get("standard") ?? "";
+  useEffect(() => {
+    if (!deepLink) return;
+    setParams({}, { replace: true });
+    setQuestion(`What certification applies to ${deepLink}?`);
+    task.run("", "", deepLink, false).catch(() => {});
+    // Deliberately keyed on the link alone: it is consumed once, on arrival.
+  }, [deepLink]);
+
   function submit(e: FormEvent) {
     e.preventDefault();
     const q = question.trim();
-    if (q) task.run(q, product.trim()).catch(() => {});
+    if (q) task.run(q, product.trim(), "", true).catch(() => {});
   }
 
   return (
@@ -81,7 +95,7 @@ export function CertificationView() {
               type="button"
               onClick={() => {
                 setQuestion(ex);
-                task.run(ex, "").catch(() => {});
+                task.run(ex, "", "", true).catch(() => {});
               }}
               className="text-left text-[12px] text-ink-soft transition-colors hover:text-accent"
             >
@@ -100,7 +114,9 @@ export function CertificationView() {
       )}
       {task.error != null && <ErrorNote error={task.error} />}
 
-      {task.data && (
+      {task.data?.journey && <CertificationJourney journey={task.data.journey} />}
+
+      {task.data && task.data.note !== "explanation skipped (explain=false)" && (
         <GroundedAnswer
           question={task.data.question}
           answer={task.data.answer}

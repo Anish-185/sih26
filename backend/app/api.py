@@ -18,6 +18,11 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.certification import CertificationGuidanceService
+from app.certification_journey import (
+    CertificationJourneyOut,
+    CertificationJourneyService,
+    journey_out as _journey_out,
+)
 from app.laboratory import LaboratorySearchService
 from app.llm import LLMError, LocalLLM
 from app.product import ProductStandardFinder
@@ -57,6 +62,14 @@ def get_certification_service() -> CertificationGuidanceService:
         search_engine=get_engine(),
         product_finder=get_product_finder(),
         llm=LocalLLM(),
+    )
+
+
+@lru_cache(maxsize=1)
+def get_certification_journey_service() -> CertificationJourneyService:
+    return CertificationJourneyService(
+        search_engine=get_engine(),
+        product_finder=get_product_finder(),
     )
 
 
@@ -222,6 +235,14 @@ class CertificationGuidanceRequest(BaseModel):
         default="",
         description="Optional product description to give the question context",
     )
+    standard_number: str = Field(
+        default="",
+        description="Optional Indian Standard number to build the journey for directly",
+    )
+    explain: bool = Field(
+        default=True,
+        description="If false, skip the LLM and return the deterministic journey only",
+    )
 
 
 class CertificationGuidanceResponse(BaseModel):
@@ -233,6 +254,7 @@ class CertificationGuidanceResponse(BaseModel):
     source_count: int
     sources: list[SourceOut]
     note: str = ""
+    journey: CertificationJourneyOut | None = None
 
 
 # ---------------------------------------------------------------------
@@ -517,8 +539,9 @@ def certification_guidance_post(
 ) -> CertificationGuidanceResponse:
     question = request.question.strip()
     product = request.product.strip()
+    standard_number = request.standard_number.strip()
 
-    if not question:
+    if not question and not standard_number:
         return CertificationGuidanceResponse(
             question="",
             product_context=None,
@@ -533,8 +556,30 @@ def certification_guidance_post(
     # The optional product description is appended so retrieval has more context.
     combined = f"{question} {product}".strip()
 
+    # Milestone 16: the journey is deterministic and is built first, so it is
+    # present whether or not the local model is reachable.
+    journey = get_certification_journey_service().build(
+        query=combined,
+        standard_number=standard_number,
+    )
+
+    if not request.explain:
+        return CertificationGuidanceResponse(
+            question=question,
+            product_context=journey.product,
+            answer=journey.message or (
+                "Deterministic certification journey only — no model explanation was requested."
+            ),
+            grounded=journey.grounded,
+            confidence="none",
+            source_count=len(journey.sources),
+            sources=[],
+            note="explanation skipped (explain=false)",
+            journey=_journey_out(journey),
+        )
+
     try:
-        result = get_certification_service().guide(combined)
+        result = get_certification_service().guide(combined or standard_number)
     except LLMError as exc:
         raise HTTPException(
             status_code=503,
@@ -550,6 +595,7 @@ def certification_guidance_post(
         source_count=len(result.sources),
         sources=[_result_to_source(item) for item in result.sources],
         note=result.note,
+        journey=_journey_out(journey),
     )
 
 

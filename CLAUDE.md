@@ -594,7 +594,8 @@ sih26/
       copilot_api.py   # Milestone 13: GET /copilot/status, POST /copilot/explain (read-only)
       rag.py           # grounded BIS question-answering pipeline (/ask)
       product.py       # Phase 5: Product -> Standard discovery + Phase 9 "Why this result?"
-      certification.py # Phase 6: BIS certification guidance
+      certification.py # Phase 6: BIS certification guidance (retrieval + grounded LLM answer)
+      certification_journey.py # Milestone 16: deterministic product -> standard -> scheme -> next steps
       laboratory.py    # Phase 7: BIS-recognized laboratory search
       ocr.py           # Phase 13: local OCR engine wrapper (rapidocr-onnxruntime)
       inspection.py    # InspectionAnalyzer + response models (ocr / analyze)
@@ -691,3 +692,57 @@ with ranked `RetrievalResult`s. Scoring is a transparent weighted sum over
 top hit's score plus query-term coverage; all weights and thresholds live in
 `RetrievalConfig`. `abstained` is true (and `results` empty) when nothing matches.
 The LLM must never generate the match reasons — retrieval produces them.
+
+
+Milestone 16 (certification journey & scheme guidance): a user can go from "what standard applies to my
+product?" to "what certification process do I follow?" to "what do I need to do next?" — all of it
+retrieved, never decided. `app/certification_journey.py` is deterministic and calls NO model: every
+sentence a journey shows is a WORD-FOR-WORD QUOTE from a verified knowledge record plus that record's
+official BIS URL; MetrIQ only chooses which quotes are relevant and what order they go in. **How a scheme
+is established** — two independent readings of verified text, never a guess: (1) PROVENANCE — a standard
+record transcribed from BIS's own "Products under Compulsory Certification" listing carries that listing
+in `document_name`, so being on the Scheme I listing IS the statement that the route is Scheme I; (2) a
+`certification` record whose text names that standard number and states a scheme (the packaged-water
+record says "Licences are granted under Scheme I"). Agreement, or either alone, establishes the route;
+disagreement is reported as a conflict and drops the journey to PARTIAL — MetrIQ does not choose; neither
+-> `INSUFFICIENT` and the documented "verified certification information is not currently available"
+message, with the official source still offered. Statuses: `VERIFIED` (one standard confidently
+identified, a route established, every documented step present) / `PARTIAL` (several candidates, a
+conflict, missing steps, or hallmarking — whose jeweller-registration journey MetrIQ does not model) /
+`INSUFFICIENT`. `standard_selection` is `CONFIRMED` / `MULTIPLE_CANDIDATES` / `NOT_IDENTIFIED`: several
+candidates are never silently resolved into one, and a route is then shown only when EVERY candidate
+points at the same scheme ("whichever of them applies"). Retrieval and "Why this result?" are reused
+unchanged — `ProductStandardFinder` + `explain_candidate`; no second explanation system. **Knowledge:**
+6 new verified `certification` records from official sources checked on 2026-09-19 (bis.gov.in Product
+Certification Process / Fee / Apply Online, crsbis.in About CRS) — the Scheme I and Scheme IV guideline
+documents BIS publishes, the CRS legal basis and R-number, who may apply to CRS, where BIS publishes its
+fees (amounts are never reproduced), and the official application portals. `certification.json` now holds
+16 records. One precision fix: the fee record's title/keywords no longer key on the bare token "marking",
+which had made it outrank `hallmarking-charges` for "hall-marking charges". **API:** `POST
+/certification-guidance` is EXTENDED, not duplicated — it gains `standard_number` and `explain`
+(the laboratory endpoint's existing pattern) and returns `journey`; with `explain=false` it is pure
+retrieval and needs no LM Studio, so deep links never depend on the local model. **Inspection:**
+`InspectionAnalysisOut.certification` carries the journey for the identified standard, built in its own
+try/except so a failure returns null and changes no result. **Copilot:** capability
+`EXPLAIN_CERTIFICATION` (and the free-text `QUESTION`) receive a `certification_guidance` context section
+labelled "NOT a statement that this item ... is certified"; the shared system prompt now forbids saying a
+product, manufacturer or item IS certified / holds a licence, and forbids stating a fee, processing time,
+required document, testing requirement, validity period or scheme number the evidence does not state.
+**Report:** a numbered "Certification guidance" section (product, standard, verification status, scheme,
+mark, the journey with each step's quote and source, next steps, limitations, official sources) that
+states plainly it is guidance, not the certification status of the physical product; absent guidance
+renders nothing. **Frontend:** one shared `components/CertificationJourney.tsx` panel used by the
+Certification page and the inspection workspace; Standards cards gain a "Certification journey" link
+(`/certification?standard=…`, consumed once, retrieval-only); the copilot chip appears only when the
+record carries guidance. No redesign, no new colours. **Coverage, calculated from the real knowledge
+base:** 97 verified standards — 90 full guidance, 4 partial (the hallmarking standards), 3 without
+sufficient guidance (IS 17526:2021, IS 17803:2022, IS 18140:2023, which came from a product manual, an
+advisory and Know Your Standards rather than a scheme listing). By route: Scheme I 70, Scheme II 17,
+Scheme IV 3, hallmarking 4. **Nothing else grew:** requirements stay 15 (7 checkable), deterministic
+rules stay 7, INSPECTION_SUPPORTED stays 2 — certification guidance is knowledge, not an image rule.
+`scripts/check_knowledge.py` prints the certification coverage table. Tests:
+`test_certification_journey.py` (110 checks: grounding, quote fidelity, no invented fee / time / document
+/ scheme / licence, insufficient and unknown paths, multiple candidates, hallmarking separation, scheme
+resolution from verified text only, why-this-result reuse, HTTP contract, copilot grounding, coverage
+arithmetic, report honesty). Vision model swapped to `inclusionai/ling-3.0-flash-vl:free` (config only;
+`QwenVision` renamed `VisionClient`).

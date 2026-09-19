@@ -41,6 +41,12 @@ const HALLMARK_PROMPT: { code: CopilotCapability; label: string } = {
   label: "What does the hallmark / HUID evidence mean?",
 };
 
+/** Offered only when the record actually carries certification guidance. */
+const CERTIFICATION_PROMPT: { code: CopilotCapability; label: string } = {
+  code: "EXPLAIN_CERTIFICATION",
+  label: "What certification applies to this product?",
+};
+
 const WITHHELD_LABEL: Record<string, string> = {
   FABRICATED_STANDARD: "cited a standard that is not in this record",
   FABRICATED_HUID: "contained a HUID that is not in this record",
@@ -71,7 +77,10 @@ export function CopilotPanel({
   // The free budget as of the last answer, so the footer stays honest.
   const [used, setUsed] = useState<{ daily_remaining: number; daily_limit: number } | null>(null);
 
-  const prompts = hasHallmark ? [PACKAGE_PROMPTS[0], HALLMARK_PROMPT, ...PACKAGE_PROMPTS.slice(1)] : PACKAGE_PROMPTS;
+  const base = hasHallmark
+    ? [PACKAGE_PROMPTS[0], HALLMARK_PROMPT, ...PACKAGE_PROMPTS.slice(1)]
+    : PACKAGE_PROMPTS;
+  const prompts = analysis?.certification ? [...base, CERTIFICATION_PROMPT] : base;
   const configured = status.data?.configured ?? true;
   const budget = status.data;
   const remaining = used?.daily_remaining ?? budget?.daily_remaining ?? 0;

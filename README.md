@@ -214,8 +214,35 @@ product**, each with a "Why this result?" built from real matching signals.
 | `POST /product-standard` | Product → candidate Indian Standard + deterministic "Why this result?" | no |
 | `POST /inspection/analyze` | image → OCR → declarations → product → verified Indian Standard | only if rules miss |
 | `POST /ask` | grounded BIS Q&A (Hallmarking / HUID screen) | yes |
-| `POST /certification-guidance` | grounded BIS certification guidance | yes |
+| `POST /certification-guidance` | certification journey (deterministic) + grounded explanation (`explain=false` skips the model) | optional |
 | `POST /laboratory-search` | BIS recognised-lab directories (`explain=false` skips the model) | optional |
+
+### Certification journey
+
+`POST /certification-guidance` answers *"what certification process do I follow?"*
+Send a question, a product, or a `standard_number`; add `"explain": false` for the
+deterministic journey alone. The `journey` in the response carries the identified
+product and standard, the BIS scheme, the numbered steps, next steps, evidence,
+official sources, a verification status and its limitations.
+
+Nothing in it is written by MetrIQ. Each step's text is a **word-for-word quote**
+from a verified knowledge record with that record's official BIS URL, and the
+scheme itself is read out of verified text two independent ways — the BIS
+"Products under Compulsory Certification" listing the standard record was
+transcribed from, and any certification record that names that standard number.
+If they disagree the conflict is shown and MetrIQ picks neither. If neither says
+anything, the status is `INSUFFICIENT` rather than a guess.
+
+| Status | Meaning |
+|---|---|
+| `VERIFIED` | one standard identified, a route established, every documented step present |
+| `PARTIAL` | several candidate standards, a conflict, missing steps, or hallmarking |
+| `INSUFFICIENT` | no verified record states a route for this standard |
+
+It is **guidance about the route for a product type** — never a statement that a
+product, manufacturer or licence is certified, and never a legal determination.
+MetrIQ states no fee amount, processing time, required document or testing
+requirement: those live only in the BIS documents it links to.
 
 The grounded endpoints call a **local** [LM Studio](https://lmstudio.ai) server.
 If it is offline, the deterministic endpoints keep working fully and the grounded

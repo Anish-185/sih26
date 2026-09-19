@@ -37,6 +37,11 @@ from app.api import ReasonOut, WhyOut
 from app.declarations import extract_declarations, has_reliable_text
 from app.escalation import assess as assess_escalation
 from app.hallmark import HallmarkOut, evaluate_hallmark
+from app.certification_journey import (
+    CertificationJourneyOut,
+    CertificationJourneyService,
+    journey_out as _certification_out,
+)
 from app.vision import VisionClient, VisionObservation
 from app.vision import unavailable as vision_unavailable
 from app.llm import LocalLLM
@@ -678,6 +683,12 @@ class InspectionAnalysisOut(BaseModel):
         default=None, description="Whether this inspection needs officer review, and why (null only for records "
         "saved before escalation existed)."
     )
+    certification: CertificationJourneyOut | None = Field(
+        default=None,
+        description="Milestone 16: BIS certification guidance for the identified standard. Deterministic and "
+                    "retrieved, never a statement that this item or its manufacturer is certified. Null when no "
+                    "standard was identified or the journey could not be built.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -710,6 +721,7 @@ class InspectionAnalyzer:
         ocr_engine: OcrEngine = run_ocr,
         product_finder: ProductStandardFinder | None = None,
         vision: VisionClient | None = None,
+        certification: CertificationJourneyService | None = None,
     ) -> None:
         self._llm = llm
         self._ocr_engine = ocr_engine
@@ -717,6 +729,8 @@ class InspectionAnalyzer:
         # Optional visual understanding. None (or an unconfigured client) means
         # identification is exactly what it was before Milestone 15.
         self._vision = vision
+        # Milestone 16: certification guidance for the identified standard.
+        self._certification_service = certification
 
     def ocr(self, data: bytes, filename: str, side: str | None = None) -> InstantOcrOut:
         """Instant OCR of one image (see ``ocr_package``)."""
@@ -858,6 +872,12 @@ class InspectionAnalyzer:
             )
             notes.append(f"Downstream pipeline error: {exc}")
 
+        # ---- certification guidance (Milestone 16) ----
+        # Deterministic, read-only, and isolated: it explains the route for the
+        # standard already identified. A failure here leaves it null and changes
+        # no result.
+        certification = self._certification(product.standard_number)
+
         # The compliance result must say when some photos gave no usable evidence.
         if unreadable:
             gap_note = (
@@ -885,6 +905,7 @@ class InspectionAnalyzer:
             pipeline=pipeline,
             notes=notes,
             inspection_type=inspection_type,
+            certification=certification,
         )
         # Hallmark evidence is read from the OCR regions on its own, so a downstream failure cannot hide it.
         try:
@@ -932,6 +953,24 @@ class InspectionAnalyzer:
 
     _MEDIA_TYPES = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp",
                     "BMP": "image/bmp", "TIFF": "image/tiff", "MPO": "image/jpeg"}
+
+    def _certification(self, standard_number: str | None) -> CertificationJourneyOut | None:
+        """Certification guidance for the standard this inspection identified.
+
+        Read-only and deterministic: it retrieves what verified BIS records say
+        about the route for that standard. It never states that this item, its
+        manufacturer or any licence is certified, and a failure here returns None
+        rather than affecting any result.
+        """
+        if not standard_number:
+            return None
+        try:
+            from app.api import get_certification_journey_service
+
+            service = self._certification_service or get_certification_journey_service()
+            return _certification_out(service.build(standard_number=standard_number))
+        except Exception:  # noqa: BLE001 — guidance is never allowed to fail an inspection
+            return None
 
     def _observe(self, uploads: list[PackageUpload], images: list[PackageImageOut]) -> list[VisionObservation]:
         """Visual observations of the readable photos. Never raises, never required."""

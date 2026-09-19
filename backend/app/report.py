@@ -7,8 +7,8 @@ and never writes anything: every value comes from the stored record, and a value
 that is not there is reported as not established.
 
 Sections: header · inspection summary · package photos · OCR evidence ·
-declarations · BIS standard evidence · Legal Metrology evidence · compliance
-results · automated system result · officer review · final outcome · evidence
+declarations · BIS standard evidence · certification guidance · Legal Metrology evidence ·
+compliance results · automated system result · officer review · final outcome · evidence
 and sources. The system result and the officer's decision are always shown
 separately.
 
@@ -499,6 +499,68 @@ def _bis(d: _Doc, rec: dict, an: dict) -> list:
     return out
 
 
+def _certification(d: _Doc, an: dict) -> list:
+    """Milestone 16: the certification guidance stored with this inspection.
+
+    Guidance about the ROUTE for a product type — never a statement that this
+    item or its manufacturer is certified. Every sentence shown is a quote from
+    a verified record stored in the record, with its official BIS source.
+    """
+    j = an.get("certification")
+    if not j:
+        return []
+    out = d.section(0, "Certification guidance", "What published BIS information says about the certification "
+                    "route for this product type. This is guidance, not the certification status of the "
+                    "physical product: MetrIQ does not verify and does not state that this item, its "
+                    "manufacturer or any licence is certified or registered.")
+    scheme = j.get("scheme") or {}
+    out.append(d.definitions([
+        ("Product", _t(j.get("product") or (an.get("product") or {}).get("product") or "Not identified")),
+        ("Standard", f"<font name='Mono'>{_t(j.get('standard_number') or '—')}</font>"
+                     + (f" · {_t(j.get('standard_title'))}" if j.get("standard_title") else "")),
+        ("Standard selection", _t(j.get("standard_selection"))),
+        ("Verification status", _t(j.get("verification_status"))),
+        ("Certification scheme", _t(scheme.get("name") or "Not established from a verified record")),
+        ("Mark", _t(scheme.get("mark") or "—")),
+    ]))
+    if j.get("message"):
+        out += [Spacer(1, 3 * mm), d.callout(_t(j["message"]), "REVIEW")]
+    for line in scheme.get("basis") or []:
+        out.append(d.p(f"Why this guidance appears: {_t(line)}", "soft"))
+    if scheme.get("conflict"):
+        out += [Spacer(1, 2 * mm), d.callout(_t(scheme["conflict"]), "REVIEW")]
+
+    steps = j.get("steps") or []
+    if steps:
+        out += d.h3("Certification journey")
+        rows = []
+        for step in steps:
+            evidence = step.get("evidence") or []
+            quote = evidence[0].get("quote") if evidence else ""
+            source = evidence[0] if evidence else {}
+            cite = " ".join(x for x in [source.get("document_name"), source.get("source_url")] if x)
+            rows.append([f"<font name='Mono'>{step.get('order')}</font>", _t(step.get("title")),
+                         _t(quote) + (f"<br/><font size=7 color='#8b8e94'>{_t(cite)}</font>" if cite else "")])
+        out.append(d.table(["#", "Step", "What the verified BIS source states"], rows,
+                           [8 * mm, 46 * mm, CONTENT_W - 54 * mm]))
+
+    for heading, key in (("Next steps", "next_steps"), ("Limitations", "limitations")):
+        values = j.get(key) or []
+        if values:
+            out += d.h3(heading)
+            out += [d.p(f"— {_t(v)}", "soft") for v in values]
+
+    sources = j.get("sources") or []
+    if sources:
+        out += d.h3("Official sources for this guidance")
+        out.append(d.table(["Record", "Document", "Source"],
+                           [[_t(e.get("title")), _t(e.get("document_name") or "—"),
+                             f"<font size=7>{_t(e.get('source_url') or '—')}</font>"] for e in sources],
+                           [58 * mm, 52 * mm, CONTENT_W - 110 * mm]))
+    out.append(d.p(_t(j.get("disclaimer") or ""), "faint"))
+    return out
+
+
 def _legal_metrology(d: _Doc, an: dict) -> list:
     pl = an["package_label"]
     if pl.get("scope_status") == "NOT_APPLIED":
@@ -854,6 +916,7 @@ def build_story(record: dict, images: dict[int, bytes], generated_at: datetime) 
     story += _ocr(d, an)
     story += _declarations(d, an)
     story += _bis(d, record, an)
+    story += _certification(d, an)
     story += _legal_metrology(d, an)
     story += _hallmark(d, an)
     story += _vision(d, an)

@@ -69,7 +69,13 @@ YOU MUST NOT:
 - authenticate, verify or vouch for a physical item, a hallmark, a HUID, a
   licence or a registration. MetrIQ can only report what was OBSERVED in a
   photograph. Observed is not authenticated;
-- present something not detected on the label as legally missing.
+- present something not detected on the label as legally missing;
+- say that a product, a manufacturer or an item IS certified, holds a BIS
+  licence, or is registered. Certification guidance describes the ROUTE that
+  published BIS information states for a product type; it is never a statement
+  about any particular item. Never state an application fee, a processing time,
+  a required document, a testing requirement, a validity period or a scheme
+  number that the supplied evidence does not state.
 
 YOU MUST:
 - distinguish clearly between detected, not detected, uncertain, unsupported
@@ -169,11 +175,25 @@ CAPABILITIES: dict[str, dict] = {
                        "requirement areas with no verified rule. Do not invent a legal checklist and do "
                        "not add steps the record does not support.",
     },
+    "EXPLAIN_CERTIFICATION": {
+        "label": "What certification applies to this product?",
+        "question": "What BIS certification route applies to this product, and what are the next steps?",
+        "sections": _CORE + ("product", "standards", "certification"),
+        "instruction": "Explain the certification guidance in the record: the scheme the verified BIS "
+                       "records state, why that route was established, and the steps in the order the "
+                       "record gives them. Quote only what the record's evidence says. Never say the "
+                       "product, the manufacturer or any licence IS certified, never state a fee, a "
+                       "processing time, a required document or a testing requirement that the record "
+                       "does not state, and never invent a scheme or a licence number. If the record's "
+                       "verification_status is INSUFFICIENT, say plainly that the available verified "
+                       "information is insufficient and point at the official sources instead.",
+    },
     "QUESTION": {
         "label": "Ask about the evidence",
         "question": "",
         "sections": _CORE + ("product", "standards", "declarations", "bis_compliance", "legal_metrology",
-                             "hallmarking", "completeness", "coverage", "officer_review", "ocr_text"),
+                             "hallmarking", "completeness", "coverage", "officer_review", "certification",
+                             "ocr_text"),
         "instruction": "Answer the officer's question using only the record. If the record does not "
                        "contain the answer, say: Insufficient evidence in the inspection record.",
     },
@@ -185,6 +205,7 @@ QUESTION_MAX = 400
 _MAX_DECLARATIONS = 24
 _MAX_CHECKS = 16
 _MAX_STANDARDS = 3
+_MAX_JOURNEY_STEPS = 8
 _MAX_OCR_LINES = 45
 _MAX_OCR_CHARS = 1800
 _VALUE_CHARS = 160
@@ -453,6 +474,33 @@ def build_context(
             }
             for s in analysis.get("standards", [])[:_MAX_STANDARDS]
         ]
+
+    if "certification" in sections:
+        journey = analysis.get("certification") or {}
+        if journey:
+            scheme = journey.get("scheme") or {}
+            ctx["certification_guidance"] = {
+                "what_this_is": "Retrieved BIS certification guidance for the identified standard. It "
+                                "describes the route for this product type. It is NOT a statement that "
+                                "this item, its manufacturer or any licence is certified.",
+                "standard_number": journey.get("standard_number"),
+                "standard_selection": journey.get("standard_selection"),
+                "verification_status": journey.get("verification_status"),
+                "scheme": scheme.get("name"),
+                "mark": scheme.get("mark"),
+                "route_established_because": [_clean(b, 300) for b in (scheme.get("basis") or [])],
+                "conflict": _clean(scheme.get("conflict"), 300),
+                "steps": [
+                    {
+                        "order": step.get("order"),
+                        "title": _clean(step.get("title"), 160),
+                        "evidence": [book.add(e) for e in (step.get("evidence") or [])],
+                    }
+                    for step in (journey.get("steps") or [])[:_MAX_JOURNEY_STEPS]
+                ],
+                "limitations": [_clean(x, 300) for x in (journey.get("limitations") or [])],
+                "message": _clean(journey.get("message"), 300),
+            }
 
     if "declarations" in sections:
         stage = analysis.get("declaration_stage") or {}

@@ -152,6 +152,63 @@ export interface ProductStandardResponse {
   note: string;
 }
 
+/** Milestone 16 — one verified knowledge record, quoted word for word. */
+export interface CertificationEvidence {
+  knowledge_id: string;
+  title: string;
+  quote: string;
+  source_organization: string;
+  source_url: string | null;
+  document_name: string | null;
+  last_verified: string | null;
+}
+
+export interface CertificationStep {
+  order: number;
+  title: string;
+  evidence: CertificationEvidence[];
+}
+
+export interface CertificationScheme {
+  scheme: string;
+  name: string;
+  mark: string;
+  basis: string[];
+  evidence: CertificationEvidence[];
+  conflict: string;
+}
+
+export interface CertificationCandidate {
+  standard_number: string | null;
+  title: string;
+  knowledge_id: string;
+  confidence: Confidence;
+  score: number;
+  source_url: string | null;
+  why: WhyThisResult;
+}
+
+/** The deterministic certification journey. Guidance about the route for a
+ *  product type — never a statement that an item or manufacturer is certified. */
+export interface CertificationJourney {
+  query: string;
+  product: string | null;
+  standard_selection: "CONFIRMED" | "MULTIPLE_CANDIDATES" | "NOT_IDENTIFIED";
+  standard_number: string | null;
+  standard_title: string | null;
+  candidates: CertificationCandidate[];
+  scheme: CertificationScheme | null;
+  verification_status: "VERIFIED" | "PARTIAL" | "INSUFFICIENT";
+  steps: CertificationStep[];
+  next_steps: string[];
+  why: string[];
+  limitations: string[];
+  sources: CertificationEvidence[];
+  grounded: boolean;
+  message: string;
+  disclaimer: string;
+}
+
 export interface CertificationGuidanceResponse {
   question: string;
   product_context: string | null;
@@ -161,6 +218,7 @@ export interface CertificationGuidanceResponse {
   source_count: number;
   sources: EvidenceSource[];
   note: string;
+  journey: CertificationJourney | null;
 }
 
 export interface LaboratorySearchResponse {
@@ -688,6 +746,9 @@ export interface InspectionAnalysis {
   escalation: Escalation | null; // null only for inspections saved before escalation existed
   inspection_type: InspectionType;
   hallmark: HallmarkEvidence | null; // observed hallmark / HUID evidence — never an authentication
+  /** Milestone 16 — certification route for the identified standard. Guidance
+   *  only: never a statement that this item or its manufacturer is certified. */
+  certification?: CertificationJourney | null;
 }
 
 /* ------------------------------------------------ saved inspections --- */
@@ -780,6 +841,7 @@ export type CopilotCapability =
   | "EXPLAIN_EVIDENCE"
   | "EXPLAIN_UNCERTAINTY"
   | "EXPLAIN_HALLMARK"
+  | "EXPLAIN_CERTIFICATION"
   | "MANUAL_VERIFICATION"
   | "QUESTION";
 
@@ -864,11 +926,25 @@ export const api = {
       body: JSON.stringify({ product, limit }),
     }),
 
-  certificationGuidance: (question: string, product = "") =>
+  certificationGuidance: (
+    question: string,
+    product = "",
+    standardNumber = "",
+    explain = true,
+  ) =>
     request<CertificationGuidanceResponse>(
       "/certification-guidance",
-      { method: "POST", body: JSON.stringify({ question, product }) },
-      90_000,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          question,
+          product,
+          standard_number: standardNumber,
+          explain,
+        }),
+      },
+      // Without the model this is pure retrieval, so it must not wait 90s.
+      explain ? 90_000 : 20_000,
     ),
 
   laboratorySearch: (query: string, standard = "", explain = false) =>
