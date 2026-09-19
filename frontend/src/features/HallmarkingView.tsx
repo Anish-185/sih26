@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Save, ScanSearch } from "lucide-react";
-import { ApiError, api, type Confidence, type InspectionAnalysis } from "@/lib/api";
+import { ApiError, api, type Confidence, type InspectionAnalysis, type LanguageChoice } from "@/lib/api";
 import { useAsyncTask } from "@/lib/hooks";
 import {
   Button,
@@ -23,6 +23,7 @@ import {
   HeaderMotif,
 } from "@/components/decor";
 import { GroundedAnswer } from "@/components/GroundedAnswer";
+import { LanguagePicker } from "@/components/LanguagePicker";
 import { ErrorNote } from "@/features/StandardsView";
 
 const EXAMPLES = [
@@ -35,12 +36,15 @@ const EXAMPLES = [
 
 export function HallmarkingView() {
   const [question, setQuestion] = useState("");
+  // Milestone 17: the answer language. Evidence and sources are identical in
+  // every language — only the prose changes.
+  const [language, setLanguage] = useState<LanguageChoice>("auto");
   const task = useAsyncTask(api.ask);
 
   function submit(e: FormEvent) {
     e.preventDefault();
     const q = question.trim();
-    if (q) task.run(q).catch(() => {});
+    if (q) task.run(q, language).catch(() => {});
   }
 
   const res = task.data;
@@ -82,7 +86,8 @@ export function HallmarkingView() {
             placeholder="Ask about hallmarking, HUID, purity grades, or consumer verification…"
             rows={3}
           />
-          <div className="flex justify-end">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <LanguagePicker value={language} onChange={setLanguage} />
             <Button type="submit" size="lg" disabled={task.loading || !question.trim()}>
               {task.loading ? <InlineLoading label="Reasoning" /> : "Ask"}
             </Button>
@@ -96,7 +101,7 @@ export function HallmarkingView() {
               type="button"
               onClick={() => {
                 setQuestion(ex);
-                task.run(ex).catch(() => {});
+                task.run(ex, language).catch(() => {});
               }}
               className="text-left text-[12px] text-ink-soft transition-colors hover:text-accent"
             >

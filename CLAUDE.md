@@ -592,6 +592,7 @@ sih26/
       vision.py        # Milestone 15: visual product understanding (separate key/model/budget)
       copilot.py       # Milestone 13: grounded context + system prompt + answer verification (guard)
       copilot_api.py   # Milestone 13: GET /copilot/status, POST /copilot/explain (read-only)
+      language.py      # Milestone 17: language detection + retrieval aliases (en / hi / te)
       rag.py           # grounded BIS question-answering pipeline (/ask)
       product.py       # Phase 5: Product -> Standard discovery + Phase 9 "Why this result?"
       certification.py # Phase 6: BIS certification guidance (retrieval + grounded LLM answer)
@@ -635,6 +636,7 @@ sih26/
       test_laboratory.py   # laboratory search
       test_hallmarking.py  # hallmarking / HUID (via /ask)
       test_rag.py          # grounded RAG pipeline + /ask (fake LLM, 503 path)
+      test_multilingual.py # Milestone 17: detection, aliases, same evidence in every language
       test_api_contract.py # real ASGI app via TestClient: shapes, 422, 404, 503
       test_llm_adapter.py  # app/llm.py: healthy parse + clean LLMError on every failure
       test_inspection_ocr.py # Phase 13: real OCR engine on synthesised labels + HTTP contract
@@ -746,3 +748,54 @@ rules stay 7, INSPECTION_SUPPORTED stays 2 — certification guidance is knowled
 resolution from verified text only, why-this-result reuse, HTTP contract, copilot grounding, coverage
 arithmetic, report honesty). Vision model swapped to `inclusionai/ling-3.0-flash-vl:free` (config only;
 `QwenVision` renamed `VisionClient`).
+
+
+Milestone 17 (multilingual BIS assistant — English, Hindi, Telugu): **the language of
+interaction changes, the source of truth does not.** `app/language.py` is the whole layer and it
+is deterministic — no model, no network, no new dependency; it imports nothing from retrieval,
+OCR, the LLMs or vision (tested). The knowledge base is NOT translated, NOT copied and NOT
+re-indexed: there is no second KB and no translation service.
+
+    query -> detect / honour the requested language -> rewrite known terms to canonical English
+          -> the EXISTING SearchEngine, unchanged -> the SAME verified records
+          -> grounded answer written in the user's language
+
+**Why a rewrite layer at all:** `retrieval/text.normalize` is ASCII-only, so a pure Hindi or
+Telugu query reached retrieval as `""` and abstained. The layer runs BEFORE retrieval; the
+engine, its scoring, its thresholds and the records are untouched. **Detection** is Unicode
+script ranges (Devanagari incl. Extended, Telugu): a real run of an Indian script wins (so
+"Electric kettle కి ఏ standard?" is Telugu), a single stray character does not, everything else
+is English. **Selection** — an explicit `en`/`hi`/`te` always beats detection; `auto` is the
+default; an unknown code falls back to detection rather than erroring. **Aliases** — a small
+table (~30 concepts) of Hindi/Telugu spellings for products and BIS terms *that exist in the
+verified KB*, applied longest-first; a test asserts every canonical term retrieves something
+(except `standard`, which is a retrieval stopword) and that no alias is plain ASCII, so English
+queries are never rewritten. A separate `FILLER` set drops romanized Hindi/Telugu question words
+("ke liye", "kaunsa", "ku", "emi") from the RETRIEVAL text only — this lifted Hinglish from
+`low` to `high` confidence; a test asserts none of them is a KB term. The user's own question is
+never modified and is what the model is sent.
+
+**Evidence is identical in every language**: same records, same `IS 367:1993`, same record ids,
+same source URLs, same stored English text — Hindi and Telugu kettle queries return the same
+best record as English at the same confidence (tail ORDER can differ, because the questions
+genuinely differ in wording). **Prompt:** `lang.apply()` appends a clause naming the language and
+requiring standard numbers, scheme names, rule/record ids, HUIDs, document names and URLs to be
+reproduced exactly, never translated (a title may be glossed *beside* the original). For English
+it appends NOTHING, so English behaviour is byte-for-byte unchanged. Abstention and the
+empty-question prompt are MetrIQ's own sentences, hard-coded per language — the one place
+translated text exists, because MetrIQ is speaking about its own evidence and must do so with no
+model running.
+
+**API** (extended, never broken — a request with no `language` behaves exactly as before):
+`POST /ask` gains `language` and returns `language` (never `"auto"`) + `matched_concepts`;
+`/certification-guidance` and `/laboratory-search` gain the same pair. The certification
+journey's own text, quotes and sources stay canonical English — it quotes BIS records. **Frontend:**
+`components/LanguagePicker.tsx`, a small inline Auto / English / हिन्दी / తెలుగు segmented control
+on the three grounded views. No redesign, no new colours, no UI translation.
+
+**Untouched:** OCR output is raw evidence and is never translated; declarations, product
+identification, the vision fusion path, compliance, escalation, the report and the copilot are
+not part of this layer. An unknown product abstains in the user's language and never invents a
+standard. Tests: `test_multilingual.py` (120 checks, every LLM call stubbed — no quota spent).
+Full suite 245 passed. One live OpenRouter call validated the Hindi clause end to end: natural
+Hindi prose with `IS 367:1993` and the English document title preserved verbatim.

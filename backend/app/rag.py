@@ -2,12 +2,20 @@
 
 Retrieval remains deterministic and is performed by SearchEngine.
 The LLM only receives the retrieved BIS context.
+
+Milestone 17 — the answer can be written in English, Hindi or Telugu. The
+language layer (``app/language.py``) sits AROUND this pipeline, never inside it:
+it rewrites known non-English product and BIS terms into canonical English
+before retrieval, and appends a language clause to the system prompt afterwards.
+The knowledge base, the retrieval engine, its scoring and the evidence objects
+are untouched — the language of interaction changes, the source of truth does not.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+from app import language as lang
 from app.llm import LocalLLM
 from app.retrieval import RetrievalResult, SearchEngine
 
@@ -35,6 +43,12 @@ Rules:
 class GroundedAnswer:
     answer: str
     results: list[RetrievalResult]
+    # Milestone 17: the language the answer is written in ("en" / "hi" / "te"),
+    # after an explicit request or deterministic detection.
+    language: str = lang.EN
+    # The canonical English terms the query's non-English wording was mapped to
+    # for retrieval. Empty when nothing needed rewriting.
+    concepts: list[str] = field(default_factory=list)
 
 
 def _build_context(results: list[RetrievalResult]) -> str:
@@ -77,24 +91,34 @@ class BISQuestionAnswerer:
         self.llm = llm
         self.retrieval_limit = retrieval_limit
 
-    def ask(self, question: str) -> GroundedAnswer:
+    def ask(self, question: str, language: str = lang.AUTO) -> GroundedAnswer:
+        # The language to answer in. An explicit choice wins; "auto" detects the
+        # script. This never affects which evidence is retrieved.
+        answer_language = lang.resolve(question, language)
+
+        # Retrieval sees known Hindi / Telugu terms rewritten to their canonical
+        # English, because the retrieval normalizer is ASCII-only. Everything
+        # else reaches retrieval exactly as the user typed it.
+        normalized = lang.normalize_query(question)
+
         outcome = self.search_engine.search(
-            question,
+            normalized.query,
             limit=self.retrieval_limit,
         )
 
         # Retrieval abstention means the LLM receives no context.
         if outcome.abstained or not outcome.results:
             return GroundedAnswer(
-                answer=(
-                    "I couldn't find sufficient information in the available "
-                    "BIS knowledge base to answer this reliably."
-                ),
+                answer=lang.insufficient(answer_language),
                 results=[],
+                language=answer_language,
+                concepts=normalized.concepts,
             )
 
         context = _build_context(outcome.results)
 
+        # The model sees the question exactly as the user wrote it — the
+        # rewritten form is for retrieval only.
         user_prompt = f"""Answer the user's question using ONLY the BIS evidence
 below.
 
@@ -108,7 +132,8 @@ Give a concise answer grounded in the supplied evidence.
 """
 
         answer = self.llm.generate(
-            system_prompt=SYSTEM_PROMPT,
+            # Adds nothing for English, so English behaviour is unchanged.
+            system_prompt=lang.apply(SYSTEM_PROMPT, answer_language),
             user_prompt=user_prompt,
             temperature=0.1,
         )
@@ -116,4 +141,6 @@ Give a concise answer grounded in the supplied evidence.
         return GroundedAnswer(
             answer=answer,
             results=outcome.results,
+            language=answer_language,
+            concepts=normalized.concepts,
         )

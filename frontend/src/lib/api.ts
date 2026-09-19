@@ -219,6 +219,7 @@ export interface CertificationGuidanceResponse {
   sources: EvidenceSource[];
   note: string;
   journey: CertificationJourney | null;
+  language: AnswerLanguage;
 }
 
 export interface LaboratorySearchResponse {
@@ -230,7 +231,12 @@ export interface LaboratorySearchResponse {
   source_count: number;
   sources: EvidenceSource[];
   note: string;
+  language: AnswerLanguage;
 }
+
+/** Milestone 17 — assistant languages. "auto" detects from the query text. */
+export type AnswerLanguage = "en" | "hi" | "te";
+export type LanguageChoice = "auto" | AnswerLanguage;
 
 export interface AskResponse {
   question: string;
@@ -238,6 +244,10 @@ export interface AskResponse {
   grounded: boolean;
   source_count: number;
   sources: EvidenceSource[];
+  /** The language the answer is written in — never "auto". */
+  language: AnswerLanguage;
+  /** Canonical English terms the query's non-English wording mapped to. */
+  matched_concepts: string[];
 }
 
 /* ---- inspection: IMAGE -> OCR (/inspection/ocr) -> pipeline (/analyze) --- */
@@ -931,6 +941,7 @@ export const api = {
     product = "",
     standardNumber = "",
     explain = true,
+    language: LanguageChoice = "auto",
   ) =>
     request<CertificationGuidanceResponse>(
       "/certification-guidance",
@@ -941,24 +952,30 @@ export const api = {
           product,
           standard_number: standardNumber,
           explain,
+          language,
         }),
       },
       // Without the model this is pure retrieval, so it must not wait 90s.
       explain ? 90_000 : 20_000,
     ),
 
-  laboratorySearch: (query: string, standard = "", explain = false) =>
+  laboratorySearch: (
+    query: string,
+    standard = "",
+    explain = false,
+    language: LanguageChoice = "auto",
+  ) =>
     request<LaboratorySearchResponse>(
       "/laboratory-search",
-      { method: "POST", body: JSON.stringify({ query, standard, explain }) },
+      { method: "POST", body: JSON.stringify({ query, standard, explain, language }) },
       explain ? 90_000 : 20_000,
     ),
 
   // Grounded BIS Q&A (Phase 4). Used for the Hallmarking / HUID information view.
-  ask: (question: string) =>
+  ask: (question: string, language: LanguageChoice = "auto") =>
     request<AskResponse>(
       "/ask",
-      { method: "POST", body: JSON.stringify({ question }) },
+      { method: "POST", body: JSON.stringify({ question, language }) },
       120_000,
     ),
 

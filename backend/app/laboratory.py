@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app import language as lang
 from app.llm import LocalLLM
 from app.rag import _build_context
 from app.retrieval import RetrievalResult, SearchEngine
@@ -176,8 +177,13 @@ class LaboratorySearchService:
 
     # --------------------------------------------------------------- full search
 
-    def search(self, query: str, explain: bool = True) -> LaboratorySearch:
+    def search(self, query: str, explain: bool = True,
+               language: str = lang.AUTO) -> LaboratorySearch:
         query = query.strip()
+        # Milestone 17: language of the answer only. Retrieval sees known
+        # non-English terms rewritten to canonical English; the evidence,
+        # its sources and this service's own logic are unchanged.
+        answer_language = lang.resolve(query, language)
 
         if not query:
             return LaboratorySearch(
@@ -190,7 +196,7 @@ class LaboratorySearchService:
                 note="empty query",
             )
 
-        lab_evidence, standard_context = self.gather(query)
+        lab_evidence, standard_context = self.gather(lang.normalize_query(query).query)
 
         if not self._is_sufficient(lab_evidence):
             return LaboratorySearch(
@@ -223,7 +229,7 @@ Give a concise, grounded answer. Do not name any individual laboratory; the
 evidence does not contain laboratory names.
 """
             answer = self.llm.generate(
-                system_prompt=LAB_SYSTEM_PROMPT,
+                system_prompt=lang.apply(LAB_SYSTEM_PROMPT, answer_language),
                 user_prompt=user_prompt,
                 temperature=0.1,
             )

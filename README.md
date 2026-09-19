@@ -213,9 +213,58 @@ product**, each with a "Why this result?" built from real matching signals.
 | `GET`/`POST /search` | deterministic lexical retrieval over the BIS knowledge base | no |
 | `POST /product-standard` | Product → candidate Indian Standard + deterministic "Why this result?" | no |
 | `POST /inspection/analyze` | image → OCR → declarations → product → verified Indian Standard | only if rules miss |
-| `POST /ask` | grounded BIS Q&A (Hallmarking / HUID screen) | yes |
+| `POST /ask` | grounded BIS Q&A, in English / Hindi / Telugu | yes |
 | `POST /certification-guidance` | certification journey (deterministic) + grounded explanation (`explain=false` skips the model) | optional |
 | `POST /laboratory-search` | BIS recognised-lab directories (`explain=false` skips the model) | optional |
+
+### Multilingual assistant (English · Hindi · Telugu)
+
+**MetrIQ's multilingual assistant changes the language of interaction, not the
+source of truth.** The knowledge base stays canonical English. It is never
+translated, never copied, never re-indexed — there is no second knowledge base
+and no translation service.
+
+```
+user query (any language)
+   -> deterministic script detection        (no model, no network)
+   -> known product / BIS terms rewritten to canonical English
+   -> the EXISTING deterministic SearchEngine, unchanged
+   -> the SAME verified BIS records
+   -> grounded answer, written in the user's language
+```
+
+`/ask`, `/certification-guidance` and `/laboratory-search` accept a `language`
+of `auto` (default), `en`, `hi` or `te`, and report the language they answered
+in. **A request without the field behaves exactly as it did before** — for
+English the system prompt is byte-for-byte unchanged.
+
+| | |
+|---|---|
+| Detection | Unicode script ranges (Devanagari, Telugu). A real run of an Indian script wins; a stray character does not. Never an LLM. |
+| Explicit choice | Always beats detection. An unknown code falls back to detection rather than erroring. |
+| Aliases | A small table (`app/language.py`) mapping Hindi/Telugu spellings of products and BIS terms **that exist in the verified knowledge base** to their canonical English. Not a dictionary, not a transliteration engine. |
+| Mixed language | Hinglish / Tanglish work: English product names already survive retrieval, and romanized question words are dropped so they stop diluting the match. |
+| Evidence | Identical in every language — same records, same standard numbers, same record ids, same source URLs, same stored English text. |
+
+The rewrite exists because `retrieval/text.normalize` is ASCII-only, so a pure
+Hindi or Telugu query would otherwise reach retrieval as an empty string. The
+layer sits *before* retrieval; the engine, its scoring and the records are
+untouched.
+
+The model is told to write in the chosen language while reproducing Indian
+Standard numbers, scheme names, rule ids, document names and source URLs
+**exactly as stored, never translated**. It may gloss a document title in the
+user's language beside the original, never instead of it.
+
+**Limits carry across languages unchanged.** If retrieval finds nothing, the
+assistant abstains in the user's language — it never invents a standard to fill
+the gap. Certification journeys, compliance results, OCR text and declarations
+stay canonical: OCR output is raw evidence and is never translated, and product
+identification, the vision path and the inspection pipeline are untouched by
+this layer.
+
+Not covered: the application UI itself is English, and languages beyond these
+three are answered in English.
 
 ### Certification journey
 

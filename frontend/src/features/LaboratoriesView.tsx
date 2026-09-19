@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from "react";
-import { api } from "@/lib/api";
+import { api, type LanguageChoice } from "@/lib/api";
 import { useAsyncTask } from "@/lib/hooks";
 import {
   Button,
@@ -17,6 +17,7 @@ import {
   PhotoFragment,
 } from "@/components/decor";
 import { GroundedAnswer } from "@/components/GroundedAnswer";
+import { LanguagePicker } from "@/components/LanguagePicker";
 import { ErrorNote } from "@/features/StandardsView";
 
 const EXAMPLES = [
@@ -29,12 +30,13 @@ export function LaboratoriesView() {
   const [query, setQuery] = useState("");
   const [standard, setStandard] = useState("");
   const [explain, setExplain] = useState(false);
+  const [language, setLanguage] = useState<LanguageChoice>("auto");
   const task = useAsyncTask(api.laboratorySearch);
 
   function submit(e: FormEvent) {
     e.preventDefault();
     const q = query.trim();
-    if (q) task.run(q, standard.trim(), explain).catch(() => {});
+    if (q) task.run(q, standard.trim(), explain, language).catch(() => {});
   }
 
   const res = task.data;
@@ -91,6 +93,7 @@ export function LaboratoriesView() {
             Explain the evidence with the local model
             <span className="text-ink-faint">(slower)</span>
           </label>
+          <LanguagePicker value={language} onChange={setLanguage} />
           <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
             <span className="kicker mr-1">Try</span>
             {EXAMPLES.map((ex) => (
@@ -99,7 +102,7 @@ export function LaboratoriesView() {
                 type="button"
                 onClick={() => {
                   setQuery(ex);
-                  task.run(ex, "", explain).catch(() => {});
+                  task.run(ex, "", explain, language).catch(() => {});
                 }}
                 className="border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink-soft transition-colors hover:border-ink hover:text-ink"
               >

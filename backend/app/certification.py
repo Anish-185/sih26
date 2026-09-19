@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app import language as lang
 from app.llm import LocalLLM
 from app.product import ProductStandardFinder, ProductStandardOutcome
 from app.rag import _build_context
@@ -151,8 +152,11 @@ class CertificationGuidanceService:
 
     # --------------------------------------------------------------- full guide
 
-    def guide(self, question: str) -> CertificationGuidance:
+    def guide(self, question: str, language: str = lang.AUTO) -> CertificationGuidance:
         question = question.strip()
+        # Milestone 17: language of the explanation only. The deterministic
+        # certification journey, its quotes and its sources stay canonical.
+        answer_language = lang.resolve(question, language)
 
         if not question:
             return CertificationGuidance(
@@ -165,7 +169,7 @@ class CertificationGuidanceService:
                 note="empty question",
             )
 
-        cert_evidence, product_outcome = self.gather(question)
+        cert_evidence, product_outcome = self.gather(lang.normalize_query(question).query)
         product_context = (
             product_outcome.results[0].item.title
             if product_outcome.grounded and product_outcome.results
@@ -209,7 +213,7 @@ certification is mandatory for this specific product, say so explicitly.
 """
 
         answer = self.llm.generate(
-            system_prompt=CERT_SYSTEM_PROMPT,
+            system_prompt=lang.apply(CERT_SYSTEM_PROMPT, answer_language),
             user_prompt=user_prompt,
             temperature=0.1,
         )

@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api } from "@/lib/api";
+import { api, type LanguageChoice } from "@/lib/api";
 import { useAsyncTask } from "@/lib/hooks";
 import {
   Button,
@@ -17,6 +17,7 @@ import {
 } from "@/components/decor";
 import { GroundedAnswer } from "@/components/GroundedAnswer";
 import { CertificationJourney } from "@/components/CertificationJourney";
+import { LanguagePicker } from "@/components/LanguagePicker";
 import { ErrorNote } from "@/features/StandardsView";
 
 const EXAMPLES = [
@@ -29,6 +30,7 @@ export function CertificationView() {
   const [params, setParams] = useSearchParams();
   const [question, setQuestion] = useState("");
   const [product, setProduct] = useState("");
+  const [language, setLanguage] = useState<LanguageChoice>("auto");
   const task = useAsyncTask(api.certificationGuidance);
 
   // Deep link from the Standards page or an inspection: ?standard=IS 302.
@@ -38,14 +40,14 @@ export function CertificationView() {
     if (!deepLink) return;
     setParams({}, { replace: true });
     setQuestion(`What certification applies to ${deepLink}?`);
-    task.run("", "", deepLink, false).catch(() => {});
+    task.run("", "", deepLink, false, language).catch(() => {});
     // Deliberately keyed on the link alone: it is consumed once, on arrival.
   }, [deepLink]);
 
   function submit(e: FormEvent) {
     e.preventDefault();
     const q = question.trim();
-    if (q) task.run(q, product.trim(), "", true).catch(() => {});
+    if (q) task.run(q, product.trim(), "", true, language).catch(() => {});
   }
 
   return (
@@ -86,6 +88,7 @@ export function CertificationView() {
               {task.loading ? <InlineLoading label="Reasoning" /> : "Ask"}
             </Button>
           </div>
+          <LanguagePicker value={language} onChange={setLanguage} />
         </form>
         <div className="flex flex-col gap-1.5 border-t border-line px-5 py-3 sm:px-6">
           <span className="kicker">Examples</span>
@@ -95,7 +98,7 @@ export function CertificationView() {
               type="button"
               onClick={() => {
                 setQuestion(ex);
-                task.run(ex, "", "", true).catch(() => {});
+                task.run(ex, "", "", true, language).catch(() => {});
               }}
               className="text-left text-[12px] text-ink-soft transition-colors hover:text-accent"
             >

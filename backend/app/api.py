@@ -17,6 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app import language as lang
 from app.certification import CertificationGuidanceService
 from app.certification_journey import (
     CertificationJourneyOut,
@@ -159,6 +160,10 @@ class AskRequest(BaseModel):
         default="",
         description="Question about BIS standards or BIS information",
     )
+    language: str = Field(
+        default=lang.AUTO,
+        description='Answer language: "auto" (detect from the query), "en", "hi" or "te"',
+    )
 
 
 class AskResponse(BaseModel):
@@ -167,6 +172,12 @@ class AskResponse(BaseModel):
     grounded: bool
     source_count: int
     sources: list[SourceOut]
+    # Milestone 17: the language the answer is actually written in. Never
+    # "auto" — always the resolved code.
+    language: str = lang.EN
+    # Canonical English terms the query's non-English wording was mapped to for
+    # retrieval. Empty when nothing needed rewriting.
+    matched_concepts: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------
@@ -243,6 +254,10 @@ class CertificationGuidanceRequest(BaseModel):
         default=True,
         description="If false, skip the LLM and return the deterministic journey only",
     )
+    language: str = Field(
+        default=lang.AUTO,
+        description='Answer language: "auto" (detect from the query), "en", "hi" or "te"',
+    )
 
 
 class CertificationGuidanceResponse(BaseModel):
@@ -255,6 +270,7 @@ class CertificationGuidanceResponse(BaseModel):
     sources: list[SourceOut]
     note: str = ""
     journey: CertificationJourneyOut | None = None
+    language: str = lang.EN
 
 
 # ---------------------------------------------------------------------
@@ -274,6 +290,10 @@ class LaboratorySearchRequest(BaseModel):
         default=True,
         description="If false, skip the LLM and return a deterministic summary",
     )
+    language: str = Field(
+        default=lang.AUTO,
+        description='Answer language: "auto" (detect from the query), "en", "hi" or "te"',
+    )
 
 
 class LaboratorySearchResponse(BaseModel):
@@ -285,6 +305,7 @@ class LaboratorySearchResponse(BaseModel):
     source_count: int
     sources: list[SourceOut]
     note: str = ""
+    language: str = lang.EN
 
 
 # ---------------------------------------------------------------------
@@ -422,19 +443,20 @@ def ask_post(
     question = request.question.strip()
 
     if not question:
+        # With no question there is nothing to detect, so an explicit choice is
+        # the only signal; "auto" falls back to English.
+        empty_language = lang.resolve("", request.language)
         return AskResponse(
             question="",
-            answer=(
-                "Please provide a question about BIS standards "
-                "or BIS information."
-            ),
+            answer=lang.empty_question(empty_language),
             grounded=False,
             source_count=0,
             sources=[],
+            language=empty_language,
         )
 
     try:
-        result = get_answerer().ask(question)
+        result = get_answerer().ask(question, language=request.language)
     except LLMError as exc:
         raise HTTPException(
             status_code=503,
@@ -450,6 +472,8 @@ def ask_post(
             _result_to_source(result_item)
             for result_item in result.results
         ],
+        language=result.language,
+        matched_concepts=result.concepts,
     )
 
 
@@ -558,10 +582,14 @@ def certification_guidance_post(
 
     # Milestone 16: the journey is deterministic and is built first, so it is
     # present whether or not the local model is reachable.
+    # Known non-English product terms are rewritten to canonical English so the
+    # deterministic journey finds the same standard it would for the English
+    # question. The journey's own text stays canonical (it quotes BIS records).
     journey = get_certification_journey_service().build(
-        query=combined,
+        query=lang.normalize_query(combined).query,
         standard_number=standard_number,
     )
+    answer_language = lang.resolve(combined, request.language)
 
     if not request.explain:
         return CertificationGuidanceResponse(
@@ -576,10 +604,13 @@ def certification_guidance_post(
             sources=[],
             note="explanation skipped (explain=false)",
             journey=_journey_out(journey),
+            language=answer_language,
         )
 
     try:
-        result = get_certification_service().guide(combined or standard_number)
+        result = get_certification_service().guide(
+            combined or standard_number, language=request.language
+        )
     except LLMError as exc:
         raise HTTPException(
             status_code=503,
@@ -596,6 +627,7 @@ def certification_guidance_post(
         sources=[_result_to_source(item) for item in result.sources],
         note=result.note,
         journey=_journey_out(journey),
+        language=answer_language,
     )
 
 
@@ -628,7 +660,9 @@ def laboratory_search_post(
     combined = f"{query} {standard}".strip()
 
     try:
-        result = get_laboratory_service().search(combined, explain=request.explain)
+        result = get_laboratory_service().search(
+            combined, explain=request.explain, language=request.language
+        )
     except LLMError as exc:
         raise HTTPException(
             status_code=503,
@@ -644,4 +678,5 @@ def laboratory_search_post(
         source_count=len(result.sources),
         sources=[_result_to_source(item) for item in result.sources],
         note=result.note,
+        language=lang.resolve(combined, request.language),
     )
