@@ -18,12 +18,14 @@ import {
 } from "@/components/decor";
 import { GroundedAnswer } from "@/components/GroundedAnswer";
 import { LanguagePicker } from "@/components/LanguagePicker";
+import { LaboratoryResults } from "@/components/LaboratoryResults";
 import { ErrorNote } from "@/features/StandardsView";
 
 const EXAMPLES = [
-  "BIS recognised laboratory for testing steel",
-  "which lab can test IS 1786",
-  "NABL accredited laboratory list",
+  "Where can I test an electric kettle?",
+  "IS 367:1993",
+  "laboratories in Noida",
+  "packaged drinking water testing",
 ];
 
 export function LaboratoriesView() {
@@ -117,6 +119,7 @@ export function LaboratoriesView() {
 
       {res && (
         <>
+          <LaboratoryResults result={res} />
           {res.standard_context && (
             <div className="flex items-center gap-2 text-[12px]">
               <span className="kicker">Standard context</span>

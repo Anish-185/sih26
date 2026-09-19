@@ -37,6 +37,7 @@ from app.api import ReasonOut, WhyOut
 from app.declarations import extract_declarations, has_reliable_text
 from app.escalation import assess as assess_escalation
 from app.hallmark import HallmarkOut, evaluate_hallmark
+from app.lab_registry import LabRegistry, load_laboratories
 from app.certification_journey import (
     CertificationJourneyOut,
     CertificationJourneyService,
@@ -652,6 +653,28 @@ class EscalationOut(BaseModel):
     reasons: list[EscalationReasonOut] = Field(default_factory=list)
 
 
+MAX_INSPECTION_LABS = 10
+
+
+class InspectionLabOut(BaseModel):
+    """One laboratory BIS LIMS lists for this inspection's standard.
+
+    Informational discovery. It is NOT a statement that this laboratory tested
+    this item, and it is not part of the compliance result.
+    """
+
+    lab_name: str
+    osl_code: str | None = None
+    city: str | None = None
+    standard_as_listed: str
+    validity_date: str | None = None
+    validity_status: str
+    source_url: str
+    document_name: str
+    retrieved_on: str
+    why: str
+
+
 class InspectionAnalysisOut(BaseModel):
     inspection_id: str
     created_at: str
@@ -689,6 +712,12 @@ class InspectionAnalysisOut(BaseModel):
                     "retrieved, never a statement that this item or its manufacturer is certified. Null when no "
                     "standard was identified or the journey could not be built.",
     )
+    laboratories: list[InspectionLabOut] = Field(
+        default_factory=list,
+        description="Milestone 18: laboratories BIS LIMS lists for the identified standard. INFORMATIONAL "
+                    "ONLY — it never affects PASS / FAIL / REVIEW, and it is never a statement that any of "
+                    "these laboratories tested this item.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -722,6 +751,7 @@ class InspectionAnalyzer:
         product_finder: ProductStandardFinder | None = None,
         vision: VisionClient | None = None,
         certification: CertificationJourneyService | None = None,
+        lab_registry: LabRegistry | None = None,
     ) -> None:
         self._llm = llm
         self._ocr_engine = ocr_engine
@@ -731,6 +761,8 @@ class InspectionAnalyzer:
         self._vision = vision
         # Milestone 16: certification guidance for the identified standard.
         self._certification_service = certification
+        # Milestone 18: informational laboratory discovery.
+        self._lab_registry = lab_registry
 
     def ocr(self, data: bytes, filename: str, side: str | None = None) -> InstantOcrOut:
         """Instant OCR of one image (see ``ocr_package``)."""
@@ -872,6 +904,11 @@ class InspectionAnalyzer:
             )
             notes.append(f"Downstream pipeline error: {exc}")
 
+        # ---- relevant testing laboratories (Milestone 18) ----
+        # Informational only. Isolated like every other optional stage, and it
+        # is deliberately computed AFTER compliance so it cannot influence it.
+        laboratories = self._laboratories(product.standard_number)
+
         # ---- certification guidance (Milestone 16) ----
         # Deterministic, read-only, and isolated: it explains the route for the
         # standard already identified. A failure here leaves it null and changes
@@ -906,6 +943,7 @@ class InspectionAnalyzer:
             notes=notes,
             inspection_type=inspection_type,
             certification=certification,
+            laboratories=laboratories,
         )
         # Hallmark evidence is read from the OCR regions on its own, so a downstream failure cannot hide it.
         try:
@@ -953,6 +991,32 @@ class InspectionAnalyzer:
 
     _MEDIA_TYPES = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp",
                     "BMP": "image/bmp", "TIFF": "image/tiff", "MPO": "image/jpeg"}
+
+    def _laboratories(self, standard_number: str | None) -> list[InspectionLabOut]:
+        """Laboratories BIS LIMS lists for the identified standard.
+
+        Purely informational: it is read-only, it is computed after the
+        compliance engine has finished, no compliance code reads it, and a
+        failure here returns an empty list rather than affecting any result.
+        """
+        if not standard_number:
+            return []
+        try:
+            registry = self._lab_registry or load_laboratories()
+            out: list[InspectionLabOut] = []
+            for match in registry.for_standard(standard_number)[:MAX_INSPECTION_LABS]:
+                record = match.record
+                status, iso = record.validity()
+                out.append(InspectionLabOut(
+                    lab_name=record.lab_name, osl_code=record.osl_code or None, city=record.city,
+                    standard_as_listed=record.standard_as_listed,
+                    validity_date=iso, validity_status=status,
+                    source_url=record.source_url, document_name=record.document_name,
+                    retrieved_on=record.retrieved_on, why=match.why.summary,
+                ))
+            return out
+        except Exception:  # noqa: BLE001 — discovery never breaks an inspection
+            return []
 
     def _certification(self, standard_number: str | None) -> CertificationJourneyOut | None:
         """Certification guidance for the standard this inspection identified.

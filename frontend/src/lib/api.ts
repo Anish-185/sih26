@@ -222,6 +222,40 @@ export interface CertificationGuidanceResponse {
   language: AnswerLanguage;
 }
 
+/** Milestone 18 — deterministic "Why this laboratory?" Never a quality claim. */
+export interface LabWhy {
+  signals: ("STANDARD_LISTED" | "PRODUCT_LISTED" | "NAME_MATCH" | "CITY_MATCH")[];
+  summary: string;
+}
+
+/** One laboratory as BIS LIMS listed it. A null field is genuinely absent from
+ *  the verified record and must be shown as unavailable, never filled in. */
+export interface LaboratoryRecord {
+  lab_name: string;
+  osl_code: string | null;
+  city: string | null;
+  standard_as_listed: string;
+  product_as_listed: string | null;
+  grade_or_type: string | null;
+  /** Recognition validity as at the snapshot — never "currently valid". */
+  validity_date: string | null;
+  validity_status: "VALID_AT_SNAPSHOT" | "EXPIRED_AT_SNAPSHOT" | "NOT_STATED";
+  remark: string | null;
+  source_url: string;
+  source_organization: string;
+  document_name: string;
+  retrieved_on: string;
+  why: LabWhy;
+}
+
+export interface LaboratoryCoverage {
+  records: number;
+  laboratories: number;
+  standards: number;
+  retrieved_on: string | null;
+  note: string;
+}
+
 export interface LaboratorySearchResponse {
   query: string;
   standard_context: string | null;
@@ -232,6 +266,15 @@ export interface LaboratorySearchResponse {
   sources: EvidenceSource[];
   note: string;
   language: AnswerLanguage;
+  laboratories: LaboratoryRecord[];
+  laboratory_count: number;
+  laboratory_standard: string | null;
+  /** How the standard was established: given, named in the query, or via
+   *  product -> standard retrieval. Null when no standard was established. */
+  laboratory_standard_source: "standard" | "query" | "product" | "text" | null;
+  other_editions: string[];
+  coverage: LaboratoryCoverage | null;
+  no_match_note: string | null;
 }
 
 /** Milestone 17 — assistant languages. "auto" detects from the query text. */
@@ -964,10 +1007,20 @@ export const api = {
     standard = "",
     explain = false,
     language: LanguageChoice = "auto",
+    standardNumber = "",
   ) =>
     request<LaboratorySearchResponse>(
       "/laboratory-search",
-      { method: "POST", body: JSON.stringify({ query, standard, explain, language }) },
+      {
+        method: "POST",
+        body: JSON.stringify({
+          query,
+          standard,
+          explain,
+          language,
+          standard_number: standardNumber,
+        }),
+      },
       explain ? 90_000 : 20_000,
     ),
 

@@ -215,7 +215,61 @@ product**, each with a "Why this result?" built from real matching signals.
 | `POST /inspection/analyze` | image → OCR → declarations → product → verified Indian Standard | only if rules miss |
 | `POST /ask` | grounded BIS Q&A, in English / Hindi / Telugu | yes |
 | `POST /certification-guidance` | certification journey (deterministic) + grounded explanation (`explain=false` skips the model) | optional |
-| `POST /laboratory-search` | BIS recognised-lab directories (`explain=false` skips the model) | optional |
+| `POST /laboratory-search` | testing laboratories for a standard or product (`explain=false` skips the model) | optional |
+
+### Testing laboratories
+
+**MetrIQ identifies laboratories from verified laboratory evidence. It does not
+independently establish a laboratory's current accreditation, scope,
+availability, or operational status.**
+
+`POST /laboratory-search` finds laboratories three ways — by `standard_number`,
+by a question naming a standard, or by a product, which reuses the existing
+`ProductStandardFinder`:
+
+```
+"Where can I test an electric kettle?"
+   -> ProductStandardFinder  ->  IS 367:1993
+   -> laboratories BIS's own LIMS listing records against IS 367:1993
+```
+
+A laboratory is relevant to a standard **only because BIS itself lists it
+there**. Relevance is never inferred from a laboratory's name, its city, or the
+fact that it is a testing laboratory — those are separate, clearly-labelled
+search signals, never a capability claim. If the product → standard step is not
+confident, no standard is claimed and no laboratories are returned.
+
+Every result carries a deterministic **why**: `STANDARD_LISTED`,
+`PRODUCT_LISTED`, `NAME_MATCH` or `CITY_MATCH` — only the signals that actually
+occurred. Results are ordered **alphabetically, not ranked**: MetrIQ has no
+evidence that would justify calling one listed laboratory better, recommended or
+most suitable, so it does not.
+
+**The data** is a dated snapshot of BIS's own Laboratory Information Management
+System ("IS-wise test facilities in BIS / recognised / empanelled laboratories",
+`lims.bis.gov.in`), ingested by `backend/scripts/fetch_lims_laboratories.py`
+into `data/laboratories.json`. The application never calls LIMS at runtime.
+
+| | |
+|---|---|
+| Coverage | 1,205 records · 245 laboratories · 157 standards as listed · 83 cities. 78 of the 97 verified knowledge-base standards have at least one listed laboratory. |
+| Fields | Name, OSL code, city, standard as listed, product as listed, grade/type, recognition validity date, BIS remark — each only when the record holds it. A missing field reads "Not available in the verified MetrIQ record." |
+| Not held | Addresses, phone numbers, emails, accreditation numbers, NABL status, test scope beyond what LIMS prints. MetrIQ never supplies these. |
+| Currentness | Validity is reported as `VALID_AT_SNAPSHOT` / `EXPIRED_AT_SNAPSHOT` / `NOT_STATED` — never "currently valid". Confirm current scope, availability and contact details with the laboratory before arranging testing. |
+| Editions | A different edition is a different standard. BIS lists IS 14543 (2016) and IS 14543 (2024) separately, so their laboratories are never merged — the other edition is reported instead of silently dropped. |
+| No match | "No matching verified laboratory record was found" is a statement about MetrIQ's coverage, **not** about which laboratories exist. |
+
+The optional model explanation receives only the retrieved records and may name
+a laboratory **only** if it is in them. Retrieval happens before the model is
+called; the model never decides which laboratories are relevant.
+
+Laboratory discovery is **informational**. A saved inspection shows the
+laboratories listed for its identified standard, and the PDF report has a
+"Relevant testing laboratories" section — neither affects PASS / FAIL / REVIEW,
+and neither implies any laboratory tested the item.
+
+Multilingual (Milestone 17) works unchanged: Hindi and Telugu laboratory
+questions reach the same standard and the same laboratories as the English one.
 
 ### Multilingual assistant (English · Hindi · Telugu)
 

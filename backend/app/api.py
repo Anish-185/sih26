@@ -17,6 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app import lab_registry
 from app import language as lang
 from app.certification import CertificationGuidanceService
 from app.certification_journey import (
@@ -79,6 +80,9 @@ def get_laboratory_service() -> LaboratorySearchService:
     return LaboratorySearchService(
         search_engine=get_engine(),
         llm=LocalLLM(),
+        # Milestone 18: product -> standard reuses the existing finder, so there
+        # is no second product classifier.
+        product_finder=get_product_finder(),
     )
 
 
@@ -294,6 +298,48 @@ class LaboratorySearchRequest(BaseModel):
         default=lang.AUTO,
         description='Answer language: "auto" (detect from the query), "en", "hi" or "te"',
     )
+    standard_number: str = Field(
+        default="",
+        description="Optional Indian Standard number to find laboratories for directly",
+    )
+
+
+class LabWhyOut(BaseModel):
+    """Deterministic 'Why this laboratory?' — never a quality judgement."""
+
+    signals: list[str]
+    summary: str
+
+
+class LaboratoryRecordOut(BaseModel):
+    """One laboratory as BIS LIMS listed it. Every field is from the record;
+    a value the record does not hold is null, never filled in."""
+
+    lab_name: str
+    osl_code: str | None = None
+    city: str | None = None
+    standard_as_listed: str
+    product_as_listed: str | None = None
+    grade_or_type: str | None = None
+    # Recognition validity AS AT THE SNAPSHOT — never "currently valid".
+    validity_date: str | None = None
+    validity_status: str
+    remark: str | None = None
+    source_url: str
+    source_organization: str
+    document_name: str
+    retrieved_on: str
+    why: LabWhyOut
+
+
+class LaboratoryCoverageOut(BaseModel):
+    """Honest coverage of the laboratory snapshot."""
+
+    records: int
+    laboratories: int
+    standards: int
+    retrieved_on: str | None = None
+    note: str
 
 
 class LaboratorySearchResponse(BaseModel):
@@ -306,6 +352,15 @@ class LaboratorySearchResponse(BaseModel):
     sources: list[SourceOut]
     note: str = ""
     language: str = lang.EN
+    # Milestone 18 — laboratories BIS's own LIMS listing supports. Empty when
+    # nothing matched; never padded.
+    laboratories: list[LaboratoryRecordOut] = Field(default_factory=list)
+    laboratory_count: int = 0
+    laboratory_standard: str | None = None
+    laboratory_standard_source: str | None = None
+    other_editions: list[str] = Field(default_factory=list)
+    coverage: LaboratoryCoverageOut | None = None
+    no_match_note: str | None = None
 
 
 # ---------------------------------------------------------------------
@@ -362,6 +417,39 @@ def _outcome_to_response(
             _result_to_out(result)
             for result in outcome.results
         ],
+    )
+
+
+def _laboratory_out(match) -> LaboratoryRecordOut:
+    record = match.record
+    status, iso = record.validity()
+    return LaboratoryRecordOut(
+        lab_name=record.lab_name,
+        osl_code=record.osl_code or None,
+        city=record.city,
+        standard_as_listed=record.standard_as_listed,
+        product_as_listed=record.product_as_listed or None,
+        grade_or_type=record.grade_or_type,
+        validity_date=iso,
+        validity_status=status,
+        remark=record.remark,
+        source_url=record.source_url,
+        source_organization=record.source_organization,
+        document_name=record.document_name,
+        retrieved_on=record.retrieved_on,
+        why=LabWhyOut(signals=match.why.signals, summary=match.why.summary),
+    )
+
+
+def _laboratory_coverage() -> LaboratoryCoverageOut:
+    registry = get_laboratory_service().registry
+    numbers = registry.coverage()
+    return LaboratoryCoverageOut(
+        records=numbers["records"],
+        laboratories=numbers["laboratories"],
+        standards=numbers["standards"],
+        retrieved_on=numbers["retrieved_on"],
+        note=lab_registry.SNAPSHOT_NOTE,
     )
 
 
@@ -644,8 +732,11 @@ def laboratory_search_post(
 ) -> LaboratorySearchResponse:
     query = request.query.strip()
     standard = request.standard.strip()
+    standard_number = request.standard_number.strip()
 
-    if not query:
+    # A standard number on its own is a complete request: "which laboratories
+    # are listed for IS 367:1993?" needs no prose query.
+    if not query and not standard_number:
         return LaboratorySearchResponse(
             query="",
             standard_context=None,
@@ -657,11 +748,14 @@ def laboratory_search_post(
             note="empty query",
         )
 
-    combined = f"{query} {standard}".strip()
+    combined = f"{query} {standard}".strip() or standard_number
 
     try:
         result = get_laboratory_service().search(
-            combined, explain=request.explain, language=request.language
+            combined,
+            explain=request.explain,
+            language=request.language,
+            standard_number=standard_number or None,
         )
     except LLMError as exc:
         raise HTTPException(
@@ -679,4 +773,13 @@ def laboratory_search_post(
         sources=[_result_to_source(item) for item in result.sources],
         note=result.note,
         language=lang.resolve(combined, request.language),
+        laboratories=[_laboratory_out(match) for match in result.laboratories],
+        laboratory_count=len(result.laboratories),
+        laboratory_standard=result.laboratory_standard,
+        laboratory_standard_source=result.laboratory_standard_source,
+        other_editions=get_laboratory_service().registry.other_editions(
+            result.laboratory_standard
+        ),
+        coverage=_laboratory_coverage(),
+        no_match_note=None if result.laboratories else lab_registry.NO_MATCH,
     )

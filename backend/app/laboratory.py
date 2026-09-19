@@ -1,10 +1,20 @@
-"""BIS-recognized laboratory search (Phase 7).
+"""BIS testing laboratory search (Phase 7, extended in Milestone 18).
 
-The curated knowledge base does NOT contain individual laboratory records
-(names, addresses, recognition status, NABL numbers, IS-wise testing scope).
-What it holds is verified BIS information about the Laboratory Recognition
-Scheme, where BIS publishes its recognised/empanelled-laboratory lists, and the
-LIMS portal for IS-wise test facilities.
+Two kinds of evidence, kept separate:
+
+  1. BIS *guidance* — the `laboratories` / `testing` knowledge records: the
+     Laboratory Recognition Scheme, where BIS publishes its lists, the LIMS
+     portal. This is prose, retrieved by the Phase 3 SearchEngine. (Phase 7.)
+  2. BIS *laboratory records* — a verified snapshot of BIS's own LIMS "IS-wise
+     test facilities" listing (`app/lab_registry.py`). This is what makes
+     standard -> laboratory real: a laboratory is relevant to a standard
+     because BIS ITSELF LISTS IT there, never because of its name or city.
+     (Milestone 18.)
+
+The product -> standard step reuses the existing ProductStandardFinder; there is
+no second product classifier. If that mapping is not confident, the laboratory
+lookup does not proceed as if it were — it simply returns no standard-backed
+laboratories.
 
 So this service:
 
@@ -13,19 +23,28 @@ So this service:
   2. identifies an Indian Standard / product context if the query names one,
   3. checks the evidence is strong enough to say anything useful,
   4. optionally asks the local LLM to explain ONLY that evidence,
-  5. returns a structured result pointing to BIS's official laboratory
-     directories.
+  5. returns a structured result: the matched laboratory records (when any),
+     the BIS guidance evidence, and BIS's official laboratory directories.
 
-It never names an individual laboratory, and it abstains rather than fabricate
-laboratory data when no relevant evidence is retrieved.
+The LLM never decides which laboratories are relevant — retrieval does, before
+the model is called, and the model may only name laboratories that are already
+in its context. When nothing matches, the service says so rather than fabricate.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 
 from app import language as lang
+from app.lab_registry import (
+    CURRENTNESS_NOTE,
+    SNAPSHOT_NOTE,
+    LabMatch,
+    LabRegistry,
+    load_laboratories,
+)
 from app.llm import LocalLLM
+from app.product import ProductStandardFinder
 from app.rag import _build_context
 from app.retrieval import RetrievalResult, SearchEngine
 from app.retrieval.text import find_standard_numbers, standard_number_key
@@ -59,16 +78,24 @@ Rules:
 1. Use ONLY the BIS evidence supplied by the application. Do not use pretrained
    knowledge as evidence.
 2. Do NOT invent laboratory names, addresses, cities, contact details, BIS
-   recognition or accreditation status, NABL numbers, supported standards, or
-   testing scope. The supplied evidence does NOT name individual laboratories,
-   so you must not name any laboratory.
+   recognition or accreditation status, NABL numbers, supported standards,
+   testing scope, validity dates or operational status.
+   You may name a laboratory ONLY if it appears in the MATCHED LABORATORY
+   RECORDS section of the supplied evidence, and only with the details given
+   there. Never add a laboratory that is not in that section, and never say a
+   laboratory is accredited, approved, currently operating, or best/recommended
+   — the evidence establishes only that BIS's LIMS listing lists it against the
+   stated Indian Standard, as at the snapshot date.
+   If no laboratory records are supplied, name no laboratory at all.
 3. You may explain, only as far as the evidence states, that BIS operates a
    Laboratory Recognition Scheme, where BIS publishes its recognised /
    empanelled-laboratory lists, and that the LIMS portal (lims.bis.gov.in)
    gives IS-wise test facilities and testing charges.
 4. You explain the evidence. You do NOT make recognition or accreditation
-   determinations.
-5. Be concise and directly address the question.
+   determinations, and you do not rank or recommend laboratories.
+5. If the supplied evidence does not answer the question, say that the
+   available verified evidence is insufficient. Do not fill the gap.
+6. Be concise and directly address the question.
 """
 
 
@@ -83,6 +110,14 @@ class LaboratorySearch:
     confidence: str
     sources: list[RetrievalResult]
     note: str = ""
+    # Milestone 18: laboratories BIS's own LIMS listing supports. Empty when
+    # nothing matched — never padded to look fuller.
+    laboratories: list[LabMatch] = dataclass_field(default_factory=list)
+    # The standard the laboratories were matched on, when one was established.
+    laboratory_standard: str | None = None
+    # How that standard was established: "query" (the user named it),
+    # "product" (product -> standard retrieval), or None.
+    laboratory_standard_source: str | None = None
 
 
 def _beyond_category_hint(result: RetrievalResult) -> bool:
@@ -101,14 +136,63 @@ def _dedupe(results: list[RetrievalResult]) -> list[RetrievalResult]:
     return out
 
 
-def _deterministic_summary(sources: list[RetrievalResult]) -> str:
-    """A plain, no-LLM answer built only from retrieved evidence titles."""
-    lines = [
-        "Based on official BIS information, the relevant guidance is:",
-        *(f"- {r.item.title}" for r in sources),
-        "",
-        NO_LAB_RECORDS_NOTE,
-    ]
+def _matched_note(registry: LabRegistry) -> str:
+    """What the matched records do and do not establish."""
+    retrieved = registry.source.get("retrieved_on") or "an earlier date"
+    return (
+        f"These laboratories come from a snapshot of BIS's own LIMS IS-wise test-facility "
+        f"listing (lims.bis.gov.in) taken on {retrieved}. For the complete and current picture, "
+        f"use the BIS LIMS portal and BIS's official recognised / empanelled laboratory lists. "
+        f"{SNAPSHOT_NOTE} {CURRENTNESS_NOTE}"
+    )
+
+
+def _deterministic_summary(
+    sources: list[RetrievalResult],
+    laboratories: list[LabMatch] | None = None,
+    standard: str | None = None,
+) -> str:
+    """A plain, no-LLM answer built only from retrieved evidence."""
+    lines: list[str] = []
+    laboratories = laboratories or []
+    if laboratories:
+        head = (f"BIS's LIMS listing records {len(laboratories)} laboratory record(s) for "
+                f"{standard}:" if standard
+                else f"{len(laboratories)} matching laboratory record(s) were found:")
+        lines.append(head)
+        lines.extend(f"- {m.record.lab_name}" for m in laboratories[:10])
+        if len(laboratories) > 10:
+            lines.append(f"- … and {len(laboratories) - 10} more in the full result.")
+        lines.append("")
+    if sources:
+        lines.append("Related official BIS guidance:")
+        lines.extend(f"- {r.item.title}" for r in sources)
+        lines.append("")
+    lines.append(NO_LAB_RECORDS_NOTE if not laboratories else f"{SNAPSHOT_NOTE} {CURRENTNESS_NOTE}")
+    return "\n".join(lines)
+
+
+def _laboratory_context(laboratories: list[LabMatch]) -> str:
+    """The matched records, as the ONLY laboratories the model may name."""
+    if not laboratories:
+        return (
+            "\nMATCHED LABORATORY RECORDS:\n(none — no verified laboratory record matched "
+            "this query, so you must not name any laboratory)\n"
+        )
+    lines = ["\nMATCHED LABORATORY RECORDS (the only laboratories you may name):"]
+    for match in laboratories[:15]:
+        record = match.record
+        status, iso = record.validity()
+        lines.append(
+            f"- NAME: {record.lab_name}\n"
+            f"  OSL CODE: {record.osl_code or 'not stated'}\n"
+            f"  CITY: {record.city or 'not stated in the record'}\n"
+            f"  LISTED FOR: {record.standard_as_listed} — {record.product_as_listed}\n"
+            f"  RECOGNITION VALID UNTIL: {iso or 'not stated'} ({status}, as at the snapshot)\n"
+            f"  BIS REMARK: {record.remark or 'none'}"
+        )
+    lines.append("(These are BIS LIMS listings as at the snapshot date. They do not establish "
+                 "accreditation, current scope, availability or operational status.)\n")
     return "\n".join(lines)
 
 
@@ -121,11 +205,59 @@ class LaboratorySearchService:
         llm: LocalLLM,
         retrieval_limit: int = 10,
         max_sources: int = 6,
+        registry: LabRegistry | None = None,
+        product_finder: ProductStandardFinder | None = None,
+        max_laboratories: int = 25,
     ) -> None:
         self.search_engine = search_engine
         self.llm = llm
         self.retrieval_limit = retrieval_limit
         self.max_sources = max_sources
+        # Milestone 18. Both optional: without them this service behaves exactly
+        # as it did in Phase 7, which is what the Phase 7 tests assert.
+        self.registry = registry if registry is not None else load_laboratories()
+        self.product_finder = product_finder
+        self.max_laboratories = max_laboratories
+
+    # ------------------------------------------------ laboratories (no LLM)
+
+    def find_laboratories(
+        self, query: str, standard_number: str | None = None
+    ) -> tuple[list[LabMatch], str | None, str | None]:
+        """(matches, standard, how the standard was established). Deterministic.
+
+        Order of evidence, strongest first:
+          1. a standard given by the caller or named in the query,
+          2. product -> standard, via the EXISTING ProductStandardFinder, and
+             only when that retrieval is confident — an uncertain product is
+             not carried forward as if it were certain,
+          3. a plain laboratory-name / city / product-text lookup.
+        """
+        if standard_number:
+            matches = self.registry.for_standard(standard_number)
+            if matches:
+                return matches[: self.max_laboratories], standard_number, "standard"
+
+        named = [value for value in find_standard_numbers(query)]
+        if named:
+            matches = self.registry.for_standard(query)
+            if matches:
+                return matches[: self.max_laboratories], matches[0].matched_standard, "query"
+
+        if self.product_finder is not None:
+            outcome = self.product_finder.find(query, limit=3)
+            # Only a confident product -> standard mapping may drive a
+            # laboratory claim. Anything weaker is left alone.
+            if outcome.grounded and outcome.results:
+                top = outcome.results[0]
+                if top.confidence in {"medium", "high"} and top.item.standard_number:
+                    matches = self.registry.for_standard(top.item.standard_number)
+                    if matches:
+                        return (matches[: self.max_laboratories],
+                                top.item.standard_number, "product")
+
+        matches = self.registry.search(query)
+        return matches[: self.max_laboratories], None, ("text" if matches else None)
 
     # ---------------------------------------------------------- evidence (no LLM)
 
@@ -178,7 +310,8 @@ class LaboratorySearchService:
     # --------------------------------------------------------------- full search
 
     def search(self, query: str, explain: bool = True,
-               language: str = lang.AUTO) -> LaboratorySearch:
+               language: str = lang.AUTO,
+               standard_number: str | None = None) -> LaboratorySearch:
         query = query.strip()
         # Milestone 17: language of the answer only. Retrieval sees known
         # non-English terms rewritten to canonical English; the evidence,
@@ -196,9 +329,18 @@ class LaboratorySearchService:
                 note="empty query",
             )
 
-        lab_evidence, standard_context = self.gather(lang.normalize_query(query).query)
+        retrieval_query = lang.normalize_query(query).query
+        lab_evidence, standard_context = self.gather(retrieval_query)
 
-        if not self._is_sufficient(lab_evidence):
+        # Milestone 18: deterministic laboratory records, found BEFORE any model
+        # call. The LLM never decides which laboratories are relevant.
+        laboratories, lab_standard, lab_source = self.find_laboratories(
+            retrieval_query, standard_number
+        )
+
+        # Matched laboratory records are evidence in their own right: a query
+        # that finds them is grounded even when the prose guidance is thin.
+        if not laboratories and not self._is_sufficient(lab_evidence):
             return LaboratorySearch(
                 query=query,
                 standard_context=standard_context,
@@ -216,6 +358,7 @@ class LaboratorySearchService:
 
         if explain:
             context = _build_context(sources)
+            records = _laboratory_context(laboratories)
             user_prompt = f"""Answer the user's BIS laboratory question using
 ONLY the BIS evidence below.
 
@@ -224,9 +367,11 @@ USER QUESTION:
 
 BIS EVIDENCE:
 {context}
-
-Give a concise, grounded answer. Do not name any individual laboratory; the
-evidence does not contain laboratory names.
+{records}
+Give a concise, grounded answer. Name a laboratory only if it appears in the
+MATCHED LABORATORY RECORDS section above, and only with the details given there.
+Do not rank or recommend laboratories, and do not state accreditation or current
+operational status.
 """
             answer = self.llm.generate(
                 system_prompt=lang.apply(LAB_SYSTEM_PROMPT, answer_language),
@@ -234,14 +379,17 @@ evidence does not contain laboratory names.
                 temperature=0.1,
             )
         else:
-            answer = _deterministic_summary(sources)
+            answer = _deterministic_summary(sources, laboratories, lab_standard)
 
         return LaboratorySearch(
             query=query,
             standard_context=standard_context,
             answer=answer,
             grounded=True,
-            confidence=lab_evidence[0].confidence,
+            confidence=lab_evidence[0].confidence if lab_evidence else "medium",
             sources=sources,
-            note=NO_LAB_RECORDS_NOTE,
+            note=NO_LAB_RECORDS_NOTE if not laboratories else _matched_note(self.registry),
+            laboratories=laboratories,
+            laboratory_standard=lab_standard,
+            laboratory_standard_source=lab_source,
         )

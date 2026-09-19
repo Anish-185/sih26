@@ -79,8 +79,15 @@ def test_grounded_laboratory_search() -> None:
     check("lab query: every source carries provenance",
           all(s.item.source_url for s in out.sources))
     check("lab query: note points to LIMS", "lims.bis.gov.in" in out.note)
+    # Milestone 18: MetrIQ now holds verified laboratory records, so naming is
+    # allowed — but ONLY from the records the application supplied. The rule the
+    # prompt must carry is therefore "nothing outside the supplied records",
+    # which is the same guarantee expressed against a bigger evidence base.
+    system = " ".join(llm.calls[0]["system"].split())
     check("lab query: system prompt forbids inventing lab names",
-          "must not name any laboratory" in llm.calls[0]["system"])
+          "Do NOT invent laboratory names" in system)
+    check("lab query: system prompt allows naming only supplied records",
+          "ONLY if it appears in the MATCHED LABORATORY RECORDS" in system)
 
 
 def test_is_wise_context() -> None:
@@ -99,7 +106,7 @@ def test_explain_false_skips_llm() -> None:
     check("explain=False: grounded", out.grounded)
     check("explain=False: LLM NOT called", llm.calls == [])
     check("explain=False: answer built from evidence titles",
-          "Based on official BIS information" in out.answer)
+          "Related official BIS guidance:" in out.answer)
     check("explain=False: still notes no lab records", "lims.bis.gov.in" in out.answer)
 
 

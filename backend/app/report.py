@@ -7,7 +7,8 @@ and never writes anything: every value comes from the stored record, and a value
 that is not there is reported as not established.
 
 Sections: header · inspection summary · package photos · OCR evidence ·
-declarations · BIS standard evidence · certification guidance · Legal Metrology evidence ·
+declarations · BIS standard evidence · certification guidance · relevant testing laboratories ·
+Legal Metrology evidence ·
 compliance results · automated system result · officer review · final outcome · evidence
 and sources. The system result and the officer's decision are always shown
 separately.
@@ -561,6 +562,42 @@ def _certification(d: _Doc, an: dict) -> list:
     return out
 
 
+def _laboratories(d: _Doc, an: dict) -> list:
+    """Milestone 18: laboratories BIS LIMS lists for this inspection's standard.
+
+    Informational discovery, stored with the record. It is NOT a test result,
+    NOT part of the compliance decision, and NOT a statement that any of these
+    laboratories tested this item — the lead says so explicitly.
+    """
+    labs = an.get("laboratories") or []
+    if not labs:
+        return []
+    out = d.section(0, "Relevant testing laboratories", "Laboratories that BIS's own LIMS listing "
+                    "records against the Indian Standard identified for this package. This is "
+                    "discovery information only: none of these laboratories tested this item, none of "
+                    "this formed part of the compliance result, and MetrIQ does not establish any "
+                    "laboratory's current accreditation, scope, availability or operational status.")
+    rows = []
+    for lab in labs:
+        validity = _t(lab.get("validity_date") or "Not stated")
+        if lab.get("validity_status") == "EXPIRED_AT_SNAPSHOT":
+            validity += " <font color='#8a6200'>(had passed at snapshot)</font>"
+        rows.append([
+            _t(lab.get("lab_name")),
+            _t(lab.get("city") or "Not stated in the record"),
+            f"<font name='Mono'>{_t(lab.get('standard_as_listed'))}</font>",
+            validity,
+        ])
+    out.append(d.table(["Laboratory", "City", "Listed for", "Recognition valid until"], rows,
+                       [CONTENT_W - 96 * mm, 30 * mm, 32 * mm, 34 * mm]))
+    first = labs[0]
+    out.append(d.p(f"Source: {_t(first.get('document_name'))} · retrieved "
+                   f"{_t(first.get('retrieved_on'))} · {_t(first.get('source_url'))}", "faint"))
+    out.append(d.p("Listed alphabetically, not ranked. Confirm current scope, availability and "
+                   "contact details with the laboratory before arranging testing.", "faint"))
+    return out
+
+
 def _legal_metrology(d: _Doc, an: dict) -> list:
     pl = an["package_label"]
     if pl.get("scope_status") == "NOT_APPLIED":
@@ -917,6 +954,7 @@ def build_story(record: dict, images: dict[int, bytes], generated_at: datetime) 
     story += _declarations(d, an)
     story += _bis(d, record, an)
     story += _certification(d, an)
+    story += _laboratories(d, an)
     story += _legal_metrology(d, an)
     story += _hallmark(d, an)
     story += _vision(d, an)

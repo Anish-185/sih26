@@ -597,7 +597,8 @@ sih26/
       product.py       # Phase 5: Product -> Standard discovery + Phase 9 "Why this result?"
       certification.py # Phase 6: BIS certification guidance (retrieval + grounded LLM answer)
       certification_journey.py # Milestone 16: deterministic product -> standard -> scheme -> next steps
-      laboratory.py    # Phase 7: BIS-recognized laboratory search
+      laboratory.py    # Phase 7 + M18: laboratory search (guidance + verified lab records)
+      lab_registry.py  # Milestone 18: verified BIS LIMS laboratory snapshot + deterministic lookup
       ocr.py           # Phase 13: local OCR engine wrapper (rapidocr-onnxruntime)
       inspection.py    # InspectionAnalyzer + response models (ocr / analyze)
       inspection_api.py# POST /inspection/ocr (Instant OCR) + /inspection/analyze; one package = `image` or `images`+`sides`
@@ -627,13 +628,15 @@ sih26/
     migrations/            # Alembic migrations (0001_inspection_records, 0002_escalation)
     scripts/
       check_knowledge.py   # CLI: validate the knowledge base
+      fetch_lims_laboratories.py # M18: one-off BIS LIMS ingestion -> data/laboratories.json
     tests/                 # plain-Python runners: `./.venv/bin/python tests/<file>`
       test_knowledge.py    # KB schema + loader (broken-KB fixtures)
       test_retrieval.py    # retrieval ranking / abstention + /search API
       test_product.py      # Product -> Standard
       test_why_this_result.py # deterministic why-this-result
       test_certification.py # certification guidance
-      test_laboratory.py   # laboratory search
+      test_laboratory.py   # laboratory search (Phase 7)
+      test_laboratory_intelligence.py # M18: lab snapshot, standard->lab, why, no fabrication
       test_hallmarking.py  # hallmarking / HUID (via /ask)
       test_rag.py          # grounded RAG pipeline + /ask (fake LLM, 503 path)
       test_multilingual.py # Milestone 17: detection, aliases, same evidence in every language
@@ -799,3 +802,62 @@ not part of this layer. An unknown product abstains in the user's language and n
 standard. Tests: `test_multilingual.py` (120 checks, every LLM call stubbed — no quota spent).
 Full suite 245 passed. One live OpenRouter call validated the Hindi clause end to end: natural
 Hindi prose with `IS 367:1993` and the English document title preserved verbatim.
+
+
+Milestone 18 (testing laboratory intelligence): **MetrIQ identifies laboratories from verified
+laboratory evidence. It does not independently establish a laboratory's current accreditation,
+scope, availability, or operational status.**
+
+What existed before: `app/laboratory.py` retrieved BIS *guidance* prose (the Laboratory Recognition
+Scheme, where BIS publishes its lists, the LIMS portal) and deliberately **named no laboratory,
+because the knowledge base held none** — all 8 `laboratories`/`testing` records are informational.
+Milestone 18 fixes the data gap rather than the wording.
+
+**The data is real and official.** `scripts/fetch_lims_laboratories.py` (a BUILD-TIME tool, stdlib
+only — `urllib` + `html.parser`, no new dependency, no scraping framework) ingests BIS's own
+Laboratory Information Management System listing "IS-wise test facilities in BIS / recognised /
+empanelled laboratories" (`lims.bis.gov.in/home/search_is_number/`, public, no login) into
+`data/laboratories.json`. **The application never calls LIMS at runtime** — it reads the snapshot.
+Coverage, measured: **1,205 records · 245 laboratories · 157 standards as listed · 83 cities**;
+**78 of 97** verified KB standards have at least one listed laboratory, 19 have none, and that is
+reported rather than padded. Recorded verbatim when present: lab name, OSL code, city, standard as
+listed, product as listed, grade/type, recognition validity date, BIS remark. NOT recorded because
+LIMS does not print it: address, phone, email, accreditation number, NABL status. Testing charges
+are deliberately skipped (they change often and are not needed to find a laboratory).
+
+`app/lab_registry.py` is the deterministic lookup. **A standard -> laboratory relationship exists
+ONLY because BIS lists it.** Name, city and "it is a testing laboratory" never establish
+capability; they are separate signals that say exactly what they are. Its `StandardKey` is
+part/section/edition-aware on purpose — the retrieval layer's `standard_number_key` collapses
+`IS 302 (Part 2/Sec 3)` and `(Part 2/Sec 201)` to the same key, which would make an electric-iron
+laboratory look like a kettle laboratory. A different EDITION is a different standard, so
+IS 14543 (2016)'s 3 laboratories never merge with IS 14543 (2024)'s 27 — `other_editions()`
+reports the split instead of hiding it. **No ranking:** ordering is alphabetical and the UI says
+so; "best", "recommended", "most suitable" appear nowhere (tested). Validity is
+`VALID_AT_SNAPSHOT` / `EXPIRED_AT_SNAPSHOT` / `NOT_STATED` — never "currently valid". A missing
+field reads "Not available in the verified MetrIQ record.", never filled in. "No matching verified
+laboratory record was found" is stated as a fact about MetrIQ's coverage, **not** about which
+laboratories exist.
+
+`app/laboratory.py` extends Phase 7 rather than duplicating it: `find_laboratories()` tries a
+given/named standard, then **product -> standard via the EXISTING `ProductStandardFinder`** (no
+second classifier; an unconfident mapping is NOT carried forward), then a name/city/product text
+lookup. Retrieval finishes **before** any model call, so the LLM never decides relevance; the
+prompt now allows naming a laboratory **only** from the supplied `MATCHED LABORATORY RECORDS`
+block and forbids inventing accreditation, contacts, status or standards, and forbids ranking.
+**API** (extended, not duplicated): `POST /laboratory-search` gains `standard_number` and returns
+`laboratories[]` (each with a deterministic `why`: `STANDARD_LISTED` / `PRODUCT_LISTED` /
+`NAME_MATCH` / `CITY_MATCH`), `laboratory_standard`, `laboratory_standard_source`,
+`other_editions`, `coverage` and `no_match_note`. A pre-existing request shape is unaffected.
+**Inspection/report:** `InspectionAnalysisOut.laboratories` and a "Relevant testing laboratories"
+report section, both INFORMATIONAL — computed after compliance, never read by it (a test asserts
+`compliance.py`, `package_label.py`, `escalation.py`, `completeness.py` and `declarations.py` do
+not import `lab_registry`, and that results are byte-identical with and without the registry), and
+both state that no listed laboratory tested the item. **Frontend:** `components/LaboratoryResults.tsx`
+in the existing `LaboratoriesView` — no redesign. **M17 unchanged:** Hindi and Telugu laboratory
+questions reach the same standard and the same laboratories as English (tested live and in CI).
+One real bug found and fixed during this milestone: single-word substring matching made "Tell me a
+joke" match "InterSTELLar Testing Centre" — token matching is now word-boundary. Tests:
+`test_laboratory_intelligence.py` (132 checks, all LLM calls stubbed — no quota spent); three
+Phase 7 assertions in `test_laboratory.py` updated where behaviour legitimately changed. Full
+suite 258 passed.
