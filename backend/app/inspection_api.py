@@ -44,7 +44,7 @@ from app.inspection import (
     StandardCoverageOut,
 )
 from app.llm import LocalLLM
-from app.vision import QwenVision
+from app.vision import VisionClient
 from app.requirements import (
     coverage_by_standard,
     coverage_matrix,
@@ -71,9 +71,9 @@ def get_analyzer() -> InspectionAnalyzer:
 
 
 @lru_cache(maxsize=1)
-def get_vision() -> QwenVision:
+def get_vision() -> VisionClient:
     """One client per process, so its free-tier counter and image cache are shared."""
-    return QwenVision()
+    return VisionClient()
 
 
 @lru_cache(maxsize=1)

@@ -24,7 +24,7 @@ Configuration — a SEPARATE key from the DeepSeek copilot, so the two quotas an
 the two failure modes stay independent:
 
     OPENROUTER_VISION_API_KEY   required; server-side only, never sent to a browser
-    VISION_MODEL               default "qwen/qwen3.8-27b:free"
+    VISION_MODEL               default "inclusionai/ling-3.0-flash-vl:free"
     VISION_BASE_URL            default the shared OpenRouter base URL
     VISION_TIMEOUT             seconds, default 60
     VISION_MAX_IMAGES          images per inspection, default 2 (free-tier guard)
@@ -49,7 +49,7 @@ import httpx
 
 from app.openrouter import CopilotUnavailable, DEFAULT_BASE_URL, UsageLimiter, _status_code, load_env_file
 
-DEFAULT_VISION_MODEL = "qwen/qwen3.8-27b:free"
+DEFAULT_VISION_MODEL = "inclusionai/ling-3.0-flash-vl:free"
 DEFAULT_TIMEOUT = 60.0
 DEFAULT_MAX_IMAGES = 2
 DEFAULT_DAILY_LIMIT = 40
@@ -271,7 +271,7 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
-class QwenVision:
+class VisionClient:
     """OpenRouter multimodal client for the configured vision model.
 
     Its own API key, its own budget and its own failure handling, so nothing here
@@ -394,7 +394,7 @@ class QwenVision:
             ],
             "temperature": 0.0,
             "max_tokens": 600,
-            # Qwen3.8 reasons by default; without this it can spend the whole
+            # Ling reasons by default; without this it can spend the whole
             # budget thinking and return empty content (the DeepSeek lesson).
             "reasoning": {"enabled": False},
         }

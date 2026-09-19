@@ -53,7 +53,7 @@ from app.vision import (  # noqa: E402
     DEFAULT_VISION_MODEL,
     OK,
     UNAVAILABLE,
-    QwenVision,
+    VisionClient,
     VisionObservation,
     VisionUnavailable,
     parse_observation,
@@ -179,10 +179,10 @@ def with_fake_post(fake):
     return original
 
 
-def client(**kw) -> QwenVision:
+def client(**kw) -> VisionClient:
     kw.setdefault("api_key", "sk-or-v1-vision-test-key")
     kw.setdefault("limiter", UsageLimiter(50, 50))
-    return QwenVision(**kw)
+    return VisionClient(**kw)
 
 
 # ------------------------------------------------------- 1-4  configuration
@@ -195,11 +195,11 @@ def test_vision_is_configured_separately() -> None:
         os.environ.pop("VISION_MODEL", None)
         v = client()
         check("default vision model is the one configured for this project",
-              v.model == "qwen/qwen3.8-27b:free", v.model)
-        check("DEFAULT_VISION_MODEL constant matches", DEFAULT_VISION_MODEL == "qwen/qwen3.8-27b:free")
+              v.model == "inclusionai/ling-3.0-flash-vl:free", v.model)
+        check("DEFAULT_VISION_MODEL constant matches", DEFAULT_VISION_MODEL == "inclusionai/ling-3.0-flash-vl:free")
 
         os.environ["VISION_MODEL"] = "some-other/vision:free"
-        check("the vision model is configurable", QwenVision(api_key="k").model == "some-other/vision:free")
+        check("the vision model is configurable", VisionClient(api_key="k").model == "some-other/vision:free")
         os.environ.pop("VISION_MODEL", None)
 
         # The two services must not share a key variable.
@@ -213,7 +213,7 @@ def test_vision_is_configured_separately() -> None:
 
         original = with_fake_post(fake_post)
         try:
-            QwenVision(limiter=UsageLimiter(5, 5)).observe("IMG-1", "FRONT", photo(W_KETTLE), "image/png")
+            VisionClient(limiter=UsageLimiter(5, 5)).observe("IMG-1", "FRONT", photo(W_KETTLE), "image/png")
         finally:
             vision_module.httpx.post = original
         check("vision authenticates with the VISION key, never the copilot key",
@@ -233,11 +233,11 @@ def test_vision_is_configured_separately() -> None:
 
 def test_no_key_is_ever_exposed() -> None:
     print("\nthe vision key stays server-side")
-    v = QwenVision(api_key="sk-or-v1-supersecret-vision")
+    v = VisionClient(api_key="sk-or-v1-supersecret-vision")
     blob = json.dumps(v.status())
     check("status() carries no key", "sk-or" not in blob and "supersecret" not in blob, blob)
     check("no public api_key attribute", not hasattr(v, "api_key"))
-    check("an unconfigured client says so", QwenVision(api_key="").configured is False)
+    check("an unconfigured client says so", VisionClient(api_key="").configured is False)
     src = Path("app/vision.py").read_text()
     check("the adapter never logs or prints", "print(" not in src and "logging" not in src)
     frontend = Path(__file__).resolve().parents[2] / "frontend" / "src"
@@ -422,7 +422,7 @@ def test_quota_is_protected() -> None:
           and second.reason_code == "DAILY_LIMIT", second.reason_code)
     check("a refused request never reaches the network", len(calls) == 1, str(len(calls)))
 
-    unconfigured = QwenVision(api_key="")
+    unconfigured = VisionClient(api_key="")
     calls.clear()
     original = with_fake_post(fake_post)
     try:
@@ -538,7 +538,7 @@ def test_image_prompt_injection() -> None:
 
 
 class StubVision:
-    """Stands in for QwenVision. Spends nothing; returns scripted observations."""
+    """Stands in for VisionClient. Spends nothing; returns scripted observations."""
 
     def __init__(self, observations, configured=True, model=DEFAULT_VISION_MODEL, max_images=2):
         self._observations = observations

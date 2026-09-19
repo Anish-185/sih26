@@ -416,7 +416,7 @@ outages are independent:
 ```bash
 # backend/.env  (gitignored — never commit it, never put it in the frontend)
 OPENROUTER_VISION_API_KEY=sk-or-v1-...     # NOT the same as OPENROUTER_API_KEY
-VISION_MODEL=qwen/qwen3.8-27b:free
+VISION_MODEL=inclusionai/ling-3.0-flash-vl:free
 ```
 
 Optional: `VISION_BASE_URL`, `VISION_TIMEOUT`, and the free-tier guards

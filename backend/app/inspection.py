@@ -37,7 +37,7 @@ from app.api import ReasonOut, WhyOut
 from app.declarations import extract_declarations, has_reliable_text
 from app.escalation import assess as assess_escalation
 from app.hallmark import HallmarkOut, evaluate_hallmark
-from app.vision import QwenVision, VisionObservation
+from app.vision import VisionClient, VisionObservation
 from app.vision import unavailable as vision_unavailable
 from app.llm import LocalLLM
 from app.product import ProductStandardFinder
@@ -709,7 +709,7 @@ class InspectionAnalyzer:
         llm: LocalLLM | None = None,
         ocr_engine: OcrEngine = run_ocr,
         product_finder: ProductStandardFinder | None = None,
-        vision: QwenVision | None = None,
+        vision: VisionClient | None = None,
     ) -> None:
         self._llm = llm
         self._ocr_engine = ocr_engine

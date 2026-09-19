@@ -533,12 +533,12 @@ can grow without rewriting tests.
 
 Milestone 15 (vision-assisted product identification + OCR evidence fusion): an OPTIONAL second evidence
 source for ONE question — what product is this? `app/vision.py` is the only module that talks to the
-vision model (`QwenVision`, OpenRouter multimodal, default `qwen/qwen3.8-27b:free`, verified
+vision model (`VisionClient`, OpenRouter multimodal, default `inclusionai/ling-3.0-flash-vl:free`, verified
 `input_modalities: ['text','image','video']`). It uses a **separate OpenRouter key**
 (`OPENROUTER_VISION_API_KEY`, never the copilot's `OPENROUTER_API_KEY`), its own model (`VISION_MODEL`),
 its own budget (`VISION_MAX_IMAGES` 2, `VISION_DAILY_LIMIT` 40, `VISION_MINUTE_LIMIT` 10) and its own
 failure path, so a vision outage cannot touch the DeepSeek copilot and vice versa. Requests send
-`reasoning: {"enabled": false}` (Qwen reasons by default) and a base64 `image_url` content part; identical
+`reasoning: {"enabled": false}` (Ling reasons by default) and a base64 `image_url` content part; identical
 image bytes are answered from an in-process cache, so saving an inspection — which re-runs the analysis
 server-side — never spends the quota twice.
 
