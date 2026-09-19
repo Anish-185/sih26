@@ -656,6 +656,7 @@ sih26/
       test_escalation.py   # Milestone 10: every escalation reason, resolve-or-escalate decision, determinism
       test_report.py       # Milestone 11: PDF report content, honesty, escaping, read-only endpoint (PostgreSQL)
       test_hallmark_inspection.py # Milestone 12: HUID / purity extraction, untrusted text, escalation, report
+      test_hallmark_enhancement.py # M19: components, vision fusion, user HUID, no authentication state
       test_copilot.py      # Milestone 13: provider, grounding, injection defence, withheld answers, independence
       test_standards_coverage.py # Milestone 14: standard provenance, product→standard retrieval, no invented rules
       test_vision_fusion.py # Milestone 15: vision adapter, scrubbing, OCR/vision fusion, graceful failure
@@ -861,3 +862,54 @@ joke" match "InterSTELLar Testing Centre" — token matching is now word-boundar
 `test_laboratory_intelligence.py` (132 checks, all LLM calls stubbed — no quota spent); three
 Phase 7 assertions in `test_laboratory.py` updated where behaviour legitimately changed. Full
 suite 258 passed.
+
+
+Milestone 19 (hallmarking & HUID enhancement): **MetrIQ can identify and explain observable
+hallmark/HUID evidence, but it does not authenticate a physical jewellery item's hallmark, HUID,
+jeweller registration, or AHC status.** Milestone 12 already built the extraction, the checks and
+the untrusted-claim handling; M19 does not duplicate any of it. It adds three things, none of which
+can produce an authentication, and makes the safety rule structural rather than a matter of wording:
+there is **no AUTHENTIC / VERIFIED / CERTIFIED state for a physical item in any code path** —
+`verification_status` is only NOT_VERIFIED / NOT_DETECTED, `overall_status` is always REVIEW, no
+check can FAIL, `HUID_AUTHENTICITY` is permanently NOT_SUPPORTED, and the new
+`official_verification_required` is always True. A test asserts the outcome vocabulary contains no
+authentication word and that seven forbidden sentences ("HUID verified", "the jeweller is
+registered", "AHC verified" …) appear nowhere MetrIQ writes.
+
+**Components** — the three marks the verified record `hallmark-components-since-huid` itself
+enumerates (BIS logo, purity/fineness, HUID), each DETECTED / NOT_DETECTED / UNCERTAIN /
+NOT_SUPPORTED with a deterministic `why` and citing that record. The BIS logo is permanently
+NOT_SUPPORTED: it is a graphic and OCR reads text, so reading the letters "BIS" is explicitly
+*not* the logo. **"Not detected" is about the PHOTOGRAPH** — the wording never says the article
+lacks the mark, and `NO_HUID_DETECTED` is a fixed sentence about the supplied image.
+
+**Vision fusion** reuses the EXISTING Milestone 15 observations (no second pipeline —
+`evaluate_hallmark` takes the `vision_observations` the analyzer already produced). Vision answers
+ONE question: does the photo look like a precious-metal article? It can never read a mark —
+`app/vision.py`'s scrubber already deletes any HUID or IS number — and a test feeds it
+"gold ring HUID AB12CD 22K916" to prove no component becomes DETECTED from vision alone.
+`SUPPORTS` / `DOES_NOT_SUPPORT` / `INCONCLUSIVE` / `UNAVAILABLE` / `NOT_RUN`; agreement does NOT
+upgrade anything, and disagreement with OCR becomes a stated `conflict` plus outcome UNCERTAIN —
+MetrIQ picks neither and the OCR evidence is never discarded.
+
+**User-provided HUID** — `huid_reference` is now a form field on `/inspection/analyze` and
+`POST /inspections` (omit it and behaviour is exactly as before). It was previously a browser-side
+string comparison; it is now recorded in the evidence as `USER_PROVIDED`, preserved verbatim,
+normalised only for comparison, and reported MATCHES_OCR_TEXT / DIFFERS_FROM_OCR_TEXT /
+NO_OCR_VALUE_TO_COMPARE / MALFORMED. A match changes no status. **Official verification** is quoted
+from verified records (BIS Care App) with `performed_by_metriq` permanently False; with the
+hallmarking records removed it reports that instructions are not in MetrIQ's evidence set and
+invents no URL. A deterministic `why` list explains every observation, written by code, never a model.
+
+**Copilot:** the hallmarking context gains the components, the visual observation (labelled
+unverified), the user HUID (labelled a string comparison) and the verification boundary; the shared
+system prompt now names the seven forbidden claims and forbids inventing a HUID, a jeweller
+registration, an AHC or a hallmarking procedure. **Report:** the existing section keeps its
+OBSERVED / VERIFICATION split and gains the component table (with the photo-not-article caveat), a
+USER-PROVIDED HUID block and the quoted official guidance. **Domains stay separate:** a HALLMARK
+inspection still reports Legal Metrology `NOT_APPLIED`, and `hallmark.py` imports no package-label
+or compliance module (tested). The jeweller registration and AHC workflows are deliberately NOT
+built. Two real regressions were caught by existing suites and fixed at source: the report glued a
+")" onto a source URL, and the records save path bound kwargs unconditionally, breaking a narrower
+stub — it now binds only non-default options. Tests: `test_hallmark_enhancement.py` (133 checks,
+every LLM call stubbed). Full suite 271 passed.

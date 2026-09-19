@@ -52,7 +52,7 @@ router = APIRouter(prefix="/inspections", tags=["inspections"])
 
 ResultLiteral = Literal["PASS", "FAIL", "REVIEW"]
 OfficerStatusLiteral = Literal["NOT_REQUIRED", "PENDING", "IN_REVIEW", "COMPLETED"]
-_PACKAGE_FIELDS = {"image", "side", "images", "sides", "inspection_type"}
+_PACKAGE_FIELDS = {"image", "side", "images", "sides", "inspection_type", "huid_reference"}
 _DB_UNAVAILABLE = "The inspection database is unavailable. Check that PostgreSQL is running and migrated."
 
 
@@ -202,6 +202,7 @@ async def create(
     images: list[UploadFile] | None = File(None),
     sides: list[str] | None = Form(None),
     inspection_type: Literal["PACKAGE", "HALLMARK"] = Form("PACKAGE"),
+    huid_reference: str | None = Form(None),
     analyzer: InspectionAnalyzer = Depends(get_analyzer),
     session: Session = Depends(get_session),
 ) -> InspectionRecordOut:
@@ -214,8 +215,14 @@ async def create(
                    "the system result is computed by the backend.",
         )
     uploads = await _package(image, side, images, sides)
-    analyze = analyzer.analyze_package if inspection_type == "PACKAGE" else partial(
-        analyzer.analyze_package, inspection_type=inspection_type)
+    # Only non-default options are bound, so a caller that never uses them sees
+    # exactly the signature it saw before this field existed.
+    options = {}
+    if inspection_type != "PACKAGE":
+        options["inspection_type"] = inspection_type
+    if huid_reference:
+        options["huid_reference"] = huid_reference
+    analyze = partial(analyzer.analyze_package, **options) if options else analyzer.analyze_package
     analysis = _run(analyze, uploads)
     try:
         record = create_inspection(session, analysis, uploads)

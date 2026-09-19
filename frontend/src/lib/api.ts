@@ -729,6 +729,52 @@ export interface HallmarkCheck {
   source: HallmarkSource | null;
 }
 
+/** One of the three marks BIS says a hallmark consists of, as OBSERVED in the
+ *  photograph. NOT_DETECTED means this photo did not show it — never that the
+ *  article lacks it. */
+export interface HallmarkComponent {
+  component: "BIS_MARK" | "PURITY" | "HUID";
+  label: string;
+  status: "DETECTED" | "NOT_DETECTED" | "UNCERTAIN" | "NOT_SUPPORTED";
+  observed_value: string | null;
+  why: string;
+  source_regions: string[];
+  source: HallmarkSource | null;
+}
+
+/** The existing Milestone 15 visual observation, reused. It can only say whether
+ *  the photo looks like a precious-metal article — never read a mark. */
+export interface HallmarkVisionSupport {
+  status: "SUPPORTS" | "DOES_NOT_SUPPORT" | "INCONCLUSIVE" | "UNAVAILABLE" | "NOT_RUN";
+  labels: string[];
+  model: string;
+  /** Set when OCR and vision disagree. MetrIQ picks neither. */
+  conflict: string;
+  note: string;
+}
+
+/** A HUID the user typed. Compared as text; never verified. */
+export interface UserHuid {
+  value: string;
+  normalized: string;
+  status:
+    | "MATCHES_OCR_TEXT"
+    | "DIFFERS_FROM_OCR_TEXT"
+    | "NO_OCR_VALUE_TO_COMPARE"
+    | "MALFORMED";
+  compared_with: string | null;
+  note: string;
+  provenance: "USER_PROVIDED";
+}
+
+export interface OfficialVerification {
+  available: boolean;
+  /** Always false. */
+  performed_by_metriq: boolean;
+  guidance: string;
+  sources: HallmarkSource[];
+}
+
 export interface HallmarkEvidence {
   detected: boolean;
   verification_status: "NOT_VERIFIED" | "NOT_DETECTED"; // there is no VERIFIED state
@@ -755,6 +801,17 @@ export interface HallmarkEvidence {
   hallmark_text: HallmarkObservation[];
   untrusted_claims: HallmarkObservation[];
   checks: HallmarkCheck[];
+  /* ---- Milestone 19: observation only, never verification ---- */
+  /** What the observation pass found. There is deliberately no AUTHENTIC state. */
+  outcome: "OBSERVATIONS_FOUND" | "NO_OBSERVATIONS" | "UNCERTAIN";
+  /** Always true — MetrIQ has no authoritative verification channel. */
+  official_verification_required: boolean;
+  components: HallmarkComponent[];
+  vision: HallmarkVisionSupport | null;
+  user_huid: UserHuid | null;
+  official_verification: OfficialVerification | null;
+  /** Deterministic reasons. Never model-written. */
+  why: string[];
   sources: HallmarkSource[];
 }
 
@@ -958,9 +1015,16 @@ export const inspectionReportUrl = (id: string) => `${API_BASE}/inspections/${en
 /** Absolute URL of a stored package photo (the API returns a path). */
 export const inspectionImageUrl = (path: string) => `${API_BASE}${path}`;
 
-function packageForm(uploads: PackageUploadInput[], inspectionType: InspectionType = "PACKAGE"): FormData {
+function packageForm(
+  uploads: PackageUploadInput[],
+  inspectionType: InspectionType = "PACKAGE",
+  huidReference = "",
+): FormData {
   const form = new FormData();
   if (inspectionType !== "PACKAGE") form.append("inspection_type", inspectionType);
+  // Milestone 19: recorded server-side as USER-PROVIDED so it reaches the
+  // evidence and the report — it never verifies anything.
+  if (huidReference.trim()) form.append("huid_reference", huidReference.trim());
   for (const u of uploads) {
     form.append("images", u.file);
     form.append("sides", u.side);
@@ -1042,18 +1106,26 @@ export const api = {
     ),
 
   // Smart Inspection: OCR + declarations + product + standards + compliance.
-  analyzeInspection: (uploads: PackageUploadInput[], inspectionType: InspectionType = "PACKAGE") =>
+  analyzeInspection: (
+    uploads: PackageUploadInput[],
+    inspectionType: InspectionType = "PACKAGE",
+    huidReference = "",
+  ) =>
     request<InspectionAnalysis>(
       "/inspection/analyze",
-      { method: "POST", body: packageForm(uploads, inspectionType) },
+      { method: "POST", body: packageForm(uploads, inspectionType, huidReference) },
       60_000 + 60_000 * uploads.length,
     ),
 
   // Save: the backend re-runs the analysis on these photos and stores it for officer review.
-  saveInspection: (uploads: PackageUploadInput[], inspectionType: InspectionType = "PACKAGE") =>
+  saveInspection: (
+    uploads: PackageUploadInput[],
+    inspectionType: InspectionType = "PACKAGE",
+    huidReference = "",
+  ) =>
     request<InspectionRecord>(
       "/inspections",
-      { method: "POST", body: packageForm(uploads, inspectionType) },
+      { method: "POST", body: packageForm(uploads, inspectionType, huidReference) },
       60_000 + 60_000 * uploads.length,
     ),
 

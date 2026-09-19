@@ -661,10 +661,21 @@ def test_inspection_without_vision_is_unchanged() -> None:
             d.pop(volatile, None)
         d["product"].pop("vision_status", None)
         d["product"].pop("signals", None)
+        # Milestone 19: the hallmark block records whether vision RAN at all
+        # (NOT_RUN) or ran and failed (UNAVAILABLE). That is the same kind of
+        # diagnostic as product.vision_status above, not a result, so it is
+        # popped the same way. The hallmark RESULT fields are asserted below.
+        if d.get("hallmark"):
+            d["hallmark"].pop("vision", None)
         return d
 
     check("no vision client: OCR, product, compliance unchanged", core(plain) == core(unconfigured))
     check("vision rate-limited: OCR, product, compliance unchanged", core(plain) == core(failed))
+    # And the hallmark result itself is unaffected by a vision outage.
+    check("vision rate-limited: the hallmark result is unchanged",
+          (plain.hallmark.verification_status, plain.hallmark.overall_status, plain.hallmark.outcome)
+          == (failed.hallmark.verification_status, failed.hallmark.overall_status,
+              failed.hallmark.outcome))
     check("an unconfigured client is never called", True)
     check("the product is still identified from the label",
           failed.product.status == "MATCHED" and failed.product.standard_number == "IS 367:1993")

@@ -768,9 +768,11 @@ class InspectionAnalyzer:
         """Instant OCR of one image (see ``ocr_package``)."""
         return self.ocr_package([PackageUpload(data, filename, side)])
 
-    def analyze(self, data: bytes, filename: str, side: str | None = None) -> InspectionAnalysisOut:
+    def analyze(self, data: bytes, filename: str, side: str | None = None,
+                huid_reference: str | None = None) -> InspectionAnalysisOut:
         """Smart Inspection of one image (see ``analyze_package``)."""
-        return self.analyze_package([PackageUpload(data, filename, side)])
+        return self.analyze_package([PackageUpload(data, filename, side)],
+                                    huid_reference=huid_reference)
 
     def ocr_package(self, uploads: list[PackageUpload]) -> InstantOcrOut:
         """Instant OCR of one package photographed from one or more sides.
@@ -852,7 +854,8 @@ class InspectionAnalyzer:
             notes=notes,
         )
 
-    def analyze_package(self, uploads: list[PackageUpload], inspection_type: str = "PACKAGE") -> InspectionAnalysisOut:
+    def analyze_package(self, uploads: list[PackageUpload], inspection_type: str = "PACKAGE",
+                        huid_reference: str | None = None) -> InspectionAnalysisOut:
         """Smart Inspection of one package: Instant OCR of every image, then the
         downstream pipeline (declarations -> product -> standards -> compliance)
         over the combined evidence."""
@@ -950,8 +953,13 @@ class InspectionAnalyzer:
             from app.api import get_product_finder
 
             finder = self._product_finder or get_product_finder()
+            # Milestone 19: the EXISTING Milestone 15 visual observations are reused
+            # (no second vision pipeline) and a user-typed HUID is recorded as
+            # user-provided. Neither can authenticate anything.
             analysis.hallmark = evaluate_hallmark(regions, finder.search_engine.items,
-                                                  force=inspection_type == "HALLMARK")
+                                                  force=inspection_type == "HALLMARK",
+                                                  vision=vision_observations or None,
+                                                  user_huid=huid_reference)
         except Exception as exc:  # noqa: BLE001
             analysis.notes.append(f"Hallmark evidence extraction failed: {exc}")
         if analysis.hallmark is not None and (analysis.hallmark.detected or inspection_type == "HALLMARK"):

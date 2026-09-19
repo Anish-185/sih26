@@ -217,6 +217,46 @@ product**, each with a "Why this result?" built from real matching signals.
 | `POST /certification-guidance` | certification journey (deterministic) + grounded explanation (`explain=false` skips the model) | optional |
 | `POST /laboratory-search` | testing laboratories for a standard or product (`explain=false` skips the model) | optional |
 
+### Hallmarking & HUID
+
+**MetrIQ can identify and explain observable hallmark/HUID evidence, but it does
+not authenticate a physical jewellery item's hallmark, HUID, jeweller
+registration, or AHC status.**
+
+There is deliberately **no AUTHENTIC, VERIFIED or CERTIFIED state** for a
+physical item anywhere in the code. `verification_status` is only
+`NOT_VERIFIED` or `NOT_DETECTED`, the hallmark result is always `REVIEW`, and
+`official_verification_required` is always true — MetrIQ has no channel that
+could establish authenticity. An image is not proof; OCR is not proof; the
+vision model is not proof; an LLM is not proof.
+
+```
+photo -> OCR -----+
+                  +-- evidence fusion -> observable evidence -> REVIEW
+        vision ---+      (a conflict is stated, never resolved)
+```
+
+| Reported | Meaning |
+|---|---|
+| `outcome` | `OBSERVATIONS_FOUND` / `NO_OBSERVATIONS` / `UNCERTAIN` — what the photo showed |
+| `components` | The three marks BIS enumerates — BIS logo, purity/fineness, HUID — each `DETECTED` / `NOT_DETECTED` / `UNCERTAIN` / `NOT_SUPPORTED`, with a deterministic reason |
+| `vision` | The existing Milestone 15 observation, reused. It can only say whether the photo *looks like* a precious-metal article — it never reads a mark. Disagreement with OCR is a stated **conflict**; MetrIQ picks neither. |
+| `user_huid` | A HUID the user typed: preserved verbatim, labelled `USER_PROVIDED`, compared with the OCR text as a **string**. A match changes nothing. |
+| `official_verification` | Quoted from verified BIS records (BIS Care App). `performed_by_metriq` is always false. When the knowledge base states no mechanism, nothing is invented. |
+
+The BIS logo is always `NOT_SUPPORTED`: it is a graphic mark and OCR reads text,
+so reading the letters "BIS" is not the logo. **"Not detected" is about the
+photograph** — never a finding that the article lacks the mark. Text printed on
+the item claiming "VERIFIED" or "AUTHENTIC" is recorded as an untrusted claim
+and changes no status.
+
+Not built, and deliberately out of scope: the jeweller registration journey and
+the Assaying & Hallmarking Centre workflow. Hallmarking and package inspection
+stay separate — a hallmark inspection reports Legal Metrology as `NOT_APPLIED`.
+
+Multilingual (Milestone 17) applies: hallmarking questions work in English,
+Hindi and Telugu, and the evidence stays canonical.
+
 ### Testing laboratories
 
 **MetrIQ identifies laboratories from verified laboratory evidence. It does not

@@ -158,12 +158,16 @@ async def analyze(
     images: list[UploadFile] | None = File(None),
     sides: list[str] | None = Form(None),
     inspection_type: Literal["PACKAGE", "HALLMARK"] = Form("PACKAGE"),
+    # Milestone 19: a HUID the user typed. Recorded as USER-PROVIDED and compared
+    # with the OCR text as a string; it never verifies anything.
+    huid_reference: str | None = Form(None),
 ) -> InspectionAnalysisOut:
     """Smart Inspection: the same OCR step for every image, then declaration
     extraction, product identification, verified Indian Standard candidates and
     deterministic compliance over the combined evidence."""
     uploads = await _package(image, side, images, sides)
-    return _run(partial(get_analyzer().analyze_package, inspection_type=inspection_type), uploads)
+    return _run(partial(get_analyzer().analyze_package, inspection_type=inspection_type,
+                        huid_reference=huid_reference), uploads)
 
 
 @router.get("/coverage", response_model=CoverageMatrixOut)

@@ -173,8 +173,6 @@ function HallmarkInspection() {
 
   const result: InspectionAnalysis | null = analyse.data;
   const hallmark = result?.hallmark ?? null;
-  const entered = reference.trim().toUpperCase();
-  const observed = hallmark?.huid.value ?? null;
 
   return (
     <section className="space-y-6">
@@ -198,7 +196,7 @@ function HallmarkInspection() {
             </div>
           )}
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" disabled={!files.length || analyse.loading} onClick={() => analyse.run(files).catch(() => {})}>
+            <Button size="sm" disabled={!files.length || analyse.loading} onClick={() => analyse.run(files, reference).catch(() => {})}>
               <ScanSearch className="h-3.5 w-3.5" />
               {analyse.loading ? "Reading the hallmark…" : "Analyse hallmark evidence"}
             </Button>
@@ -209,7 +207,7 @@ function HallmarkInspection() {
                 disabled={save.loading}
                 onClick={() =>
                   save
-                    .run(files)
+                    .run(files, reference)
                     .then((r) => navigate(`/history/${r.inspection_id}`))
                     .catch(() => {})
                 }
@@ -256,13 +254,10 @@ function HallmarkInspection() {
               placeholder="Type the HUID you see on the article"
             />
             <p className="mt-2 text-[12px] leading-relaxed text-ink-soft">
-              {!entered
-                ? "Entering a HUID only compares it with the text OCR read. It does not verify anything."
-                : observed === null
-                  ? "No single potential HUID was read from the photo to compare with."
-                  : entered === observed
-                    ? `Matches the potential HUID read from the photo (${observed}) — a text comparison only.`
-                    : `Does not match the potential HUID read from the photo (${observed}). Check the article and the OCR.`}
+              {hallmark?.user_huid
+                ? hallmark.user_huid.note
+                : "Enter the HUID printed on the article and analyse again. MetrIQ records it as " +
+                  "user-provided and compares it with the text OCR read — it does not verify anything."}
             </p>
             <p className="mt-1 text-[12px] font-medium text-ink">
               External authoritative HUID verification required.{" "}
@@ -277,7 +272,7 @@ function HallmarkInspection() {
   );
 }
 
-const analyseHallmark = (files: File[]) =>
-  api.analyzeInspection(files.map((file) => ({ file, side: "UNKNOWN" as const })), "HALLMARK");
-const saveHallmark = (files: File[]) =>
-  api.saveInspection(files.map((file) => ({ file, side: "UNKNOWN" as const })), "HALLMARK");
+const analyseHallmark = (files: File[], huid = "") =>
+  api.analyzeInspection(files.map((file) => ({ file, side: "UNKNOWN" as const })), "HALLMARK", huid);
+const saveHallmark = (files: File[], huid = "") =>
+  api.saveInspection(files.map((file) => ({ file, side: "UNKNOWN" as const })), "HALLMARK", huid);

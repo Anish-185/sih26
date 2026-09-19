@@ -119,14 +119,40 @@ export function HallmarkEvidencePanel({
               </div>
             ))}
           </div>
-          <div>
-            <div className="kicker mb-1">BIS mark</div>
-            <p className="text-[12px] leading-relaxed text-ink-soft">
-              {hallmark.bis_text.length > 0
-                ? "The letters “BIS” were read. The BIS logo itself is a graphic mark that OCR cannot establish."
-                : "No “BIS” text was read. The BIS logo is a graphic mark that OCR cannot establish."}
-            </p>
-          </div>
+          {hallmark.components.length > 0 && (
+            <div>
+              <div className="kicker mb-1.5">Hallmark components in this photograph</div>
+              <ul className="divide-y divide-line border-y border-line">
+                {hallmark.components.map((c) => (
+                  <li key={c.component} className="flex items-baseline gap-3 py-2">
+                    <Mono
+                      muted
+                      className={cn(
+                        "w-24 shrink-0 text-[10px] uppercase tracking-[0.1em]",
+                        c.status === "DETECTED" && "text-pass",
+                        c.status === "UNCERTAIN" && "text-review",
+                      )}
+                    >
+                      {c.status.replace(/_/g, " ")}
+                    </Mono>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[12px] font-medium">
+                        {c.label}
+                        {c.observed_value && (
+                          <Mono className="ml-2 text-[12px] text-ink">{c.observed_value}</Mono>
+                        )}
+                      </div>
+                      <p className="mt-0.5 text-[11px] leading-relaxed text-ink-soft">{c.why}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5 text-[11px] text-ink-faint">
+                “Not detected” means this photograph did not show the mark — not that the
+                article lacks it.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* VERIFICATION */}
@@ -139,6 +165,26 @@ export function HallmarkEvidencePanel({
           {hallmark.detected && (
             <p className="text-[12px] font-medium leading-relaxed text-ink">
               External authoritative HUID verification required.
+            </p>
+          )}
+          {hallmark.user_huid && (
+            <div className="border border-line-strong bg-raised p-3">
+              <div className="kicker mb-1">User-provided HUID</div>
+              <Mono className="block text-[13px] text-ink">{hallmark.user_huid.value}</Mono>
+              <Mono muted className="mt-1 block text-[10px] uppercase tracking-[0.1em]">
+                {hallmark.user_huid.status.replace(/_/g, " ")}
+              </Mono>
+              <p className="mt-1 text-[11px] leading-relaxed text-ink-soft">
+                {hallmark.user_huid.note}
+              </p>
+            </div>
+          )}
+          {hallmark.vision?.conflict && (
+            <p className="text-[12px] leading-relaxed text-review">{hallmark.vision.conflict}</p>
+          )}
+          {hallmark.official_verification && (
+            <p className="text-[12px] leading-relaxed text-ink-soft">
+              {hallmark.official_verification.guidance}
             </p>
           )}
           {careSource?.source_url && (

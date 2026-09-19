@@ -28,6 +28,25 @@ Checks (``evaluate_hallmark``), each quoting a verified knowledge record:
 No check can FAIL: an unreadable or unexpected mark from a photograph is an OCR
 limitation, not a verified failure. Because authenticity is never supported,
 the hallmark result is always REVIEW, and the inspection goes to an officer.
+
+Milestone 19 adds three things, none of which can produce an authentication:
+
+  components   the three marks BIS itself says a hallmark consists of (BIS logo,
+               purity, HUID), each reported DETECTED / NOT_DETECTED / UNCERTAIN
+               / NOT_SUPPORTED with a deterministic reason. "Not detected" means
+               the photo did not show it — never that the article lacks it.
+  vision       the EXISTING Milestone 15 visual observation, reused (no second
+               vision pipeline). It can only ever say whether the photo LOOKS
+               like a precious-metal article. It never reads a HUID, a purity
+               mark or a BIS mark, and where it disagrees with OCR the result is
+               a stated CONFLICT — MetrIQ does not pick a winner.
+  user HUID    a HUID the user typed. It is recorded as USER-PROVIDED, compared
+               with the OCR text as a string, and never treated as verification
+               of anything.
+
+`outcome` names what happened (OBSERVATIONS_FOUND / NO_OBSERVATIONS /
+UNCERTAIN); `official_verification_required` is always True, because MetrIQ has
+no authoritative verification channel at all.
 """
 
 from __future__ import annotations
@@ -39,15 +58,45 @@ from pydantic import BaseModel, Field
 HALLMARK_SOURCE = "HALLMARKING"
 NOT_VERIFIED = "NOT_VERIFIED"
 NOT_DETECTED = "NOT_DETECTED"
+
+# Milestone 19 — outcome of the OBSERVATION pass. None of these is an
+# authentication, and there is deliberately no AUTHENTIC / VERIFIED / CERTIFIED
+# outcome: MetrIQ has no channel that could establish one.
+OBSERVATIONS_FOUND = "OBSERVATIONS_FOUND"
+NO_OBSERVATIONS = "NO_OBSERVATIONS"
+UNCERTAIN = "UNCERTAIN"
+
+# Component statuses.
+C_DETECTED = "DETECTED"
+C_NOT_DETECTED = "NOT_DETECTED"
+C_UNCERTAIN = "UNCERTAIN"
+C_NOT_SUPPORTED = "NOT_SUPPORTED"
+
+# Vision support for "this photo shows a precious-metal article".
+V_SUPPORTS = "SUPPORTS"
+V_DOES_NOT_SUPPORT = "DOES_NOT_SUPPORT"
+V_INCONCLUSIVE = "INCONCLUSIVE"
+V_UNAVAILABLE = "UNAVAILABLE"
+V_NOT_RUN = "NOT_RUN"
+
+# User-provided HUID, compared as TEXT with what OCR read. Never verification.
+U_MATCHES_OCR = "MATCHES_OCR_TEXT"
+U_DIFFERS_FROM_OCR = "DIFFERS_FROM_OCR_TEXT"
+U_NO_OCR_VALUE = "NO_OCR_VALUE_TO_COMPARE"
+U_MALFORMED = "MALFORMED"
+
+NO_HUID_DETECTED = "No HUID-like identifier was detected in the supplied image."
 PASS_CONFIDENCE = 0.8
 
 HUID_RECORD = "what-is-huid"
+CONSUMER_RECORD = "consumer-verification-of-hallmark"
 COMPONENTS_RECORD = "hallmark-components-since-huid"
 GOLD_RECORD = "gold-purity-grades-for-hallmarking"
 SILVER_RECORD = "silver-purity-grades-for-hallmarking"
 
 HUID_QUOTE = "It is a six-digit alphanumeric number which is unique for each hallmarked item and is traceable."
 CARE_APP_QUOTE = "Customer can also verify the HUID number in the BIS Care App using the 'Verify HUID' feature."
+CONSUMER_QUOTE = ("a consumer can verify the six-digit HUID number of a hallmarked article using the BIS Care App")
 COMPONENTS_QUOTE = ("hallmark consists of 3 marks viz, BIS logo, purity of the article in caratage as well as "
                     "fineness and six-digit alphanumeric HUID number.")
 GOLD_QUOTE = ("IS 1417:2016 permits hallmarking of six caratage (fineness in ppt) of gold jewellery/artefacts, viz. "
@@ -133,6 +182,60 @@ class PurityEvidence(BaseModel):
     reason: str
 
 
+class HallmarkComponent(BaseModel):
+    """One of the three marks BIS says a hallmark consists of, as OBSERVED.
+
+    ``status`` is about the PHOTOGRAPH, never about the article: NOT_DETECTED
+    means this photo did not show it, not that the article lacks it.
+    """
+
+    component: str = Field(description='"BIS_MARK" | "PURITY" | "HUID"')
+    label: str
+    status: str = Field(description='"DETECTED" | "NOT_DETECTED" | "UNCERTAIN" | "NOT_SUPPORTED"')
+    observed_value: str | None = None
+    why: str = Field(description="Deterministic reason. Never written by a model.")
+    source_regions: list[str] = Field(default_factory=list)
+    source: HallmarkSource | None = None
+
+
+class HallmarkVision(BaseModel):
+    """The EXISTING Milestone 15 visual observation, reused as a weak signal.
+
+    It can only say whether the photo LOOKS like a precious-metal article. It
+    never reads a HUID, a purity mark or a BIS mark, and it never authenticates.
+    """
+
+    status: str = Field(description='"SUPPORTS" | "DOES_NOT_SUPPORT" | "INCONCLUSIVE" | "UNAVAILABLE" | "NOT_RUN"')
+    labels: list[str] = Field(default_factory=list, description="What the vision model said it saw.")
+    model: str = ""
+    conflict: str = Field(default="", description="Set when OCR and vision disagree. MetrIQ picks neither.")
+    note: str = ""
+
+
+class UserHuid(BaseModel):
+    """A HUID the USER typed. Recorded, compared as text, never verified."""
+
+    value: str = Field(description="Exactly what the user entered, preserved.")
+    normalized: str = Field(description="Upper-cased, spaces and separators removed — for comparison only.")
+    status: str = Field(description='"MATCHES_OCR_TEXT" | "DIFFERS_FROM_OCR_TEXT" | "NO_OCR_VALUE_TO_COMPARE" | "MALFORMED"')
+    compared_with: str | None = Field(default=None, description="The OCR-read value it was compared against.")
+    note: str
+    provenance: str = Field(default="USER_PROVIDED", description="Never OCR, never verified.")
+
+
+class OfficialVerification(BaseModel):
+    """Where official verification happens — quoted from verified BIS records.
+
+    MetrIQ does not perform it. When the knowledge base does not state a
+    mechanism, ``available`` is False and nothing is invented.
+    """
+
+    available: bool
+    performed_by_metriq: bool = Field(default=False, description="Always False.")
+    guidance: str
+    sources: list[HallmarkSource] = Field(default_factory=list)
+
+
 class HallmarkOut(BaseModel):
     """Hallmark evidence OBSERVED in the photos. Never an authentication."""
 
@@ -149,6 +252,23 @@ class HallmarkOut(BaseModel):
     untrusted_claims: list[HallmarkObservation] = Field(default_factory=list)
     checks: list[HallmarkCheck] = Field(default_factory=list)
     sources: list[HallmarkSource] = Field(default_factory=list)
+    # ---- Milestone 19 ----
+    outcome: str = Field(
+        default=NO_OBSERVATIONS,
+        description='"OBSERVATIONS_FOUND" | "NO_OBSERVATIONS" | "UNCERTAIN". Never an authentication.',
+    )
+    official_verification_required: bool = Field(
+        default=True,
+        description="Always True: MetrIQ has no authoritative verification channel.",
+    )
+    components: list[HallmarkComponent] = Field(default_factory=list)
+    vision: HallmarkVision | None = None
+    user_huid: UserHuid | None = None
+    official_verification: OfficialVerification | None = None
+    why: list[str] = Field(
+        default_factory=list,
+        description="Deterministic reasons for what was and was not observed. Never model-written.",
+    )
 
 
 # ------------------------------------------------------------------ extraction
@@ -284,7 +404,176 @@ def _huid_evidence(labelled, pattern) -> HuidEvidence:
 # ------------------------------------------------------------------ evaluation
 
 
-def evaluate_hallmark(regions, knowledge_items, force: bool = False) -> HallmarkOut:
+# Vocabulary for the ONLY question vision is allowed to answer here: does this
+# photo look like a precious-metal article? Taken from the verified records'
+# own wording (what-is-hallmarking, metals-hallmarked-in-india) plus the plain
+# article words a vision model would use. Never used to read a mark.
+_JEWELLERY_WORDS = frozenset({
+    "gold", "silver", "jewellery", "jewelry", "precious", "metal", "bullion",
+    "ring", "necklace", "bangle", "bracelet", "chain", "earring", "pendant",
+    "coin", "ornament", "artefact", "artifact", "anklet", "nose pin", "locket",
+})
+# Things a vision model says when the photo is plainly NOT a precious-metal
+# article. Only used to raise a CONFLICT, never to overrule OCR.
+_NON_JEWELLERY_WORDS = frozenset({
+    "bottle", "packet", "carton", "package", "label", "box", "sachet", "pouch",
+    "kettle", "lamp", "bulb", "cable", "cement", "tyre", "food", "beverage",
+})
+
+
+def _normalize_huid(value: str) -> str:
+    """Upper-case, strip separators. For TEXT comparison only — not validation."""
+    return re.sub(r"[^A-Za-z0-9]", "", value or "").upper()
+
+
+def _user_huid(value: str | None, observed: str | None) -> UserHuid | None:
+    """Record a user-typed HUID. Compared as a string; never verification."""
+    if value is None or not str(value).strip():
+        return None
+    raw = str(value).strip()
+    normalized = _normalize_huid(raw)
+    base = ("This HUID was typed by the user, not read from the image and not verified by MetrIQ. "
+            "MetrIQ cannot confirm that it belongs to this article or that it is genuine — that "
+            "needs official verification.")
+    if not normalized:
+        return UserHuid(value=raw, normalized="", status=U_MALFORMED,
+                        note=f"No alphanumeric characters were found in the entry. {base}")
+    if observed is None:
+        return UserHuid(value=raw, normalized=normalized, status=U_NO_OCR_VALUE,
+                        note=f"No single potential HUID was read from the photo to compare with. {base}")
+    same = normalized == _normalize_huid(observed)
+    return UserHuid(
+        value=raw, normalized=normalized,
+        status=U_MATCHES_OCR if same else U_DIFFERS_FROM_OCR,
+        compared_with=observed,
+        note=(f"This matches the text OCR read from the photo ({observed}). A string comparison only — "
+              f"it does not verify the HUID or the article. {base}" if same else
+              f"This differs from the text OCR read from the photo ({observed}). That may mean the OCR "
+              f"misread the mark, or that the entry is for a different article. {base}"),
+    )
+
+
+def _vision_support(vision, ocr_detected: bool) -> HallmarkVision:
+    """Fuse the EXISTING Milestone 15 visual observation. Never authoritative.
+
+    Vision answers one question: does the photo look like a precious-metal
+    article? It cannot read a mark — ``app/vision.py`` deletes any HUID, IS
+    number or certification claim before the observation ever arrives here.
+    """
+    if vision is None:
+        return HallmarkVision(status=V_NOT_RUN, note="No visual observation was available for this inspection.")
+    usable = [o for o in vision if getattr(o, "status", "") == "OK"]
+    if not usable:
+        return HallmarkVision(
+            status=V_UNAVAILABLE,
+            model=getattr(vision[0], "model", "") if vision else "",
+            note="The visual understanding service did not return an observation; OCR evidence was used alone.",
+        )
+
+    labels: list[str] = []
+    for observation in usable:
+        for value in (getattr(observation, "product_label", ""), getattr(observation, "product_category", "")):
+            if value and value not in labels:
+                labels.append(value)
+        for feature in getattr(observation, "visual_features", []) or []:
+            if feature and feature not in labels:
+                labels.append(feature)
+
+    words = {w for label in labels for w in re.split(r"[^a-z]+", label.lower()) if w}
+    looks_precious = bool(words & _JEWELLERY_WORDS)
+    looks_other = bool(words & _NON_JEWELLERY_WORDS)
+    model = getattr(usable[0], "model", "")
+
+    if looks_precious and not looks_other:
+        return HallmarkVision(
+            status=V_SUPPORTS, labels=labels, model=model,
+            note="The visual observation is consistent with a precious-metal article. It is an unverified "
+                 "AI observation and establishes no mark, no purity and no HUID.",
+        )
+    if looks_other and not looks_precious:
+        conflict = ""
+        if ocr_detected:
+            conflict = (
+                "OCR read hallmark-related text from this image, but the visual observation describes "
+                f"something else ({', '.join(labels[:3])}). MetrIQ does not choose between them: treat both "
+                "as unresolved and confirm the article by eye."
+            )
+        return HallmarkVision(
+            status=V_DOES_NOT_SUPPORT, labels=labels, model=model, conflict=conflict,
+            note="The visual observation does not describe a precious-metal article. It is an unverified AI "
+                 "observation and does not overrule what OCR read.",
+        )
+    return HallmarkVision(
+        status=V_INCONCLUSIVE, labels=labels, model=model,
+        note="The visual observation neither supports nor contradicts a precious-metal article.",
+    )
+
+
+def _components(huid: "HuidEvidence", purity: "PurityEvidence", bis_text, comp_src) -> list[HallmarkComponent]:
+    """The three marks BIS states a hallmark consists of, as OBSERVED in the photo.
+
+    Grounded in the verified record that enumerates them. A status is about the
+    photograph only — NOT_DETECTED never means the article lacks the mark.
+    """
+    out: list[HallmarkComponent] = []
+
+    # 1. BIS logo — a GRAPHIC. OCR reads text, so this can never be confirmed here.
+    bis_regions = [r for o in bis_text for r in o.source_regions]
+    out.append(HallmarkComponent(
+        component="BIS_MARK", label="BIS logo", status=C_NOT_SUPPORTED,
+        observed_value="BIS" if bis_text else None, source_regions=bis_regions, source=comp_src,
+        why=("The BIS logo is a graphic mark and MetrIQ reads text only, so its presence cannot be "
+             "established from OCR." + (" The letters \"BIS\" were read as text, which is not the logo."
+                                        if bis_text else "")),
+    ))
+
+    # 2. Purity / fineness.
+    purity_status = {
+        "DETECTED": C_DETECTED, "UNCERTAIN": C_UNCERTAIN,
+        "CONFLICT": C_UNCERTAIN, "NOT_DETECTED": C_NOT_DETECTED,
+    }.get(purity.status, C_UNCERTAIN)
+    out.append(HallmarkComponent(
+        component="PURITY", label="Purity / fineness mark", status=purity_status,
+        observed_value=purity.caratage or purity.fineness,
+        source_regions=[r for o in purity.candidates for r in o.source_regions],
+        source=comp_src, why=purity.reason,
+    ))
+
+    # 3. HUID.
+    huid_status = {
+        "DETECTED": C_DETECTED, "UNCERTAIN": C_UNCERTAIN,
+        "MULTIPLE": C_UNCERTAIN, "NOT_DETECTED": C_NOT_DETECTED,
+    }.get(huid.status, C_UNCERTAIN)
+    out.append(HallmarkComponent(
+        component="HUID", label="Six-digit alphanumeric HUID", status=huid_status,
+        observed_value=huid.value,
+        source_regions=[r for o in huid.candidates for r in o.source_regions],
+        source=comp_src,
+        why=NO_HUID_DETECTED if huid_status == C_NOT_DETECTED else huid.reason,
+    ))
+    return out
+
+
+def _official_verification(care_src, consumer_src) -> OfficialVerification:
+    """Where official verification happens, quoted from verified records only."""
+    sources = [s for s in (care_src, consumer_src) if s]
+    if not sources:
+        return OfficialVerification(
+            available=False,
+            guidance=("Verified instructions for official HUID verification are not available in MetrIQ's "
+                      "current evidence set. Use BIS's official hallmarking channels."),
+        )
+    return OfficialVerification(
+        available=True,
+        guidance=("MetrIQ does not perform official verification. According to the verified BIS records "
+                  "below, a consumer verifies the six-digit HUID of a hallmarked article using the BIS Care "
+                  "App. Anything MetrIQ reports from a photograph is an observation, not a verification."),
+        sources=sources,
+    )
+
+
+def evaluate_hallmark(regions, knowledge_items, force: bool = False,
+                      vision=None, user_huid: str | None = None) -> HallmarkOut:
     """Hallmark evidence and checks for one inspection. ``force`` evaluates even when no
     hallmark evidence is seen (a hallmark inspection). Deterministic; never authenticates."""
     items = {i.id: i for i in knowledge_items}
@@ -313,12 +602,23 @@ def evaluate_hallmark(regions, knowledge_items, force: bool = False) -> Hallmark
     purity = _purity_evidence(purity_found, gold, silver)
     sources = [s for s in (comp_src, huid_src, care_src, gold_src, silver_src) if s]
 
+    # ---- Milestone 19: observation-only additions ----
+    consumer_src = _source(items, CONSUMER_RECORD, CONSUMER_QUOTE)
+    components = _components(huid, purity, bis_text, comp_src)
+    vision_support = _vision_support(vision, detected)
+    entered = _user_huid(user_huid, huid.value)
+    verification = _official_verification(care_src, consumer_src)
+    why = _why(huid, purity, bis_text, hallmark_text, vision_support, entered, claims)
+    outcome = _outcome(detected, huid, purity, vision_support)
+
     if not detected and not force:
         return HallmarkOut(
             detected=False, verification_status=NOT_DETECTED, verification_note="No hallmark evidence was seen.",
             overall_status="REVIEW", reason_code="NO_HALLMARK_EVIDENCE",
             reason="No hallmark or HUID evidence was read in the OCR text.", huid=huid, purity=purity,
             bis_text=bis_text, untrusted_claims=claims, sources=[],
+            outcome=outcome, components=components, vision=vision_support,
+            user_huid=entered, official_verification=verification, why=why,
         )
 
     checks = [
@@ -354,7 +654,64 @@ def evaluate_hallmark(regions, knowledge_items, force: bool = False) -> Hallmark
         verification_note=NOT_VERIFIED_NOTE if detected else "No hallmark evidence was seen.",
         overall_status="REVIEW", reason_code=code, reason=reason, huid=huid, purity=purity, bis_text=bis_text,
         hallmark_text=hallmark_text, untrusted_claims=claims, checks=checks, sources=sources,
+        outcome=outcome, components=components, vision=vision_support,
+        user_huid=entered, official_verification=verification, why=why,
     )
+
+
+def _outcome(detected: bool, huid: "HuidEvidence", purity: "PurityEvidence",
+             vision: HallmarkVision) -> str:
+    """What the OBSERVATION pass found. Never an authentication."""
+    if vision.conflict:
+        return UNCERTAIN
+    if not detected:
+        return NO_OBSERVATIONS
+    if huid.status in {"UNCERTAIN", "MULTIPLE"} or purity.status in {"UNCERTAIN", "CONFLICT"}:
+        return UNCERTAIN
+    return OBSERVATIONS_FOUND
+
+
+def _why(huid, purity, bis_text, hallmark_text, vision: HallmarkVision,
+         entered: UserHuid | None, claims) -> list[str]:
+    """Plain deterministic reasons. Never written or paraphrased by a model."""
+    out: list[str] = []
+    if huid.status == "DETECTED":
+        out.append(f"An HUID-like string ({huid.value}) was detected by OCR in the supplied image.")
+    elif huid.status == "MULTIPLE":
+        out.append("More than one HUID-like string was detected by OCR, so none was selected.")
+    elif huid.status == "UNCERTAIN":
+        out.append("A possible HUID-like string was detected by OCR but could not be read with confidence.")
+    else:
+        out.append(NO_HUID_DETECTED)
+
+    if purity.status == "DETECTED":
+        out.append(f"A purity / fineness mark ({purity.caratage or purity.fineness}) was detected by OCR.")
+    elif purity.status == "CONFLICT":
+        out.append("More than one purity mark was detected and they disagree, so none was selected.")
+    elif purity.status == "UNCERTAIN":
+        out.append("A possible purity mark was detected but could not be matched to a permitted grade.")
+    else:
+        out.append("No purity / fineness mark was detected in the supplied image.")
+
+    if bis_text:
+        out.append("The letters \"BIS\" were detected as text. The BIS logo itself is a graphic mark and "
+                   "cannot be confirmed by OCR.")
+    if hallmark_text:
+        out.append("Hallmark-related wording was detected in the supplied image.")
+    if vision.status == V_SUPPORTS:
+        out.append("The visual observation is consistent with a precious-metal article — an unverified AI "
+                   "observation, not evidence of any mark.")
+    elif vision.conflict:
+        out.append("Vision and OCR produced conflicting observations; MetrIQ does not choose between them.")
+    elif vision.status in {V_UNAVAILABLE, V_NOT_RUN}:
+        out.append("No visual observation was available, so OCR evidence was used on its own.")
+    if entered is not None:
+        out.append(f"A HUID was provided by the user and recorded as user-provided ({entered.status}).")
+    if claims:
+        out.append("Text on the item claims verification. Printed text is untrusted OCR evidence and "
+                   "changes no status.")
+    out.append("Official physical-item verification is outside MetrIQ's current capabilities.")
+    return out
 
 
 def _check_huid(huid: HuidEvidence, source: HallmarkSource | None) -> HallmarkCheck:

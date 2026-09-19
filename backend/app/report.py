@@ -689,8 +689,47 @@ def _hallmark(d: _Doc, an: dict) -> list:
         ("Verification status", d.badge(None, _t(h["verification_status"]).replace("_", " "))),
         ("Reason", _t(h["verification_note"])),
     ])
-    out += [d.p("OBSERVED FROM THE IMAGE", "kicker"), observed, Spacer(1, 3 * mm),
-            d.p("VERIFICATION", "kicker"), verification]
+    out += [d.p("OBSERVED FROM THE IMAGE", "kicker"), observed]
+
+    # Milestone 19: the three marks BIS states a hallmark consists of, each
+    # reported as OBSERVED in this photograph — never as present on the article.
+    components = h.get("components") or []
+    if components:
+        out += [Spacer(1, 3 * mm), d.p("HALLMARK COMPONENTS AS OBSERVED IN THIS PHOTOGRAPH", "kicker")]
+        out.append(d.table(
+            ["Component", "Status", "Observed", "Why"],
+            [[_t(c.get("label")),
+              f"<font name='Mono'>{_t(c.get('status'))}</font>",
+              _t(c.get("observed_value") or "—"),
+              _t(c.get("why"))] for c in components],
+            [40 * mm, 26 * mm, 26 * mm, CONTENT_W - 92 * mm]))
+        out.append(d.p("\u201cNot detected\u201d means this photograph did not show the mark. It is not a "
+                       "finding that the article lacks it.", "faint"))
+
+    # A HUID typed by the officer or consumer: recorded, compared as text, never verified.
+    entered = h.get("user_huid")
+    if entered:
+        out += [Spacer(1, 3 * mm), d.p("USER-PROVIDED HUID", "kicker"), d.definitions([
+            ("Entered value", f"<font name='Mono'>{_t(entered.get('value'))}</font>"),
+            ("Compared with OCR", f"<font name='Mono'>{_t(entered.get('status'))}</font>"
+             + (f" ({_t(entered.get('compared_with'))})" if entered.get("compared_with") else "")),
+            ("Note", _t(entered.get("note"))),
+        ])]
+
+    out += [Spacer(1, 3 * mm), d.p("VERIFICATION", "kicker"), verification]
+
+    official = h.get("official_verification")
+    if official:
+        out.append(d.callout(_t(official.get("guidance")), "REVIEW"))
+        for source in official.get("sources") or []:
+            # The URL is emitted bare: wrapping it in punctuation glues the
+            # bracket onto the link in both the PDF and any text extraction.
+            out.append(d.p(f"{_t(source.get('title'))} — \u201c{_t(source.get('quote'))}\u201d", "faint"))
+            if source.get("source_url"):
+                out.append(d.p(_t(source["source_url"]), "faint"))
+
+    for line in h.get("why") or []:
+        out.append(d.p(f"— {_t(line)}", "faint"))
     if h.get("untrusted_claims"):
         out += [Spacer(1, 3 * mm), d.callout(
             "Text printed on the item or package claims verification: "

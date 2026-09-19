@@ -68,7 +68,12 @@ YOU MUST NOT:
   decide it;
 - authenticate, verify or vouch for a physical item, a hallmark, a HUID, a
   licence or a registration. MetrIQ can only report what was OBSERVED in a
-  photograph. Observed is not authenticated;
+  photograph. Observed is not authenticated. Never write "HUID verified",
+  "HUID authentic", "hallmark authentic", "the jewellery is BIS certified",
+  "the jeweller is registered", "AHC verified" or "registration verified" —
+  MetrIQ has no channel that could establish any of them. Never invent a HUID,
+  a jeweller registration, an Assaying and Hallmarking Centre, or a hallmarking
+  procedure, and never turn an OCR or visual observation into verification;
 - present something not detected on the label as legally missing;
 - say that a product, a manufacturer or an item IS certified, holds a BIS
   licence, or is registered. Certification guidance describes the ROUTE that
@@ -573,6 +578,35 @@ def build_context(
                 }
                 for c in hallmark.get("checks", [])[:8]
             ],
+            # Milestone 19 — observation only. None of this is verification.
+            "outcome": hallmark.get("outcome"),
+            "official_verification_required": hallmark.get("official_verification_required"),
+            "components_observed_in_the_photograph": [
+                {
+                    "component": c.get("label"),
+                    "status": c.get("status"),
+                    "observed_value": c.get("observed_value"),
+                    "why": _clean(c.get("why"), 240),
+                }
+                for c in hallmark.get("components", [])[:4]
+            ],
+            "visual_observation": {
+                "status": (hallmark.get("vision") or {}).get("status"),
+                "conflict_with_ocr": _clean((hallmark.get("vision") or {}).get("conflict"), 300),
+                "note": "An unverified AI visual observation. It establishes no mark, no purity and no HUID.",
+            },
+            "user_provided_huid": (
+                {
+                    "value": _clean((hallmark.get("user_huid") or {}).get("value"), 40),
+                    "comparison_with_ocr_text": (hallmark.get("user_huid") or {}).get("status"),
+                    "note": "Typed by the user. A string comparison only — never a verification.",
+                }
+                if hallmark.get("user_huid") else None
+            ),
+            "official_verification": {
+                "performed_by_metriq": False,
+                "guidance": _clean((hallmark.get("official_verification") or {}).get("guidance"), 400),
+            },
         }
 
     if "completeness" in sections:
