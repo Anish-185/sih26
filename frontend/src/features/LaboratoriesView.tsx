@@ -1,4 +1,5 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, type LanguageChoice } from "@/lib/api";
 import { useAsyncTask } from "@/lib/hooks";
 import {
@@ -20,6 +21,7 @@ import { GroundedAnswer } from "@/components/GroundedAnswer";
 import { LanguagePicker } from "@/components/LanguagePicker";
 import { LaboratoryResults } from "@/components/LaboratoryResults";
 import { ErrorNote } from "@/features/StandardsView";
+import { CopilotPanel } from "@/features/CopilotPanel";
 
 const EXAMPLES = [
   "Where can I test an electric kettle?",
@@ -34,6 +36,19 @@ export function LaboratoriesView() {
   const [explain, setExplain] = useState(false);
   const [language, setLanguage] = useState<LanguageChoice>("auto");
   const task = useAsyncTask(api.laboratorySearch);
+  const [params, setParams] = useSearchParams();
+
+  // Deep link from product intelligence or an inspection: ?standard=IS 367:1993.
+  // Retrieval-only, so it never waits on the local model.
+  const deepLink = params.get("standard") ?? "";
+  useEffect(() => {
+    if (!deepLink) return;
+    setParams({}, { replace: true });
+    setQuery(deepLink);
+    setStandard(deepLink);
+    task.run(deepLink, deepLink, false, language).catch(() => {});
+    // Consumed once, on arrival.
+  }, [deepLink]);
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -50,14 +65,17 @@ export function LaboratoriesView() {
         <PageHeader
           eyebrow="Laboratory search"
           title="BIS-recognized testing laboratories"
-          lead="MetrIQ does not hold individual laboratory records. It points to BIS's official recognised / empanelled-laboratory lists and the LIMS portal, and abstains rather than fabricate laboratory data."
+          lead="MetrIQ identifies laboratories from a verified snapshot of BIS's own LIMS listing of IS-wise test facilities. It reports what BIS listed and when, links to the official lists and the LIMS portal, and abstains rather than fabricate laboratory data."
         />
       </div>
 
       <Callout>
-        This search returns BIS's official laboratory <em>directories</em> and the
-        IS-wise LIMS portal — not specific laboratory names, addresses or
-        accreditation records.
+        Laboratory records come from MetrIQ's verified BIS LIMS snapshot
+        (retrieved 2026&#8209;09&#8209;19). A record states that BIS listed that
+        laboratory for that standard on that date — it does not establish current
+        recognition, accreditation, NABL status, test scope or availability, and
+        MetrIQ holds no addresses or contact details. Results are ordered
+        alphabetically; MetrIQ does not rank laboratories.
       </Callout>
 
       <div className="relative border border-line bg-raised">
@@ -135,6 +153,10 @@ export function LaboratoriesView() {
             sources={res.sources}
             context={{ label: "Standard", value: res.standard_context }}
             abstentionMessage="Insufficient verified laboratory information. No BIS laboratory or testing evidence in the knowledge base matched this query."
+          />
+          <CopilotPanel
+            context={{ feature: "LABORATORY", laboratory: res }}
+            language={language}
           />
         </>
       )}

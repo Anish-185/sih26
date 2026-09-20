@@ -246,9 +246,9 @@ def test_model_and_endpoint_configuration() -> None:
             os.environ.pop(key, None)
         p = OpenRouterLLM(api_key="test-key")
         check("default model is the free model the copilot is configured for",
-              p.model == "deepseek/deepseek-v4-flash-0731:free", p.model)
+              p.model == "inclusionai/ling-3.0-flash-vl:free", p.model)
         check("default base url is OpenRouter", p.base_url == DEFAULT_BASE_URL, p.base_url)
-        check("DEFAULT_MODEL constant matches", DEFAULT_MODEL == "deepseek/deepseek-v4-flash-0731:free")
+        check("DEFAULT_MODEL constant matches", DEFAULT_MODEL == "inclusionai/ling-3.0-flash-vl:free")
 
         os.environ["OPENROUTER_MODEL"] = "some-other/model:free"
         os.environ["OPENROUTER_BASE_URL"] = "https://example.invalid/v1"

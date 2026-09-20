@@ -17,8 +17,10 @@ import {
   api,
   type CopilotAnswer,
   type CopilotCapability,
+  type CopilotFeatureContext,
   type CopilotInput,
   type InspectionAnalysis,
+  type LanguageChoice,
   type SystemResult,
 } from "@/lib/api";
 import { useAsyncTask, useOnMount } from "@/lib/hooks";
@@ -26,8 +28,12 @@ import { Button, Mono, Panel, PanelHeader, Spinner, StatusBadge, TextInput } fro
 import { cn } from "@/lib/cn";
 
 /** The questions offered up front. Everything else goes through the free-text field. */
-const PACKAGE_PROMPTS: { code: CopilotCapability; label: string }[] = [
+type Prompt = { code: CopilotCapability; label: string };
+
+const PACKAGE_PROMPTS: Prompt[] = [
   { code: "EXPLAIN_INSPECTION", label: "Explain this inspection" },
+  { code: "EXPLAIN_RESULT", label: "Why this result?" },
+  { code: "WHAT_IS_MISSING", label: "What information is missing?" },
   { code: "EXPLAIN_ESCALATION", label: "Why does an officer need to review this?" },
   { code: "EXPLAIN_CHECKS", label: "Which requirements were checked?" },
   { code: "EXPLAIN_UNCERTAINTY", label: "Which declarations are uncertain?" },
@@ -35,6 +41,45 @@ const PACKAGE_PROMPTS: { code: CopilotCapability; label: string }[] = [
   { code: "MANUAL_VERIFICATION", label: "What should I verify manually?" },
   { code: "SUMMARIZE", label: "Summarise in simple language" },
 ];
+
+/** Offered only when the inspection actually carries laboratory records. */
+const LABORATORY_PROMPT: Prompt = {
+  code: "EXPLAIN_LABORATORY",
+  label: "Why were these laboratories returned?",
+};
+
+/* Milestone 20 — the same panel over a feature page's own result. One prompt
+   each: these contexts are small, and a free-text question covers the rest. */
+const FEATURE_PROMPTS: Record<CopilotFeatureContext["feature"], Prompt[]> = {
+  STANDARD: [{ code: "EXPLAIN_STANDARD", label: "Why was this standard retrieved?" }],
+  CERTIFICATION: [{ code: "EXPLAIN_CERTIFICATION", label: "Explain these certification steps" }],
+  LABORATORY: [{ code: "EXPLAIN_LABORATORY", label: "Why were these laboratories returned?" }],
+  // Milestone 21 — the context already spans features, so the questions do too.
+  PRODUCT: [
+    { code: "EXPLAIN_PRODUCT_CONTEXT", label: "Summarise everything MetrIQ found" },
+    { code: "EXPLAIN_STANDARD", label: "Why was this standard selected?" },
+    { code: "EXPLAIN_CERTIFICATION", label: "Explain the certification route" },
+    { code: "EXPLAIN_LABORATORY", label: "Are there laboratory records for this standard?" },
+  ],
+};
+
+const FEATURE_BLURB: Record<CopilotFeatureContext["feature"], string> = {
+  STANDARD:
+    "Explains the standards MetrIQ's deterministic retrieval returned for this query, and the evidence behind each. Retrieval confidence is a text-match strength — never a statement that a standard legally applies.",
+  CERTIFICATION:
+    "Explains the retrieved certification route and its steps. It describes what published BIS information states for this product type — never that any item, manufacturer or licence is certified.",
+  LABORATORY:
+    "Explains why each laboratory was returned. The records are a dated BIS LIMS snapshot: they never establish current recognition, accreditation, scope or availability, and MetrIQ does not rank laboratories.",
+  PRODUCT:
+    "Explains MetrIQ's canonical product context — what its deterministic features established about this product, and which features do not apply to it. It connects existing evidence; it never adds any.",
+};
+
+const FEATURE_PLACEHOLDER: Record<CopilotFeatureContext["feature"], string> = {
+  STANDARD: "Ask about these standards and the evidence behind them…",
+  CERTIFICATION: "Ask about this certification route and its evidence…",
+  LABORATORY: "Ask about these laboratory records…",
+  PRODUCT: "Ask about what MetrIQ found for this product…",
+};
 
 const HALLMARK_PROMPT: { code: CopilotCapability; label: string } = {
   code: "EXPLAIN_HALLMARK",
@@ -53,22 +98,30 @@ const WITHHELD_LABEL: Record<string, string> = {
   FABRICATED_SOURCE: "cited a source that is not in this record",
   AUTHENTICATION_CLAIM: "claimed an authentication MetrIQ cannot establish",
   CONTRADICTS_SYSTEM_RESULT: "stated a result other than the deterministic one",
+  LABORATORY_STATUS_CLAIM: "claimed a laboratory status a dated snapshot cannot establish",
+  LABORATORY_RANKING_CLAIM: "ranked or recommended a laboratory, which MetrIQ does not do",
+  FABRICATED_AMOUNT: "stated a fee or amount that is not in the evidence",
 };
 
 /**
- * `inspectionId` explains a saved record (the officer path); `analysis` explains
- * the inspection currently on screen. Exactly one of them is given.
+ * `inspectionId` explains a saved record (the officer path), `analysis` the
+ * inspection currently on screen, and `context` a feature page's own
+ * deterministic result (Milestone 20). Exactly one of them is given.
  */
 export function CopilotPanel({
   inspectionId,
   analysis,
+  context,
   systemResult,
   hasHallmark,
+  language,
 }: {
   inspectionId?: string;
   analysis?: InspectionAnalysis;
-  systemResult: SystemResult;
+  context?: CopilotFeatureContext;
+  systemResult?: SystemResult;
   hasHallmark?: boolean;
+  language?: LanguageChoice;
 }) {
   const status = useOnMount(api.copilotStatus);
   const task = useAsyncTask(api.copilotExplain);
@@ -77,10 +130,17 @@ export function CopilotPanel({
   // The free budget as of the last answer, so the footer stays honest.
   const [used, setUsed] = useState<{ daily_remaining: number; daily_limit: number } | null>(null);
 
-  const base = hasHallmark
-    ? [PACKAGE_PROMPTS[0], HALLMARK_PROMPT, ...PACKAGE_PROMPTS.slice(1)]
-    : PACKAGE_PROMPTS;
-  const prompts = analysis?.certification ? [...base, CERTIFICATION_PROMPT] : base;
+  const feature = context?.feature;
+  let prompts: Prompt[];
+  if (feature) {
+    prompts = FEATURE_PROMPTS[feature];
+  } else {
+    const base = hasHallmark
+      ? [PACKAGE_PROMPTS[0], HALLMARK_PROMPT, ...PACKAGE_PROMPTS.slice(1)]
+      : PACKAGE_PROMPTS;
+    prompts = analysis?.certification ? [...base, CERTIFICATION_PROMPT] : base;
+    if (analysis?.laboratories?.length) prompts = [...prompts, LABORATORY_PROMPT];
+  }
   const configured = status.data?.configured ?? true;
   const budget = status.data;
   const remaining = used?.daily_remaining ?? budget?.daily_remaining ?? 0;
@@ -89,7 +149,9 @@ export function CopilotPanel({
 
   function ask(capability: CopilotCapability, text = "") {
     const body: CopilotInput = { capability, ...(text ? { question: text } : {}) };
-    if (inspectionId) body.inspection_id = inspectionId;
+    if (language) body.language = language;
+    if (context) body.context = context;
+    else if (inspectionId) body.inspection_id = inspectionId;
     else if (analysis) body.analysis = analysis;
     setAsked(text || prompts.find((p) => p.code === capability)?.label || "");
     task
@@ -120,7 +182,7 @@ export function CopilotPanel({
         meta={
           <span className="inline-flex items-center gap-2">
             <Mono muted className="text-[10px] uppercase tracking-[0.16em]">
-              Grounded in this inspection
+              {feature ? "Grounded in the retrieved evidence" : "Grounded in this inspection"}
             </Mono>
           </span>
         }
@@ -128,9 +190,20 @@ export function CopilotPanel({
 
       <div className="border-b border-line px-5 py-3 sm:px-6">
         <p className="text-[12px] leading-relaxed text-ink-soft">
-          Explains the evidence on this page in plain language. It reads the record only — it does not
-          retrieve standards, run checks, or change the system result, which stays{" "}
-          <StatusBadge status={systemResult} size="sm" /> whatever the explanation says.
+          {feature ? (
+            FEATURE_BLURB[feature]
+          ) : (
+            <>
+              Explains the evidence on this page in plain language. It reads the record only — it does
+              not retrieve standards, run checks, or change the system result
+              {systemResult && (
+                <>
+                  , which stays <StatusBadge status={systemResult} size="sm" />
+                </>
+              )}{" "}
+              whatever the explanation says.
+            </>
+          )}
         </p>
       </div>
 
@@ -165,8 +238,8 @@ export function CopilotPanel({
               value={question}
               maxLength={400}
               onChange={(e) => setQuestion(e.target.value)}
-              placeholder="Ask about the evidence in this inspection…"
-              aria-label="Ask about the evidence in this inspection"
+              placeholder={feature ? FEATURE_PLACEHOLDER[feature] : "Ask about the evidence in this inspection…"}
+              aria-label="Ask about the evidence on this page"
             />
             <Button type="submit" size="sm" variant="secondary" disabled={task.loading || !question.trim() || exhausted}>
               <MessageSquareText className="h-3.5 w-3.5" />
@@ -177,7 +250,7 @@ export function CopilotPanel({
           {task.loading && (
             <div className="flex items-center gap-2 border-t border-line px-5 py-4 text-[12px] text-ink-soft sm:px-6">
               <Spinner className="h-3.5 w-3.5" />
-              Reading the inspection record…
+              {feature ? "Reading the retrieved evidence…" : "Reading the inspection record…"}
             </div>
           )}
 
@@ -206,12 +279,18 @@ function Answer({ answer, asked }: { answer: CopilotAnswer; asked: string }) {
     <div className="border-t border-line">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-2.5 sm:px-6">
         <Mono muted className="text-[10px] uppercase tracking-[0.16em]">
-          {answer.withheld ? "Explanation withheld" : "Grounded in inspection evidence"}
+          {answer.withheld ? "Explanation withheld" : "Grounded in MetrIQ evidence"}
         </Mono>
-        <span className="inline-flex items-center gap-2 text-[11px] text-ink-faint">
-          System result
-          {answer.system_result && <StatusBadge status={answer.system_result} size="sm" />}
-        </span>
+        {answer.system_result ? (
+          <span className="inline-flex items-center gap-2 text-[11px] text-ink-faint">
+            System result
+            <StatusBadge status={answer.system_result} size="sm" />
+          </span>
+        ) : (
+          <Mono muted className="text-[10px] uppercase tracking-[0.16em]">
+            {answer.context_type} evidence
+          </Mono>
+        )}
       </div>
 
       <div className="px-5 py-4 sm:px-6">
@@ -224,8 +303,8 @@ function Answer({ answer, asked }: { answer: CopilotAnswer; asked: string }) {
             <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-review" />
             <div>
               <span className="font-medium text-ink">MetrIQ rejected the generated explanation</span> — it{" "}
-              {WITHHELD_LABEL[answer.withheld_reason] ?? "did not match the inspection record"}. The
-              deterministic result and the evidence below are unaffected.
+              {WITHHELD_LABEL[answer.withheld_reason] ?? "did not match MetrIQ's own evidence"}. The
+              deterministic evidence on this page is unaffected.
             </div>
           </div>
         )}

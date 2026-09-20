@@ -15,7 +15,7 @@ from functools import lru_cache
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app import lab_registry
 from app import language as lang
@@ -27,7 +27,9 @@ from app.certification_journey import (
 )
 from app.laboratory import LaboratorySearchService
 from app.llm import LLMError, LocalLLM
+from app.lab_registry import LabRegistry, load_laboratories
 from app.product import ProductStandardFinder
+from app.product_context import ProductContextOut, build_from_query, context_out
 from app.rag import BISQuestionAnswerer
 from app.retrieval import RetrievalResult, SearchEngine, SearchOutcome
 
@@ -73,6 +75,12 @@ def get_certification_journey_service() -> CertificationJourneyService:
         search_engine=get_engine(),
         product_finder=get_product_finder(),
     )
+
+
+@lru_cache(maxsize=1)
+def get_lab_registry() -> LabRegistry:
+    """The verified BIS LIMS snapshot, loaded once. Read-only, no network."""
+    return load_laboratories()
 
 
 @lru_cache(maxsize=1)
@@ -717,6 +725,45 @@ def certification_guidance_post(
         journey=_journey_out(journey),
         language=answer_language,
     )
+
+
+# ---------------------------------------------------------------------
+# Product-context route (Milestone 21)
+# ---------------------------------------------------------------------
+
+class ProductContextRequest(BaseModel):
+    """Only text. MetrIQ derives every fact in the response itself."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    product: str = Field(default="", max_length=400, description="Natural-language product description")
+    standard_number: str = Field(default="", max_length=64,
+                                 description="Build the context for this Indian Standard directly")
+
+
+@router.post("/product-context", response_model=ProductContextOut)
+def product_context_post(request: ProductContextRequest) -> ProductContextOut:
+    """The canonical product context for a product that has NOT been inspected.
+
+    SERVER-DERIVED: the request carries only text. MetrIQ runs its own existing
+    retrieval, certification journey and laboratory lookup — no client-supplied
+    evidence is involved, and nothing new is created. (The context of a finished
+    inspection travels on the analysis itself, as `product_context`.)
+    """
+    product = request.product.strip()
+    standard_number = request.standard_number.strip()
+    if not product and not standard_number:
+        raise HTTPException(
+            status_code=422,
+            detail="Send a product description or a standard_number to build a product context.",
+        )
+    return context_out(build_from_query(
+        product,
+        finder=get_product_finder(),
+        journey_service=get_certification_journey_service(),
+        registry=get_lab_registry(),
+        standard_number=standard_number,
+    ))
 
 
 # ---------------------------------------------------------------------

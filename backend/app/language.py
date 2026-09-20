@@ -275,6 +275,23 @@ EMPTY_QUESTION = {
 }
 
 
+# MetrIQ's own sentence when it REJECTS a generated explanation (Milestone 20).
+# Hard-coded per language for the same reason as INSUFFICIENT: MetrIQ is speaking
+# about its own verification, and must be able to do so with no model running.
+WITHHELD = {
+    EN: ("MetrIQ checked the generated explanation against its own evidence and rejected it. "
+         "The deterministic result and the evidence on this page are unchanged."),
+    HI: ("MetrIQ ने उत्पन्न व्याख्या को अपने साक्ष्य के विरुद्ध जाँचा और उसे अस्वीकार कर दिया। "
+         "निर्धारित (deterministic) परिणाम और इस पृष्ठ के साक्ष्य अपरिवर्तित हैं।"),
+    TE: ("MetrIQ తయారైన వివరణను తన సాక్ష్యంతో సరిపోల్చి దానిని తిరస్కరించింది. "
+         "నిర్ధారిత (deterministic) ఫలితం మరియు ఈ పేజీలోని సాక్ష్యం మారలేదు."),
+}
+
+
+def withheld(language: str) -> str:
+    return WITHHELD.get(language, WITHHELD[EN])
+
+
 def insufficient(language: str) -> str:
     return INSUFFICIENT.get(language, INSUFFICIENT[EN])
 

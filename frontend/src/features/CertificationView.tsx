@@ -19,6 +19,7 @@ import { GroundedAnswer } from "@/components/GroundedAnswer";
 import { CertificationJourney } from "@/components/CertificationJourney";
 import { LanguagePicker } from "@/components/LanguagePicker";
 import { ErrorNote } from "@/features/StandardsView";
+import { CopilotPanel } from "@/features/CopilotPanel";
 
 const EXAMPLES = [
   "How do I get BIS certification for a stainless steel water bottle?",
@@ -132,6 +133,13 @@ export function CertificationView() {
             task.data.answer ||
             "The available BIS knowledge base does not contain sufficient verified information to answer this certification question."
           }
+        />
+      )}
+
+      {task.data && (
+        <CopilotPanel
+          context={{ feature: "CERTIFICATION", certification: task.data }}
+          language={language}
         />
       )}
 

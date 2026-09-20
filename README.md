@@ -489,13 +489,94 @@ export LM_STUDIO_MODEL=qwen/qwen3-4b                  # default (LLM_MODEL also 
 > term (never a verdict), which can take ~25 s on first call.
 
 
+### Product intelligence — one context across the features
+
+**MetrIQ connects evidence produced by its existing deterministic features into a
+unified product context. The context does not create new evidence and does not
+independently verify external facts.**
+
+For one product it connects what the features already established, and says
+explicitly which features apply:
+
+```
+OCR / declarations / vision ---+
+deterministic identification --+
+BIS retrieval -----------------+--> CANONICAL PRODUCT CONTEXT --> panel · copilot
+certification journey ---------+
+compliance rule engine --------+
+BIS LIMS laboratory snapshot --+
+hallmark observations ---------+
+```
+
+Availability is four different facts, never collapsed:
+
+| State | Meaning |
+|---|---|
+| `AVAILABLE` | MetrIQ holds evidence for it |
+| `NOT_AVAILABLE` | the feature applies, but MetrIQ's verified data has nothing |
+| `NOT_APPLICABLE` | the feature does not apply to this product at all |
+| `UNCERTAIN` | evidence exists but does not settle the question |
+
+So an electric kettle shows a standard, a certification route and laboratory
+records with hallmarking `NOT_APPLICABLE`; a hallmark photo shows hallmarking
+evidence with package inspection `NOT_APPLICABLE`. Every section names the system
+that produced it (`DETERMINISTIC_RETRIEVAL`, `DETERMINISTIC_RULE_ENGINE`,
+`LABORATORY_SNAPSHOT`, `OCR_TEXT`, `HALLMARK_OBSERVATION`, …), and agreements and
+conflicts between sources are shown rather than resolved.
+
+**Two entry points, with different trust properties — stated plainly because the
+difference matters:**
+
+- `POST /product-context` is **server-derived**: the request carries only a
+  product description or a standard number, and MetrIQ runs its own retrieval,
+  journey builder and laboratory lookup. No client-supplied evidence is involved.
+- A finished inspection carries its context on the analysis itself
+  (`product_context`). On the live inspection screen that object is echoed back
+  by the browser exactly as `/inspection/analyze` produced it — the same trust
+  model the copilot's live path has always used. The request models whitelist
+  what may reach the model; nothing arbitrary from a client is treated as
+  evidence.
+
+The context is a composition: it contains no classifier, no ranking, no rule
+engine and no model call. The summary is written from structured data by MetrIQ
+itself — the copilot may explain it afterwards, never produce it. Saved
+inspections need no migration, and records saved before this milestone simply
+have no context.
+
+
 ### MetrIQ Copilot — grounded explanations (optional)
 
-An optional explanation layer: it reads a **finished** inspection and puts it into
-plain language. It never retrieves a standard, never runs a check and never decides
-PASS / FAIL / REVIEW — the deterministic result is shown beside every answer and
-comes from the record. With no key configured, everything else works exactly as
-before; only the explanation is unavailable.
+An optional explanation layer. **MetrIQ's copilot explains evidence produced by the
+deterministic system; it does not independently establish standards, compliance,
+laboratory status, certification applicability, or hallmark/HUID authenticity.**
+
+It reads a **finished** result and puts it into plain language: it never retrieves a
+standard, never runs a check and never decides PASS / FAIL / REVIEW — the
+deterministic result is shown beside every answer and comes from the record. With no
+key configured, everything else works exactly as before; only the explanation is
+unavailable.
+
+**Where it can be asked** (each is its own small grounded context — MetrIQ never
+sends the whole knowledge base, and only the sections the question needs):
+
+| Page | Context | Example question |
+|---|---|---|
+| Inspection / officer review | the finished inspection | "Why this result?" · "What information is missing?" |
+| Standards | the product → standard retrieval | "Why was this standard retrieved?" |
+| Certification | the retrieved certification journey | "Explain these certification steps" |
+| Laboratories | the BIS LIMS snapshot lookup | "Why were these laboratories returned?" |
+| Standards (product intelligence) | the canonical product context | "Summarise everything MetrIQ found" |
+
+Four evidence states are kept apart and are never collapsed into "missing":
+`NOT_DETECTED` (the photographs did not show it — not a statement that it is legally
+missing), `UNCERTAIN` (found but unreadable; the value is withheld on purpose),
+`UNSUPPORTED` (MetrIQ has no verified deterministic rule for it — not a pass and not
+a failure) and `NOT_AVAILABLE_IN_KNOWLEDGE_BASE` (a statement about MetrIQ's
+coverage, never about what exists).
+
+**Answers follow the user's language** (English / Hindi / Telugu, the Milestone 17
+selection). The *evidence* is never translated: standard numbers, rule ids, record
+ids, document names and source URLs are reproduced exactly.
 
 The API key stays on the server. The browser talks to MetrIQ, MetrIQ talks to
 OpenRouter — there is deliberately no `VITE_` variable for it.
@@ -503,11 +584,14 @@ OpenRouter — there is deliberately no `VITE_` variable for it.
 ```bash
 # backend/.env  (gitignored — never commit it, never put it in the frontend)
 OPENROUTER_API_KEY=sk-or-v1-...
-OPENROUTER_MODEL=deepseek/deepseek-v4-flash-0731:free
+OPENROUTER_MODEL=inclusionai/ling-3.0-flash-vl:free
 ```
 
 The model id is configuration, not code — any OpenRouter chat model works.
-`deepseek/deepseek-v4-flash-0731:free` is the default and is verified end to end.
+`inclusionai/ling-3.0-flash-vl:free` is the default and is verified end to end
+(2026-09-20). The previous default, `deepseek/deepseek-v4-flash-0731:free`, is no
+longer served by OpenRouter and returns HTTP 404; if you see that, set
+`OPENROUTER_MODEL` to a model the provider currently lists.
 If a free model starts returning HTTP 429, check
 `curl https://openrouter.ai/api/v1/key -H "Authorization: Bearer $OPENROUTER_API_KEY"`
 before assuming your allowance is spent — a provider's shared free pool can refuse
@@ -522,15 +606,34 @@ plain text instead of raw JSON.
 request locally before it reaches the network. A request the provider never served
 does not consume the day's allowance.
 
-Where it appears: the **Inspection** workspace and the **officer review** page, as a
-"MetrIQ Copilot" panel. A request is sent only when you press a question — never on
-page load, never in the background, never from the pipeline. Automated tests stub
-the provider, so running the suite costs nothing.
+A request is sent only when you press a question — never on page load, never in the
+background, never from the pipeline. One user action is one model call; language
+detection, retrieval, compliance and every explanation MetrIQ writes itself stay
+deterministic. Automated tests stub the provider, so running the suite costs nothing.
 
-If MetrIQ finds that a generated answer cites a standard, HUID or URL that is not in
-the record, claims a hallmark was authenticated, or states a result other than the
-deterministic one, the answer is **withheld** and MetrIQ's own sentence is shown
-instead.
+**What MetrIQ withholds.** After the model replies, MetrIQ re-reads the generated
+text deterministically and replaces it with its own sentence (in the user's
+language) when the text:
+
+- cites an Indian Standard number, a HUID or a URL that is not in the context;
+- claims a hallmark, HUID or item was authenticated;
+- states an overall result other than the deterministic one;
+- claims a laboratory is accredited, currently valid, operational or available, or
+  ranks one as best / nearest / recommended — a BIS LIMS record is a **dated
+  snapshot** (retrieved 2026-09-19), and it establishes only that the laboratory was
+  listed against that standard on that date;
+- states a fee or amount that is not in the evidence.
+
+The deterministic result, the evidence, the sources and the officer workflow are
+unaffected either way. If the provider times out, is rate-limited, is unconfigured
+or returns unusable output, the endpoint returns 429 / 503 with a short sentence —
+no provider URL, no key, no raw exception — and every MetrIQ result stays exactly as
+it was. An LLM answer never replaces a deterministic one.
+
+Certification guidance describes the route that published BIS information states for
+a product type; the copilot may never say an item, a manufacturer or a licence *is*
+certified, nor state a fee, processing time, required document, testing requirement
+or validity period the evidence does not state.
 
 
 ### Knowledge coverage

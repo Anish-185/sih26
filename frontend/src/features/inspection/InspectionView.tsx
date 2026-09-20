@@ -50,6 +50,7 @@ import { PackageImages, RegionSides, regionSides, useWhere } from "./PackageImag
 import { EscalationPanel } from "../records";
 import { CertificationJourney } from "@/components/CertificationJourney";
 import { CopilotPanel } from "../CopilotPanel";
+import { ProductIntelligence } from "@/components/ProductIntelligence";
 import { HallmarkEvidencePanel, showHallmark } from "../HallmarkEvidence";
 
 // upload (stage photos) -> ocr (Instant OCR running) -> evidence (raw OCR shown)
@@ -625,6 +626,8 @@ export function Workspace({
           <DownstreamPanel result={result} />
         </div>
       </div>
+
+      {result.product_context && <ProductIntelligence context={result.product_context} />}
 
       {!hideCopilot && result.escalation && (
         <CopilotPanel

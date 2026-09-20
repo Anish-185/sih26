@@ -1,4 +1,5 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { ArrowUpRight, Search } from "lucide-react";
 import {
   ApiError,
@@ -28,6 +29,8 @@ import {
   HeaderMotif,
   Motif,
 } from "@/components/decor";
+import { CopilotPanel } from "@/features/CopilotPanel";
+import { ProductIntelligence } from "@/components/ProductIntelligence";
 
 const EXAMPLES = [
   "stainless steel water bottle",
@@ -52,10 +55,29 @@ export function StandardsView() {
     (coverage.data?.standards ?? []).map((s) => [s.standard_number, s]),
   );
 
+  const [params, setParams] = useSearchParams();
+  // Deep link from product intelligence: ?q=IS 367:1993 (or a product name).
+  const deepLink = params.get("q") ?? "";
+  useEffect(() => {
+    if (!deepLink) return;
+    setParams({}, { replace: true });
+    setQuery(deepLink);
+    task.run(deepLink).catch(() => {});
+    contextTask.run(deepLink, "").catch(() => {});
+    // Consumed once, on arrival.
+  }, [deepLink]);
+
+  // Milestone 21: the canonical product context for the query, derived by the
+  // server from the same text. It connects the retrieved standard to the
+  // certification route, the laboratory snapshot and inspection coverage.
+  const contextTask = useAsyncTask(api.productContext);
+
   function submit(e: FormEvent) {
     e.preventDefault();
     const q = query.trim();
-    if (q) task.run(q).catch(() => {});
+    if (!q) return;
+    task.run(q).catch(() => {});
+    contextTask.run(q, "").catch(() => {});
   }
 
   const res = task.data;
@@ -99,6 +121,7 @@ export function StandardsView() {
               onClick={() => {
                 setQuery(ex);
                 task.run(ex).catch(() => {});
+                contextTask.run(ex, "").catch(() => {});
               }}
               className="border border-line bg-surface px-2 py-1 font-mono text-[11px] text-ink-soft transition-colors hover:border-ink hover:text-ink"
             >
@@ -146,6 +169,18 @@ export function StandardsView() {
               {res.note ||
                 "No Indian Standard in the knowledge base clearly describes this product. MetrIQ does not guess a standard number."}
             </Callout>
+          )}
+
+          {contextTask.data && <ProductIntelligence context={contextTask.data} />}
+
+          {res.results.length > 0 && (
+            <CopilotPanel
+              context={
+                contextTask.data
+                  ? { feature: "PRODUCT", product: contextTask.data }
+                  : { feature: "STANDARD", standard: res }
+              }
+            />
           )}
         </section>
       )}

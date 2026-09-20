@@ -277,6 +277,69 @@ export interface LaboratorySearchResponse {
   no_match_note: string | null;
 }
 
+/** One laboratory BIS LIMS lists for an inspection's standard (a dated snapshot). */
+export interface InspectionLaboratory {
+  lab_name: string;
+  osl_code: string | null;
+  city: string | null;
+  standard_as_listed: string;
+  validity_date: string | null;
+  validity_status: string;
+  source_url: string;
+  document_name: string;
+  retrieved_on: string;
+  why: string;
+}
+
+/* ------------------------------------- Milestone 21: product context --- */
+
+/**
+ * MetrIQ's canonical product context: the evidence its deterministic features
+ * already produced, connected. It creates no evidence and verifies nothing
+ * externally. `origin: "QUERY"` is server-derived from a typed description;
+ * `origin: "INSPECTION"` is composed from a finished analysis.
+ */
+export type ContextAvailability = "AVAILABLE" | "NOT_AVAILABLE" | "NOT_APPLICABLE" | "UNCERTAIN";
+
+export type ContextFeature =
+  | "PRODUCT"
+  | "STANDARD"
+  | "CERTIFICATION"
+  | "INSPECTION"
+  | "LABORATORY"
+  | "HALLMARKING";
+
+export interface ContextSection {
+  feature: ContextFeature;
+  status: ContextAvailability;
+  headline: string;
+  reason_code: string;
+  detail: Record<string, unknown>;
+  provenance: string[]; // which MetrIQ system produced it
+  sources: {
+    title: string | null;
+    source_url: string | null;
+    document_name: string | null;
+    authority: string;
+    reference: string | null;
+  }[];
+  limitations: string[];
+}
+
+export interface ProductContext {
+  origin: "QUERY" | "INSPECTION";
+  query: string;
+  inspection_id: string | null;
+  product_name: string | null;
+  product_status: string;
+  availability: Record<string, ContextAvailability>;
+  sections: ContextSection[];
+  conflicts: string[]; // recorded disagreements and agreements — never resolved here
+  summary: string[]; // deterministic, written from structured data only
+  limitations: string[];
+  note: string;
+}
+
 /** Milestone 17 — assistant languages. "auto" detects from the query text. */
 export type AnswerLanguage = "en" | "hi" | "te";
 export type LanguageChoice = "auto" | AnswerLanguage;
@@ -859,6 +922,13 @@ export interface InspectionAnalysis {
   /** Milestone 16 — certification route for the identified standard. Guidance
    *  only: never a statement that this item or its manufacturer is certified. */
   certification?: CertificationJourney | null;
+  /** Milestone 18 — laboratories BIS LIMS lists for the identified standard.
+      INFORMATIONAL: it never affected the result, and no listed laboratory
+      tested this item. Absent on inspections saved before that milestone. */
+  laboratories?: InspectionLaboratory[];
+  /** Milestone 21 — the canonical product context composed from this analysis.
+      Absent on inspections saved before that milestone. */
+  product_context?: ProductContext | null;
 }
 
 /* ------------------------------------------------ saved inspections --- */
@@ -952,8 +1022,24 @@ export type CopilotCapability =
   | "EXPLAIN_UNCERTAINTY"
   | "EXPLAIN_HALLMARK"
   | "EXPLAIN_CERTIFICATION"
+  | "EXPLAIN_RESULT"
+  | "WHAT_IS_MISSING"
+  | "EXPLAIN_STANDARD"
+  | "EXPLAIN_LABORATORY"
+  | "EXPLAIN_PRODUCT_CONTEXT"
   | "MANUAL_VERIFICATION"
   | "QUESTION";
+
+/**
+ * Milestone 20 — the copilot can also explain a feature page's own deterministic
+ * result. The page sends back the response it received; the backend whitelists
+ * the fields that reach the model. There is no system result in these contexts.
+ */
+export type CopilotFeatureContext =
+  | { feature: "STANDARD"; standard: ProductStandardResponse }
+  | { feature: "CERTIFICATION"; certification: CertificationGuidanceResponse }
+  | { feature: "LABORATORY"; laboratory: LaboratorySearchResponse }
+  | { feature: "PRODUCT"; product: ProductContext };
 
 export interface CopilotStatus {
   configured: boolean; // the server has a key; the key itself is never sent here
@@ -980,7 +1066,10 @@ export interface CopilotSource {
 export interface CopilotAnswer {
   capability: CopilotCapability;
   question: string;
-  evidence_scope: "SAVED_RECORD" | "LIVE_ANALYSIS";
+  evidence_scope: "SAVED_RECORD" | "LIVE_ANALYSIS" | "FEATURE_CONTEXT";
+  context_type: string; // INSPECTION, or the feature explained
+  language: AnswerLanguage; // the language the answer is written in
+  confidence: "GROUNDED" | "UNSTRUCTURED" | "WITHHELD"; // deterministic, not the model's opinion
   inspection_id: string | null;
   system_result: SystemResult | null; // deterministic, read from the record
   escalation_required: boolean | null;
@@ -1001,8 +1090,10 @@ export interface CopilotInput {
   capability: CopilotCapability;
   question?: string;
   inspection_id?: string; // a saved inspection …
-  analysis?: InspectionAnalysis; // … or the one currently on screen
+  analysis?: InspectionAnalysis; // … the one currently on screen …
+  context?: CopilotFeatureContext; // … or a feature page's own result
   rule_id?: string;
+  language?: LanguageChoice;
 }
 
 export type ReviewInput =
@@ -1141,6 +1232,15 @@ export const api = {
 
   // What MetrIQ can do with each verified standard (data-derived, no model).
   inspectionCoverage: () => request<CoverageMatrix>("/inspection/coverage", undefined, 20_000),
+
+  // Milestone 21: the canonical product context for a product that has not been
+  // inspected. Server-derived — the request carries only text.
+  productContext: (product: string, standardNumber = "") =>
+    request<ProductContext>(
+      "/product-context",
+      { method: "POST", body: JSON.stringify({ product, standard_number: standardNumber }) },
+      30_000,
+    ),
 
   // Copilot: is an explanation service configured, and how much free budget is left?
   copilotStatus: () => request<CopilotStatus>("/copilot/status", undefined, 10_000),

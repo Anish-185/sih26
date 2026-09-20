@@ -667,10 +667,22 @@ def test_inspection_without_vision_is_unchanged() -> None:
         # popped the same way. The hallmark RESULT fields are asserted below.
         if d.get("hallmark"):
             d["hallmark"].pop("vision", None)
+        # Milestone 21: the product context reports whether a visual observation
+        # contributed — the same diagnostic again, not a result. Its RESULT
+        # fields (availability, summary, conflicts) are asserted below.
+        d.pop("product_context", None)
         return d
+
+    def context_result(a):
+        ctx = a.model_dump(mode="json").get("product_context") or {}
+        return ctx.get("availability"), ctx.get("summary"), ctx.get("conflicts")
 
     check("no vision client: OCR, product, compliance unchanged", core(plain) == core(unconfigured))
     check("vision rate-limited: OCR, product, compliance unchanged", core(plain) == core(failed))
+    check("no vision client: the product context reaches the same conclusions",
+          context_result(plain) == context_result(unconfigured))
+    check("vision rate-limited: the product context reaches the same conclusions",
+          context_result(plain) == context_result(failed))
     # And the hallmark result itself is unaffected by a vision outage.
     check("vision rate-limited: the hallmark result is unchanged",
           (plain.hallmark.verification_status, plain.hallmark.overall_status, plain.hallmark.outcome)

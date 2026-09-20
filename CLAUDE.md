@@ -590,8 +590,9 @@ sih26/
       llm.py           # LM Studio / Qwen3-4B local LLM adapter (used by /ask — unchanged)
       openrouter.py    # Milestone 13: the ONLY OpenRouter surface, key stays server-side
       vision.py        # Milestone 15: visual product understanding (separate key/model/budget)
-      copilot.py       # Milestone 13: grounded context + system prompt + answer verification (guard)
-      copilot_api.py   # Milestone 13: GET /copilot/status, POST /copilot/explain (read-only)
+      product_context.py # M21: the canonical product context — composes existing evidence, creates none
+      copilot.py       # M13 + M20: grounded context (inspection + feature) + system prompt + guard
+      copilot_api.py   # M13 + M20: GET /copilot/status, POST /copilot/explain (read-only)
       language.py      # Milestone 17: language detection + retrieval aliases (en / hi / te)
       rag.py           # grounded BIS question-answering pipeline (/ask)
       product.py       # Phase 5: Product -> Standard discovery + Phase 9 "Why this result?"
@@ -658,6 +659,8 @@ sih26/
       test_hallmark_inspection.py # Milestone 12: HUID / purity extraction, untrusted text, escalation, report
       test_hallmark_enhancement.py # M19: components, vision fusion, user HUID, no authentication state
       test_copilot.py      # Milestone 13: provider, grounding, injection defence, withheld answers, independence
+      test_copilot_context.py # M20: feature contexts, evidence vocabulary, lab/hallmark/cert safety, language
+      test_product_context.py # M21: cross-feature composition, applicability, provenance, trust boundary
       test_standards_coverage.py # Milestone 14: standard provenance, product→standard retrieval, no invented rules
       test_vision_fusion.py # Milestone 15: vision adapter, scrubbing, OCR/vision fusion, graceful failure
       test_pipeline.py     # OCR -> standard candidates end-to-end + stage degradation
@@ -913,3 +916,127 @@ built. Two real regressions were caught by existing suites and fixed at source: 
 ")" onto a source URL, and the records save path bound kwargs unconditionally, breaking a narrower
 stub — it now binds only non-default options. Tests: `test_hallmark_enhancement.py` (133 checks,
 every LLM call stubbed). Full suite 271 passed.
+
+
+Milestone 20 (advanced grounded copilot): the copilot becomes CONTEXTUAL — it explains the
+deterministic results of the feature pages too, not only a finished inspection — and the verification
+MetrIQ runs over what the model wrote is widened. The architecture is unchanged and is the point:
+USER -> deterministic retrieval / rules / evidence -> grounded context -> the model -> explanation.
+**MetrIQ's copilot explains evidence produced by the deterministic system; it does not independently
+establish standards, compliance, laboratory status, certification applicability, or hallmark/HUID
+authenticity.** No second LLM abstraction, no new provider, no agent orchestration, no vector search:
+`app/openrouter.py` is still the only OpenRouter surface and `app/llm.py` (LM Studio, `/ask`) is
+untouched.
+
+**Contexts** — `POST /copilot/explain` now takes exactly ONE of `inspection_id`, `analysis` or (new)
+`context`. A feature page sends back the response MetrIQ itself produced; `FeatureContextIn` in
+`copilot_api.py` is a WHITELIST (`extra="ignore"`), so only the declared fields ever reach the model.
+`build_feature_context(feature, payload)` in `copilot.py` builds the small grounded context —
+`STANDARD` (the product -> standard retrieval, reusing the existing deterministic "why this result",
+labelled *retrieval confidence is not legal applicability*), `CERTIFICATION` (the journey only — the
+LM Studio prose is NOT fed back as evidence) and `LABORATORY` (the BIS LIMS snapshot). Feature
+contexts carry no system result, so `system_result` is null and `evidence_scope` is `FEATURE_CONTEXT`.
+`FEATURE_CAPABILITIES` fixes which question each context accepts; anything else is 422. The
+inspection context gains a `laboratories` section (M18 evidence was previously invisible to the
+copilot), and `_journey()` renders the certification journey in one place for both paths.
+
+**New capabilities:** `EXPLAIN_RESULT` ("why this result?" — PASS names the supported checks that
+passed, FAIL the rule(s) that failed with their evidence, REVIEW why compliance could not be
+established), `WHAT_IS_MISSING`, `EXPLAIN_STANDARD`, `EXPLAIN_LABORATORY`. **`EVIDENCE_VOCABULARY`**
+travels with every context and the system prompt repeats it: `NOT_DETECTED` / `UNCERTAIN` /
+`UNSUPPORTED` / `NOT_AVAILABLE_IN_KNOWLEDGE_BASE` are four different things and may never be merged
+into a generic "missing".
+
+**Guard (deterministic, runs after every reply)** gains three reasons on top of M13's four:
+`LABORATORY_STATUS_CLAIM` (accredited / NABL / currently valid / operational / available),
+`LABORATORY_RANKING_CLAIM` (best / nearest / recommended / preferred) and `FABRICATED_AMOUNT` (any
+currency amount not already in the evidence — this is what stops an invented certification or testing
+fee). A sentence can name a laboratory without the word "laboratory", so the lab names MetrIQ actually
+sent are read back out of the context (`"lab_name": "..."`) and matched too; an explicit denial
+("MetrIQ cannot establish whether it is accredited") is not withheld, because the existing negation
+test applies. A withheld answer is replaced by MetrIQ's own sentence — now in the user's language
+(`lang.WITHHELD`, the third and last hard-coded translated string set).
+
+**Multilingual (M17 unchanged, extended to the copilot):** `language` on the request, `lang.resolve`
+on the officer's own question, `lang.apply` on the system prompt, and `language` + a deterministic
+`confidence` (`GROUNDED` / `UNSTRUCTURED` / `WITHHELD` — computed by MetrIQ from what happened to the
+answer, never a self-assessment) on the response. The evidence sent is byte-for-byte identical in
+every language (tested); English appends nothing, so English behaviour is unchanged.
+
+**Frontend:** no redesign and no new page. `CopilotPanel` gains an optional `context` prop and an
+optional `systemResult`, and now appears on Standards, Certification and Laboratories with ONE prompt
+chip each plus the existing free-text field; the inspection panel gains "Why this result?", "What
+information is missing?" and (only when the record carries laboratory records) "Why were these
+laboratories returned?". `InspectionAnalysis` gained the `laboratories` field it had been missing.
+
+**Model config fix found during validation:** `deepseek/deepseek-v4-flash-0731:free` is no longer
+served by OpenRouter (HTTP 404). The default and `backend/.env` now point at
+`inclusionai/ling-3.0-flash-vl:free`, verified live end to end on 2026-09-20 with ONE laboratory-context
+call. The model is still configuration — no caller hardcodes it.
+
+Tests: `test_copilot_context.py` (186 checks, every provider call stubbed — no quota spent): contexts
+A-E, why-this-result, what-is-missing and the four states, source preservation, laboratory snapshot
+wording, hallmark/HUID safety, certification safety, multilingual, no unsupported facts, provider
+failure, malformed / truncated / empty output, the HTTP contract, and the copilot changing nothing.
+Full suite 290 passed.
+
+
+Milestone 21 (cross-feature product intelligence): **MetrIQ connects evidence produced by its existing
+deterministic features into a unified product context. The context does not create new evidence and does
+not independently verify external facts.** `app/product_context.py` is the whole layer and it is a
+COMPOSER: no classifier, no ranking, no rule engine, no model call, no knowledge graph, no new knowledge.
+Coverage is unchanged and asserted — 97 verified standards, 15 requirements, 7 deterministic rules,
+2 INSPECTION_SUPPORTED.
+
+**The context** carries six sections — PRODUCT / STANDARD / CERTIFICATION / INSPECTION / LABORATORY /
+HALLMARKING — each with an explicit availability (`AVAILABLE` = MetrIQ holds evidence · `NOT_AVAILABLE` =
+the feature applies but the verified data has nothing · `NOT_APPLICABLE` = it does not apply to this
+product · `UNCERTAIN` = the evidence does not settle it), a one-sentence headline, a `detail` dict holding
+ONLY keys that exist, `provenance` naming the system that produced the evidence (`USER_DESCRIPTION`,
+`OCR_TEXT`, `DECLARATION`, `VISION_OBSERVATION`, `DETERMINISTIC_RETRIEVAL`, `BIS_KNOWLEDGE_BASE`,
+`DETERMINISTIC_RULE_ENGINE`, `LABORATORY_SNAPSHOT`, `HALLMARK_OBSERVATION`), its sources and its
+limitations. Plus `conflicts` (agreements and disagreements the features recorded — carried word for word,
+never resolved) and a deterministic `summary` written from structured data; a model may explain it
+afterwards but never produces it.
+
+**Two entry points with different trust properties, documented in the module and tested:**
+`build_from_query` is SERVER-DERIVED (the request carries only text; MetrIQ runs its own
+`ProductStandardFinder`, `CertificationJourneyService` and `LabRegistry` — `POST /product-context`,
+`extra="forbid"`), and `build_from_analysis` composes a FINISHED analysis (from the database, or echoed
+back by the browser on the live inspection screen exactly as `/inspection/analyze` produced it — the same
+trust model the copilot's live path has always had; never claimed as re-derivation).
+
+**Links, all reusing existing systems:** the standard is whatever `ProductStandardFinder` /
+product identification already returned (never reranked; no confident single candidate -> reason code
+`STANDARD_NOT_ESTABLISHED`); certification is the M16 journey with ITS OWN limitations carried verbatim
+(`INSUFFICIENT` or no journey -> `CERTIFICATION_ROUTE_NOT_AVAILABLE`, never borrowed from a similar
+product); inspection is the compliance engine's own output (failed / review / passed / no-verified-rule
+rule ids, coverage, escalation — nothing recomputed); laboratories are the M18 snapshot (validity only
+`*_AT_SNAPSHOT`, alphabetical, no ranking, no accreditation, no contacts, the un-ingested Group-1 /
+Group-2 PDFs disclosed, a missing city never guessed). **Hallmarking relevance is decided by the EXISTING
+retrieval engine** — a jewellery standard, or a query whose best verified record is a hallmarking record
+("gold ring") — so no jewellery classifier was written; M19's boundaries survive intact (no
+authentication, `official_verification_required` always true, overall REVIEW, BIS logo unconfirmable by
+OCR, a user HUID is a text comparison). A package never gets hallmarking; jewellery never gets
+package-label inspection.
+
+**Where it appears:** `InspectionAnalysisOut.product_context` (composed in the analyzer from parts it
+already built — no extra retrieval, isolated so a failure leaves it null, **no migration**: old saved
+records simply have none and the composer tolerates every missing key, tested); `POST /product-context`
+for a product that has not been inspected; copilot feature context `PRODUCT` with capability
+`EXPLAIN_PRODUCT_CONTEXT` ("Summarise everything MetrIQ found") plus the cross-feature questions, reusing
+`ProductContextOut` as the request whitelist. Every M20 guard still fires through it (fabricated standard
+/ URL / amount, laboratory status and ranking claims) and the M17 language layer is unchanged.
+
+**Frontend:** `components/ProductIntelligence.tsx` — one compact panel in the inspection workspace and on
+the Standards page, linking to the existing routes rather than duplicating them; `?standard=` deep links
+added to LaboratoriesView and `?q=` to StandardsView, mirroring CertificationView's existing pattern.
+**Stale M18 copy fixed:** the Laboratories page no longer says MetrIQ "does not hold individual laboratory
+records" — it now describes the verified snapshot, its date and what a listing does not establish.
+
+Tests: `test_product_context.py` (200 checks, every model call stubbed): composition, applicability,
+each connection, uncertainty, snapshot and hallmarking safety, conflicts, provenance, the client payload
+whitelist, copilot guards and language, unchanged results and coverage, old-record compatibility, the
+corrected UI copy, and no unsupported claim. One invariance assertion in `test_vision_fusion.py` now pops
+the context's vision diagnostic the way it already pops `product.vision_status`, and asserts the context
+reaches the same conclusions with and without vision. Full suite 308 passed.

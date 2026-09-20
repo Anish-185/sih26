@@ -16,7 +16,7 @@ surface, so the explanation layer stays provider-replaceable.
 Configuration (environment; ``backend/.env`` is read by ``load_env_file()``):
 
     OPENROUTER_API_KEY       required — server-side only, never sent to the browser
-    OPENROUTER_MODEL         default "deepseek/deepseek-v4-flash-0731:free"
+    OPENROUTER_MODEL         default "inclusionai/ling-3.0-flash-vl:free"
     OPENROUTER_BASE_URL      default "https://openrouter.ai/api/v1"
     OPENROUTER_TIMEOUT       seconds, default 60
     OPENROUTER_DAILY_LIMIT   default 45  (free tier allows ~50/day — headroom kept)
@@ -40,7 +40,7 @@ import httpx
 
 from app.llm import LLMError
 
-DEFAULT_MODEL = "deepseek/deepseek-v4-flash-0731:free"
+DEFAULT_MODEL = "inclusionai/ling-3.0-flash-vl:free"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_TIMEOUT = 60.0
 DEFAULT_DAILY_LIMIT = 45

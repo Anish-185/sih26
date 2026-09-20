@@ -38,6 +38,11 @@ from app.declarations import extract_declarations, has_reliable_text
 from app.escalation import assess as assess_escalation
 from app.hallmark import HallmarkOut, evaluate_hallmark
 from app.lab_registry import LabRegistry, load_laboratories
+from app.product_context import (
+    ProductContextOut,
+    build_from_analysis as build_product_context,
+    context_out,
+)
 from app.certification_journey import (
     CertificationJourneyOut,
     CertificationJourneyService,
@@ -718,6 +723,13 @@ class InspectionAnalysisOut(BaseModel):
                     "ONLY — it never affects PASS / FAIL / REVIEW, and it is never a statement that any of "
                     "these laboratories tested this item.",
     )
+    product_context: ProductContextOut | None = Field(
+        default=None,
+        description="Milestone 21: the canonical product context — the product, standard, certification, "
+                    "inspection, laboratory and hallmarking evidence THIS analysis already contains, "
+                    "composed into one view with explicit feature applicability. It creates no evidence "
+                    "and recomputes nothing. Null for inspections saved before this milestone.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -964,6 +976,14 @@ class InspectionAnalyzer:
             analysis.notes.append(f"Hallmark evidence extraction failed: {exc}")
         if analysis.hallmark is not None and (analysis.hallmark.detected or inspection_type == "HALLMARK"):
             analysis.pipeline.hallmark = analysis.hallmark.overall_status
+        # Milestone 21: compose what this analysis already holds into the canonical
+        # product context. Pure composition — no retrieval, no rule, no model — and
+        # isolated like every other optional stage, so a failure leaves it null.
+        try:
+            analysis.product_context = context_out(build_product_context(analysis.model_dump(mode="json")))
+        except Exception as exc:  # noqa: BLE001 — a summary must never fail an inspection
+            analysis.notes.append(f"Product context composition failed: {exc}")
+
         # Escalation reads the finished analysis, so it can never disagree with what is shown.
         try:
             analysis.escalation = EscalationOut(**assess_escalation(analysis.model_dump(mode="json")))
