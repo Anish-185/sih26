@@ -136,7 +136,8 @@ function SpecRow({ label, children }: { label: ReactNode; children: ReactNode })
   );
 }
 
-function Prose({ text }: { text: string }) {
+/** Shared by the grounded views and the home page language demo. */
+export function Prose({ text }: { text: string }) {
   // The backend answer is short plain text / light markdown. Render paragraphs
   // and simple bullets without pulling in a markdown dependency.
   const blocks = text.split(/\n{2,}/);

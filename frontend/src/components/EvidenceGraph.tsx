@@ -45,11 +45,11 @@ const TYPE_LABEL: Record<GraphNodeType, string> = {
 /** The main chain, for "focus on the evidence path". */
 const CHAIN: GraphNodeType[] = ["PRODUCT", "STANDARD", "REQUIREMENT", "SOURCE"];
 
-/** Status colouring is the status the producing system recorded — never a score. */
-function tone(node: GraphNode): string {
+/** The status the producing system recorded — never a score — reduced to a
+ *  single tick so the node chip itself stays quiet. */
+function statusTick(node: GraphNode): string {
   const s = node.status;
-  if (s === "MATCHED" || s === "IDENTIFIED" || s === "VERIFIED" || s === "DETECTED")
-    return "border-pass-line bg-pass-soft text-pass";
+  if (s === "MATCHED" || s === "IDENTIFIED" || s === "VERIFIED" || s === "DETECTED") return "bg-pass";
   if (
     s === "REVIEW" ||
     s === "UNCERTAIN" ||
@@ -58,9 +58,9 @@ function tone(node: GraphNode): string {
     s === "PARTIAL" ||
     s === "NOT_VERIFIED"
   )
-    return "border-review-line bg-review-soft text-review";
-  if (s === "CANDIDATE") return "border-accent-line bg-accent-soft text-accent";
-  return "border-line bg-surface text-ink-soft";
+    return "bg-review";
+  if (s === "CANDIDATE") return "bg-accent";
+  return "bg-line-strong";
 }
 
 function prettyKey(key: string): string {
@@ -105,6 +105,15 @@ export function EvidenceGraphPanel({
   const selected = selectedId ? (byId.get(selectedId) ?? null) : null;
   const outgoing = graph.edges.filter((e) => e.source === selectedId);
   const incoming = graph.edges.filter((e) => e.target === selectedId);
+  // Nodes one edge from the selection — what the highlight is actually about.
+  const linked = useMemo(() => {
+    const out = new Set<string>();
+    for (const e of graph.edges) {
+      if (e.source === selectedId) out.add(e.target);
+      if (e.target === selectedId) out.add(e.source);
+    }
+    return out;
+  }, [graph.edges, selectedId]);
 
   function select(node: GraphNode) {
     setSelectedId(node.id);
@@ -147,25 +156,42 @@ export function EvidenceGraphPanel({
                 {LAYER_LABEL[layer] ?? `layer ${layer}`}
               </Mono>
               <div className="mt-2 flex flex-wrap gap-2">
-                {layerNodes.map((node) => (
-                  <button
-                    key={node.id}
-                    type="button"
-                    onClick={() => select(node)}
-                    aria-pressed={node.id === selectedId}
-                    className={cn(
-                      "max-w-full rounded-sm border px-2.5 py-1.5 text-left transition-colors",
-                      tone(node),
-                      node.id === selectedId && "ring-1 ring-ink",
-                    )}
-                  >
-                    <span className="block truncate text-[12px] font-medium">{node.label}</span>
-                    <span className="mt-0.5 block font-mono text-[10px] uppercase tracking-[0.08em] opacity-70">
-                      {TYPE_LABEL[node.type]}
-                      {node.status ? ` · ${node.status}` : ""}
-                    </span>
-                  </button>
-                ))}
+                {layerNodes.map((node) => {
+                  const isSelected = node.id === selectedId;
+                  const isLinked = linked.has(node.id);
+                  return (
+                    <button
+                      key={node.id}
+                      type="button"
+                      onClick={() => select(node)}
+                      aria-pressed={isSelected}
+                      className={cn(
+                        "relative flex max-w-full items-start gap-2 rounded-sm border px-2.5 py-1.5 text-left",
+                        "transition-[border-color,background-color,opacity] duration-300",
+                        isSelected
+                          ? "border-ink bg-raised text-ink"
+                          : isLinked
+                            ? "border-accent-line bg-accent-soft/60 text-ink"
+                            : "border-line bg-surface text-ink-soft hover:border-line-strong",
+                        // Everything unrelated to the selection steps back, so the
+                        // relationship being read is the only thing emphasised.
+                        selectedId && !isSelected && !isLinked && "opacity-45",
+                      )}
+                    >
+                      <span
+                        aria-hidden
+                        className={cn("mt-[5px] h-1.5 w-1.5 shrink-0", statusTick(node))}
+                      />
+                      <span className="min-w-0">
+                        <span className="block truncate text-[12px] font-medium">{node.label}</span>
+                        <span className="mt-0.5 block font-mono text-[10px] uppercase tracking-[0.08em] text-ink-faint">
+                          {TYPE_LABEL[node.type]}
+                          {node.status ? ` · ${node.status}` : ""}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </li>

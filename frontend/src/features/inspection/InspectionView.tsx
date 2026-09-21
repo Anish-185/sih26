@@ -24,6 +24,7 @@ import { cn } from "@/lib/cn";
 import {
   Button,
   Callout,
+  CollapsiblePanel,
   ConfidenceMeter,
   DefinitionRow,
   InlineLoading,
@@ -555,17 +556,10 @@ export function Workspace({
           </Panel>
         </div>
 
-        {/* RIGHT — OCR + pipeline results */}
+        {/* RIGHT — what MetrIQ concluded first, then the evidence behind it.
+            Everything below "Supporting evidence" is folded away by default:
+            it is how the conclusions were reached, not the conclusions. */}
         <div className="space-y-6">
-          <QualityPanel
-            quality={activeImage?.quality ?? quality}
-            side={images.length > 1 ? activeImage?.side : undefined}
-          />
-          <DeclarationsPanel
-            stage={declaration_stage}
-            selected={linkedRegions}
-            onSelect={selectRegions}
-          />
           <ProductPanel
             vision={result.vision}
             product={product}
@@ -585,21 +579,42 @@ export function Workspace({
           {showHallmark(result.hallmark, result.inspection_type) && (
             <HallmarkEvidencePanel hallmark={result.hallmark} selected={linkedRegions} onSelect={selectRegions} />
           )}
-          <CompletenessPanel
-            completeness={result.completeness}
-            selected={linkedRegions}
-            onSelect={selectRegions}
-          />
-          <RegionsPanel
-            regions={ocr.regions}
-            selected={selectedRegion}
-            onSelect={setSelectedRegion}
-          />
-          {region && (
-            <RegionDetail region={region} declaration={declForRegion} images={images} />
-          )}
-          <RawTextPanel text={ocr.text} />
-          <DownstreamPanel result={result} />
+
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center gap-3">
+              <span className="eyebrow">Supporting evidence</span>
+              <span className="h-px flex-1 bg-line" aria-hidden />
+            </div>
+            <p className="max-w-prose text-[12px] leading-relaxed text-ink-faint">
+              What the conclusions above were read from. Open a section to see it.
+            </p>
+
+            <DeclarationsPanel
+              stage={declaration_stage}
+              selected={linkedRegions}
+              onSelect={selectRegions}
+            />
+            <CompletenessPanel
+              completeness={result.completeness}
+              selected={linkedRegions}
+              onSelect={selectRegions}
+            />
+            <RegionsPanel
+              regions={ocr.regions}
+              selected={selectedRegion}
+              onSelect={setSelectedRegion}
+            />
+            {/* Only present once a region is selected, so it stays expanded. */}
+            {region && (
+              <RegionDetail region={region} declaration={declForRegion} images={images} />
+            )}
+            <RawTextPanel text={ocr.text} />
+            <QualityPanel
+              quality={activeImage?.quality ?? quality}
+              side={images.length > 1 ? activeImage?.side : undefined}
+            />
+            <DownstreamPanel result={result} />
+          </div>
         </div>
       </div>
 
@@ -761,12 +776,14 @@ function OcrEvidence({
             stage={declaration_stage}
             selected={linkedRegions}
             onSelect={selectRegions}
+            open
           />
-          <RawTextPanel text={ocr.text} title="Detected text" />
+          <RawTextPanel text={ocr.text} title="Detected text" open />
           <RegionsPanel
             regions={ocr.regions}
             selected={selectedRegion}
             onSelect={setSelectedRegion}
+            open
           />
           {region && (
             <RegionDetail region={region} declaration={declForRegion} images={images} />
@@ -831,11 +848,15 @@ function QualityPanel({
   side?: string;
 }) {
   return (
-    <Panel flush>
-      <PanelHeader
-        title={side ? `Image quality · ${side === "UNKNOWN" ? "selected photo" : side}` : "Image quality"}
-        meta={quality.is_low_quality ? "flagged" : "ok"}
-      />
+    <CollapsiblePanel
+      title={
+        side
+          ? `How readable the photo was · ${side === "UNKNOWN" ? "selected photo" : side}`
+          : "How readable the photo was"
+      }
+      meta={quality.is_low_quality ? "flagged" : "ok"}
+      defaultOpen={quality.is_low_quality}
+    >
       <dl className="grid grid-cols-3 gap-px border-b border-line bg-line">
         {[
           ["Sharpness", quality.blur_score.toFixed(0)],
@@ -859,7 +880,7 @@ function QualityPanel({
           No quality issues detected.
         </p>
       )}
-    </Panel>
+    </CollapsiblePanel>
   );
 }
 
@@ -867,17 +888,19 @@ function RegionsPanel({
   regions,
   selected,
   onSelect,
+  open,
 }: {
   regions: OcrRegion[];
   selected: string | null;
   onSelect: (id: string | null) => void;
+  open?: boolean;
 }) {
   return (
-    <Panel flush>
-      <PanelHeader
-        title="Detected text regions"
-        meta={`${regions.length} ${regions.length === 1 ? "region" : "regions"}`}
-      />
+    <CollapsiblePanel
+      defaultOpen={open}
+      title="Text detected on the package"
+      meta={`${regions.length} ${regions.length === 1 ? "region" : "regions"}`}
+    >
       {regions.length === 0 ? (
         <p className="px-5 py-4 text-[13px] text-ink-soft">
           OCR found no legible text in this image.
@@ -923,7 +946,7 @@ function RegionsPanel({
           })}
         </ul>
       )}
-    </Panel>
+    </CollapsiblePanel>
   );
 }
 
@@ -1034,10 +1057,13 @@ function DeclarationsPanel({
   stage,
   selected,
   onSelect,
+  open,
 }: {
   stage: DeclarationStage;
   selected: string[];
   onSelect: (ids: string[]) => void;
+  /** Instant OCR shows the reading itself, so it opens these by default. */
+  open?: boolean;
 }) {
   const where = useWhere();
   const withEvidence = stage.fields.filter((d) => d.status !== "NOT_DETECTED");
@@ -1048,16 +1074,16 @@ function DeclarationsPanel({
     d.source_regions.every((id, i) => selected[i] === id);
 
   return (
-    <Panel flush>
-      <PanelHeader
-        title="Detected declarations"
-        meta={
-          <span className={stageTone(stage.status)}>
-            {stage.status.replace(/_/g, " ")}
-            {stage.principal_display_panel ? " · PDP" : ""}
-          </span>
-        }
-      />
+    <CollapsiblePanel
+      defaultOpen={open}
+      title="Values declared on the package"
+      meta={
+        <span className={stageTone(stage.status)}>
+          {stage.status.replace(/_/g, " ")}
+          {stage.principal_display_panel ? " · PDP" : ""}
+        </span>
+      }
+    >
       <p className="border-b border-line px-5 py-2.5 text-[11px] leading-relaxed text-ink-faint">
         Parsed from the OCR text by fixed rules — select one to see where it came
         from. “OCR %” is how confident PaddleOCR was reading that text, not
@@ -1159,7 +1185,7 @@ function DeclarationsPanel({
           {notDetected.map((d) => d.label).join(" · ")}
         </p>
       )}
-    </Panel>
+    </CollapsiblePanel>
   );
 }
 
@@ -1553,11 +1579,10 @@ function CompletenessPanel({
 }) {
   const where = useWhere();
   return (
-    <Panel flush>
-      <PanelHeader
-        title="Declaration observations"
-        meta={`${completeness.detected} detected · ${completeness.uncertain} uncertain · ${completeness.not_detected} not detected`}
-      />
+    <CollapsiblePanel
+      title="What the photos did and did not show"
+      meta={`${completeness.detected} detected · ${completeness.uncertain} uncertain · ${completeness.not_detected} not detected`}
+    >
       <p className="border-b border-line px-5 py-2.5 text-[11px] leading-relaxed text-ink-faint">
         {completeness.note}
         {completeness.with_verified_requirement === 0 &&
@@ -1635,7 +1660,7 @@ function CompletenessPanel({
           </tbody>
         </table>
       </div>
-    </Panel>
+    </CollapsiblePanel>
   );
 }
 
@@ -1662,8 +1687,7 @@ function DownstreamPanel({ result }: { result: InspectionAnalysis }) {
     ],
   ];
   return (
-    <Panel flush>
-      <PanelHeader title="Downstream pipeline" meta="OCR → standard live" />
+    <CollapsiblePanel title="How the pipeline ran" meta="OCR → standard">
       <ul>
         {rows.map(([k, v, status], i) => (
           <li
@@ -1688,24 +1712,25 @@ function DownstreamPanel({ result }: { result: InspectionAnalysis }) {
           </li>
         ))}
       </ul>
-    </Panel>
+    </CollapsiblePanel>
   );
 }
 
 function RawTextPanel({
   text,
   title = "Raw OCR text",
+  open,
 }: {
   text: string;
   title?: string;
+  open?: boolean;
 }) {
   return (
-    <Panel flush>
-      <PanelHeader title={title} meta="verbatim" />
+    <CollapsiblePanel defaultOpen={open} title={title} meta="verbatim">
       <pre className="max-h-72 overflow-auto whitespace-pre-wrap px-5 py-4 font-mono text-[12px] leading-relaxed text-ink">
         {text || "— no text —"}
       </pre>
-    </Panel>
+    </CollapsiblePanel>
   );
 }
 

@@ -5,18 +5,20 @@ import {
   ScrollRestoration,
   useLocation,
 } from "react-router-dom";
-import { Menu, Settings, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { useOnMount } from "@/lib/hooks";
 import { cn } from "@/lib/cn";
-import { Mono } from "@/components/ui";
-import { DigitHalftone } from "@/components/decor";
+import { LinkButton, Mono } from "@/components/ui";
+import { BrailleField } from "@/components/decor";
 
+/* The bar carries the six surfaces. "Inspect a product" is the one action, so
+   it is a button rather than a seventh link of equal weight. */
 const NAV = [
-  { to: "/inspection", label: "Inspection" },
   { to: "/standards", label: "Standards" },
+  { to: "/inspection", label: "Inspection" },
   { to: "/certification", label: "Certification" },
-  { to: "/laboratories", label: "Laboratories" },
+  { to: "/laboratories", label: "Labs" },
   { to: "/hallmarking", label: "Hallmarking" },
   { to: "/history", label: "History" },
 ];
@@ -113,7 +115,7 @@ function NavItem({
           {label}
           <span
             className={cn(
-              "absolute -bottom-[21px] left-0 hidden h-[2px] w-full bg-accent transition-opacity md:block",
+              "absolute -bottom-[23px] left-0 hidden h-[2px] w-full bg-accent transition-opacity lg:block",
               isActive ? "opacity-100" : "opacity-0 group-hover:opacity-30",
             )}
           />
@@ -134,31 +136,26 @@ function TopNav() {
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-paper/85 backdrop-blur-md">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-accent/30" aria-hidden />
-      <div className="mx-auto flex h-16 max-w-[1240px] items-center justify-between gap-6 px-5 sm:px-8">
-        <div className="flex items-center gap-9">
-          <NavLink to="/" className="flex items-center">
+      <div className="mx-auto flex h-[68px] max-w-[1240px] items-center justify-between gap-6 px-5 sm:px-8">
+        <div className="flex items-center gap-10">
+          <NavLink to="/" className="flex items-center" aria-label="MetrIQ home">
             <Wordmark withMark />
           </NavLink>
-          <nav className="hidden items-center gap-7 md:flex">
+          <nav className="hidden items-center gap-7 lg:flex">
             {NAV.map((item) => (
               <NavItem key={item.to} {...item} />
             ))}
           </nav>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <HealthStatus />
+          <LinkButton to="/inspection" size="sm" className="hidden sm:inline-flex">
+            Inspect a product
+          </LinkButton>
           <button
             type="button"
-            className="hidden text-ink-faint transition-colors hover:text-ink sm:block"
-            aria-label="Settings"
-            title="Settings"
-          >
-            <Settings className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            className="text-ink md:hidden"
+            className="text-ink lg:hidden"
             aria-label={open ? "Close menu" : "Open menu"}
             aria-expanded={open}
             onClick={() => setOpen((v) => !v)}
@@ -169,7 +166,7 @@ function TopNav() {
       </div>
 
       {open && (
-        <nav className="border-t border-line bg-paper md:hidden">
+        <nav className="border-t border-line bg-paper lg:hidden">
           <div className="mx-auto flex max-w-[1240px] flex-col px-5 py-2 sm:px-8">
             {NAV.map((item) => (
               <NavLink
@@ -185,6 +182,9 @@ function TopNav() {
                 {item.label}
               </NavLink>
             ))}
+            <LinkButton to="/inspection" size="sm" className="mt-4 mb-2 self-start sm:hidden">
+              Inspect a product
+            </LinkButton>
           </div>
         </nav>
       )}
@@ -222,7 +222,12 @@ export function SystemLayerFooter() {
           <rect width="100%" height="100%" fill="url(#ticks)" />
         </svg>
 
-        <DigitHalftone className="right-2 max-h-[60%] w-[70%] opacity-70 [mask-image:linear-gradient(to_left,#000,transparent)]" />
+        <BrailleField
+          tone="white"
+          rows={16}
+          cols={64}
+          className="bottom-0 right-0 leading-[13px] [mask-image:linear-gradient(to_left,#000,transparent_82%)]"
+        />
 
         <div className="relative mx-auto max-w-[1240px] px-5 py-20 sm:px-8 sm:py-28">
           <div className="flex items-center gap-3">
@@ -266,6 +271,19 @@ export function SystemLayerFooter() {
 /* --------------------------------------------------------------- layout --- */
 
 export function AppLayout() {
+  // Full-bleed bands are sized from 100vw, which includes the scrollbar gutter.
+  // Publishing its real width keeps them exactly as wide as the viewport.
+  useEffect(() => {
+    const set = () =>
+      document.documentElement.style.setProperty(
+        "--scrollbar",
+        `${window.innerWidth - document.documentElement.clientWidth}px`,
+      );
+    set();
+    window.addEventListener("resize", set);
+    return () => window.removeEventListener("resize", set);
+  }, []);
+
   return (
     <div className="flex min-h-dvh flex-col">
       <TopNav />

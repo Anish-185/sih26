@@ -421,3 +421,57 @@ export function DigitHalftone({ className }: { className?: string }) {
     </pre>
   );
 }
+
+/* -------------------------------------------------------------- BrailleField --- */
+
+/**
+ * A field of real Unicode braille cells (U+2800..U+28FF) whose dot-density
+ * falls off toward one edge, forming a soft halftone.
+ *
+ * MetrIQ's own answer to the reference plate's numeral texture. Braille is the
+ * right motif here because the whole product is about reading marks off a
+ * physical surface — but it is DECORATION and nothing more: the cells are
+ * generated from a hash, they spell nothing, and this element provides NO
+ * accessibility function. Always `aria-hidden`, never over readable text.
+ */
+export function BrailleField({
+  className,
+  rows = 12,
+  cols = 48,
+  tone = "ink",
+}: {
+  className?: string;
+  rows?: number;
+  cols?: number;
+  tone?: "ink" | "white";
+}) {
+  const lines: string[] = [];
+  for (let r = 0; r < rows; r++) {
+    let line = "";
+    for (let c = 0; c < cols; c++) {
+      // Density rises to the left, so the field dissolves as it travels right.
+      const t = 1 - c / cols;
+      const jitter = ((r * 17 + c * 31) % 13) / 13;
+      if (t * 0.8 + jitter * 0.45 > 0.62) {
+        // Pick a cell with 1-5 raised dots; the low bits give lighter glyphs.
+        const bits = ((r * 5 + c * 11) % 63) | 1;
+        line += String.fromCharCode(0x2800 + bits);
+      } else {
+        line += "⠀"; // blank braille cell — keeps the grid rigid
+      }
+    }
+    lines.push(line);
+  }
+  return (
+    <pre
+      aria-hidden
+      className={cn(
+        "braille pointer-events-none absolute select-none overflow-hidden text-[11px]",
+        tone === "white" ? "text-white/20" : "text-accent/15",
+        className,
+      )}
+    >
+      {lines.join("\n")}
+    </pre>
+  );
+}

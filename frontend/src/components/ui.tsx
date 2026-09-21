@@ -7,9 +7,10 @@ import {
   forwardRef,
 } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, ArrowRight, Info } from "lucide-react";
+import { AlertTriangle, ArrowRight, ChevronRight, Info } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { confidenceFill, confidenceLabel } from "@/lib/format";
+import { useReveal } from "@/lib/motion";
 
 /* ---------------------------------------------------------------- Button --- */
 
@@ -252,6 +253,51 @@ export function Panel({ as: Tag = "div", flush, className, ...props }: PanelProp
       )}
       {...props}
     />
+  );
+}
+
+/**
+ * A Panel whose header is the toggle: the same chrome as `Panel` +
+ * `PanelHeader`, built on native <details> so it is keyboard-operable and needs
+ * no state. Used to fold supporting evidence away beneath the conclusions it
+ * supports — the title says what the section is FOR, not what it contains.
+ */
+export function CollapsiblePanel({
+  title,
+  meta,
+  defaultOpen = false,
+  children,
+  className,
+}: {
+  title: ReactNode;
+  meta?: ReactNode;
+  defaultOpen?: boolean;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <details
+      open={defaultOpen}
+      className={cn("group border border-line bg-raised", className)}
+    >
+      <summary
+        className={cn(
+          "flex cursor-pointer list-none flex-wrap items-baseline justify-between gap-3 px-5 py-3 sm:px-6",
+          "transition-colors hover:bg-surface [&::-webkit-details-marker]:hidden",
+          "border-line group-open:border-b",
+        )}
+      >
+        <span className="flex items-baseline gap-2.5">
+          <ChevronRight
+            aria-hidden
+            className="disclosure-chevron h-3.5 w-3.5 shrink-0 translate-y-[2px] text-ink-faint"
+          />
+          <h3 className="text-[13px] font-semibold tracking-tight">{title}</h3>
+        </span>
+        {meta && <span className="text-[12px] text-ink-faint">{meta}</span>}
+      </summary>
+      {children}
+    </details>
   );
 }
 
@@ -548,5 +594,34 @@ export function ArrowLink({
     <Link to={to ?? "#"} className={cls}>
       {inner}
     </Link>
+  );
+}
+
+/* ------------------------------------------------------------------ Reveal --- */
+
+/**
+ * Wraps a block so it settles into place the first time it is scrolled to.
+ * Progressive enhancement only — see lib/motion.ts: under reduced motion, or
+ * with no IntersectionObserver, children render in their final state.
+ */
+export function Reveal({
+  children,
+  delay,
+  as: Tag = "div",
+  className,
+}: {
+  children: ReactNode;
+  delay?: 1 | 2 | 3 | 4;
+  as?: "div" | "section" | "li" | "header";
+  className?: string;
+}) {
+  const { ref, shown } = useReveal<HTMLDivElement>();
+  return (
+    <Tag
+      ref={ref as never}
+      className={cn("rise", delay && `rise-${delay}`, shown && "is-in", className)}
+    >
+      {children}
+    </Tag>
   );
 }
