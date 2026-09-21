@@ -31,6 +31,7 @@ import {
 } from "@/components/decor";
 import { CopilotPanel } from "@/features/CopilotPanel";
 import { ProductIntelligence } from "@/components/ProductIntelligence";
+import { EvidenceGraphSection } from "@/components/EvidenceGraphSection";
 
 const EXAMPLES = [
   "stainless steel water bottle",
@@ -172,6 +173,10 @@ export function StandardsView() {
           )}
 
           {contextTask.data && <ProductIntelligence context={contextTask.data} />}
+
+          {contextTask.data && (
+            <EvidenceGraphSection source={{ product_context: contextTask.data }} />
+          )}
 
           {res.results.length > 0 && (
             <CopilotPanel

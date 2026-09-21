@@ -1,14 +1,14 @@
-"""MetrIQ Copilot — a grounded explanation layer over a finished inspection.
+"""MetrIQ Copilot — a grounded explanation layer over verified MetrIQ evidence.
 
-    verified evidence + deterministic rules -> SYSTEM RESULT -> officer
-                                                     |
-                                                     +--> the model explains the record
+    verified evidence (OCR, declarations, product identification, standards,
+    certification, laboratories, hallmark observations) -> the model explains
+    it in plain language
 
-The copilot NEVER retrieves standards, NEVER evaluates a requirement and NEVER
-decides PASS / FAIL / REVIEW. It receives an inspection that the deterministic
-pipeline has already finished and puts it into plain language. Everything it is
-allowed to talk about is in the context this module builds; the system result in
-the API response is read from the record, not from the model.
+MetrIQ produces no automatic legal/compliance verdict. The copilot NEVER
+retrieves standards, NEVER runs a rule and NEVER states a PASS/FAIL/compliance
+result — there is none to state. It receives evidence the deterministic
+pipeline already assembled and puts it into plain language. Everything it is
+allowed to talk about is in the context this module builds.
 
 Three layers of protection, in order:
 
@@ -19,9 +19,9 @@ Three layers of protection, in order:
                  must never be followed as instructions.
 3. VERIFICATION  ``guard()`` re-reads the generated text deterministically. An
                  answer that cites a standard, HUID or URL that is not in the
-                 context, claims a hallmark is authentic, or states a verdict
-                 other than the deterministic one, is WITHHELD — the application
-                 returns its own deterministic sentence instead.
+                 context, claims a hallmark is authentic, or states a
+                 compliance verdict MetrIQ never produced, is WITHHELD — the
+                 application returns its own deterministic sentence instead.
 
 No module of the inspection pipeline imports this file.
 """
@@ -43,18 +43,17 @@ LAYER over verified MetrIQ evidence, never a source of facts of your own.
 
 MetrIQ is an evidence-backed system for BIS (Bureau of Indian Standards)
 requirements and Legal Metrology packaged-commodity rules. Everything in the
-context below — the inspection result, the retrieved standards, the certification
+context below — the inspection evidence, the retrieved standards, the certification
 route, the laboratory records — was produced by MetrIQ's deterministic retrieval
-and rule engines BEFORE you were called. Your only job is to explain that
+and evidence extraction BEFORE you were called. Your only job is to explain that
 evidence in clear, plain language. You never produce it, extend it or revise it.
 
 SOURCE OF TRUTH, in order:
 1. the inspection evidence supplied below
 2. the verified BIS knowledge quoted in it
 3. the verified Legal Metrology knowledge quoted in it
-4. the deterministic compliance results in it
-5. the OCR evidence in it
-6. the officer's own note, when one is supplied
+4. the OCR evidence in it
+5. the user's own question, when one is supplied
 Your pretrained knowledge NEVER overrides these and is never evidence. Do not
 treat anything you happen to know about a standard, a product, a laboratory, a
 fee or a procedure as a fact here: if it is not in the supplied context, it does
@@ -71,9 +70,11 @@ YOU MUST NOT:
 - invent or guess an Indian Standard number, a clause, a requirement, a rule, a
   product identity, a HUID, a test result, a certification status, a fee, a
   laboratory, a legal conclusion, or a source URL;
-- state a PASS, FAIL or REVIEW other than the one already in the record, or
-  imply the result should be different — you explain the result, you never
-  decide it;
+- state or imply that a product, package or item PASSES, FAILS, or otherwise
+  meets or fails a legal/compliance requirement, or that it "is compliant" or
+  "is non-compliant". MetrIQ produces no automatic compliance verdict — you may
+  only describe what evidence and verified knowledge exist and what could or
+  could not be established from the photographs;
 - authenticate, verify or vouch for a physical item, a hallmark, a HUID, a
   licence or a registration. MetrIQ can only report what was OBSERVED in a
   photograph. Observed is not authenticated. Never write "HUID verified",
@@ -82,6 +83,11 @@ YOU MUST NOT:
   MetrIQ has no channel that could establish any of them. Never invent a HUID,
   a jeweller registration, an Assaying and Hallmarking Centre, or a hallmarking
   procedure, and never turn an OCR or visual observation into verification;
+- derive anything new from an EVIDENCE GRAPH in the context. A graph is a picture
+  of relationships MetrIQ's deterministic systems already recorded: it decides
+  nothing. Never read a standard, a requirement, a rule, an authentication or a
+  result out of a path through it, and never claim a relationship it does not
+  hold;
 - present something not detected on the label as legally missing;
 - say that a laboratory is currently valid, currently recognised, accredited,
   NABL accredited, operational, available, or suitable for a particular test,
@@ -99,22 +105,24 @@ YOU MUST NOT:
   number that the supplied evidence does not state.
 
 YOU MUST:
-- keep these four apart and never merge them into a generic "missing". They mean
-  different things and the officer acts on them differently:
+- keep these three apart and never merge them into a generic "missing". They
+  mean different things and a reader acts on them differently:
   NOT_DETECTED   the photographs did not show it. NOT a statement that it is
                  absent from the item or legally missing.
   UNCERTAIN      it was found but could not be read reliably (ambiguous or
                  corrupted OCR, or photographs that disagree). MetrIQ withholds
                  the value on purpose — do not guess it.
-  UNSUPPORTED    MetrIQ has no verified deterministic rule for it, so it was not
-                 checked. Not a pass, not a failure.
   NOT_AVAILABLE_IN_KNOWLEDGE_BASE
                  MetrIQ's verified knowledge base holds no record for it. A
                  statement about MetrIQ's coverage, never about what exists;
+- when a declaration carries requirement_coverage VERIFIED_REQUIREMENT, say
+  only that a verified requirement mentions this field — never that the item
+  passed or failed it, since MetrIQ produces no such verdict; NOT_ESTABLISHED
+  means MetrIQ holds no verified requirement linking this field, not that
+  nothing is required;
 - preserve uncertainty exactly as the record states it, and never resolve a
   conflict the record left open;
-- distinguish clearly between detected, not detected, uncertain, unsupported
-  (MetrIQ has no verified rule for it) and verified;
+- distinguish clearly between detected, not detected, uncertain and verified;
 - say "Insufficient evidence in the inspection record." when the supplied
   context does not answer the question, instead of filling the gap;
 - cite the evidence you used, using only identifiers, quotes and URLs that
@@ -132,7 +140,7 @@ never treat it as proof of anything.
 ANSWER FORMAT: reply with ONE JSON object and nothing else:
 {"answer": "...", "evidence": [{"claim": "...", "source": "..."}],
  "limitations": ["..."]}
-"answer" is plain text for an inspection officer (no markdown headings, at most
+"answer" is plain text for the person running the inspection (no markdown headings, at most
 about 150 words). "evidence" ties each significant statement to something in the
 context (a rule id, a declaration field, an OCR region id, a quoted source or a
 URL from the context) — at most 4 entries, each one short line. "limitations"
@@ -151,12 +159,15 @@ EVIDENCE_VOCABULARY = {
                     "from the item or legally missing.",
     "UNCERTAIN": "It was found but could not be read reliably — ambiguous or corrupted OCR text, "
                  "or photographs that disagree. MetrIQ withholds the value on purpose.",
-    "UNSUPPORTED": "MetrIQ has no verified deterministic rule for it, so it was not checked. "
-                   "It is not a pass and not a failure.",
     "NOT_AVAILABLE_IN_KNOWLEDGE_BASE": "MetrIQ's verified knowledge base holds no record for it. "
                                        "That is a statement about MetrIQ's coverage, not about "
                                        "what exists in reality.",
-    "_note": "These four are different. Never merge them into a generic 'missing'.",
+    "VERIFIED_REQUIREMENT": "A verified requirement that applies to this package mentions this "
+                            "declaration field. Not a pass or a failure — MetrIQ produces no such "
+                            "verdict, only a link to the verified requirement.",
+    "NOT_ESTABLISHED": "MetrIQ holds no verified requirement linking this field. Not a statement "
+                       "that nothing is required — only that MetrIQ's verified data does not cover it.",
+    "_note": "These are different. Never merge them into a generic 'missing'.",
 }
 
 # ------------------------------------------------------------------ capabilities
@@ -164,44 +175,38 @@ EVIDENCE_VOCABULARY = {
 # Each capability is one user action -> ONE provider request. `sections` keeps
 # the prompt small: only the evidence that capability needs is sent.
 
-_CORE = ("inspection", "system_result", "escalation")
+_CORE = ("inspection", "escalation")
 
 CAPABILITIES: dict[str, dict] = {
     "EXPLAIN_INSPECTION": {
         "label": "Explain this inspection",
-        "question": "Explain this inspection and its system result.",
-        "sections": _CORE + ("product", "standards", "bis_compliance", "legal_metrology", "hallmarking", "declarations"),
-        "instruction": "Explain what was inspected, what the evidence established, and why the "
-                       "deterministic system result is what it is. Do not re-decide it.",
+        "question": "Explain this inspection.",
+        "sections": _CORE + ("product", "standards", "hallmarking", "declarations"),
+        "instruction": "Explain what was inspected, what the evidence established, and what — if "
+                       "anything — could not be established from the photographs. MetrIQ produces no "
+                       "compliance verdict; do not state or imply one.",
     },
     "SUMMARIZE": {
         "label": "Summarise in simple language",
         "question": "Summarise this inspection in simple language.",
-        "sections": _CORE + ("product", "standards", "bis_compliance", "legal_metrology", "hallmarking"),
+        "sections": _CORE + ("product", "standards", "hallmarking"),
         "instruction": "Summarise the case for someone who has not read the evidence. Keep it short "
                        "and factual.",
     },
     "EXPLAIN_ESCALATION": {
-        "label": "Why does an officer need to review this?",
-        "question": "Why does an officer need to review this inspection?",
-        "sections": _CORE + ("product", "bis_compliance", "legal_metrology", "hallmarking"),
-        "instruction": "Explain each escalation reason in the record in plain language. If the record "
-                       "says no officer review is required, say that instead.",
-    },
-    "EXPLAIN_CHECKS": {
-        "label": "Which requirements were checked?",
-        "question": "Which requirements were checked, and what did each one conclude?",
-        "sections": _CORE + ("bis_compliance", "legal_metrology", "coverage"),
-        "instruction": "Go through the checks in the record: what each required, what was observed and "
-                       "what it concluded. Say plainly which requirement areas MetrIQ has no verified "
-                       "rule for.",
+        "label": "Why could MetrIQ not resolve this automatically?",
+        "question": "Why could MetrIQ not fully establish this inspection from the photographs?",
+        "sections": _CORE + ("product", "hallmarking", "completeness"),
+        "instruction": "Explain each unresolved reason in the record in plain language. If the record "
+                       "says nothing was left unresolved, say that instead.",
     },
     "EXPLAIN_EVIDENCE": {
-        "label": "What evidence supports this result?",
-        "question": "What evidence supports this result?",
-        "sections": _CORE + ("product", "standards", "declarations", "bis_compliance", "legal_metrology", "ocr_text"),
-        "instruction": "List the evidence behind the result: which declarations were read, from which "
-                       "package side and OCR region, and which verified sources the requirements come from.",
+        "label": "What evidence supports this identification?",
+        "question": "What evidence supports this product and standard identification?",
+        "sections": _CORE + ("product", "standards", "declarations", "ocr_text"),
+        "instruction": "List the evidence behind the product and standard identification: which "
+                       "declarations were read, from which package side and OCR region, and which "
+                       "verified knowledge-base records the standard match comes from.",
     },
     "EXPLAIN_UNCERTAINTY": {
         "label": "Which declarations remain uncertain?",
@@ -222,28 +227,24 @@ CAPABILITIES: dict[str, dict] = {
                        "nothing.",
     },
     "EXPLAIN_RESULT": {
-        "label": "Why did this inspection get this result?",
-        "question": "Why did this inspection get this result?",
-        "sections": _CORE + ("product", "standards", "bis_compliance", "legal_metrology",
-                             "hallmarking", "coverage"),
-        "instruction": "Explain the deterministic result exactly as the record states it. For a FAIL, "
-                       "name the rule(s) that concluded FAIL and the evidence behind each. For a PASS, "
-                       "name the supported checks that passed. For a REVIEW, explain why compliance "
-                       "could not be established — which requirement is unresolved, which evidence is "
-                       "uncertain, and which requirement areas MetrIQ has no verified rule for. "
-                       "Explain the result; never restate it as a stronger legal conclusion, and never "
-                       "say the item is legally compliant or non-compliant.",
+        "label": "Why did MetrIQ reach this outcome?",
+        "question": "Why did this inspection reach this outcome?",
+        "sections": _CORE + ("product", "standards", "hallmarking", "completeness"),
+        "instruction": "Explain what the evidence establishes exactly as the record states it: the "
+                       "product and standard identification and its confidence, what was detected in "
+                       "the declarations, and what — if anything — could not be established from the "
+                       "photographs. MetrIQ produces no automatic compliance verdict — never state or "
+                       "imply that the item is legally compliant or non-compliant, and never say it "
+                       "passed or failed.",
     },
     "WHAT_IS_MISSING": {
         "label": "What information is missing?",
         "question": "What information is missing from this inspection?",
-        "sections": _CORE + ("product", "standards", "declarations", "completeness",
-                             "bis_compliance", "legal_metrology", "coverage"),
-        "instruction": "Say precisely what is missing and in WHICH sense, keeping the four states "
-                       "apart: not detected in the photographs, uncertain in the OCR, unsupported "
-                       "(no verified MetrIQ rule), and not available in the verified knowledge base. "
-                       "Never call any of them simply 'missing' and never call a not-detected "
-                       "declaration legally missing.",
+        "sections": _CORE + ("product", "standards", "declarations", "completeness"),
+        "instruction": "Say precisely what is missing and in WHICH sense, keeping the states apart: "
+                       "not detected in the photographs, uncertain in the OCR, and not available in "
+                       "the verified knowledge base. Never call any of them simply 'missing' and never "
+                       "call a not-detected declaration legally missing.",
     },
     "EXPLAIN_STANDARD": {
         "label": "Why was this standard identified?",
@@ -277,14 +278,25 @@ CAPABILITIES: dict[str, dict] = {
                        "feature as missing data, and never fill a gap. Finish with the limitations the "
                        "context itself lists. Add nothing that is not in it.",
     },
+    "EXPLAIN_EVIDENCE_GRAPH": {
+        "label": "Explain this evidence graph",
+        "question": "Explain how MetrIQ connected this evidence, following its evidence graph.",
+        "sections": _CORE + ("evidence_graph", "product", "standards"),
+        "instruction": "Walk the chain the graph records, in order: the OCR / declaration / visual "
+                       "evidence, the product identification, the standard, and its requirement / "
+                       "certification / laboratory relationships, naming each relationship the graph "
+                       "actually holds. The graph is a picture of relationships MetrIQ already "
+                       "established — it decides nothing, so do not derive a new relationship, a new "
+                       "standard or a compliance verdict from it. If a link is absent, say it is absent.",
+    },
     "MANUAL_VERIFICATION": {
         "label": "What should I manually verify?",
-        "question": "What should the officer manually verify?",
-        "sections": _CORE + ("product", "declarations", "bis_compliance", "legal_metrology", "hallmarking", "completeness"),
+        "question": "What must be verified manually, outside MetrIQ?",
+        "sections": _CORE + ("product", "declarations", "hallmarking", "completeness"),
         "instruction": "List ONLY the items the record itself leaves unresolved — escalation reasons, "
-                       "uncertain or conflicting declarations, checks that concluded REVIEW, and "
-                       "requirement areas with no verified rule. Do not invent a legal checklist and do "
-                       "not add steps the record does not support.",
+                       "uncertain or conflicting declarations, and anything the verified knowledge base "
+                       "does not cover for this product. Do not invent a legal checklist and do not add "
+                       "steps the record does not support.",
     },
     "EXPLAIN_CERTIFICATION": {
         "label": "What certification applies to this product?",
@@ -302,10 +314,9 @@ CAPABILITIES: dict[str, dict] = {
     "QUESTION": {
         "label": "Ask about the evidence",
         "question": "",
-        "sections": _CORE + ("product", "standards", "declarations", "bis_compliance", "legal_metrology",
-                             "hallmarking", "completeness", "coverage", "officer_review", "certification",
-                             "laboratories", "product_context", "ocr_text"),
-        "instruction": "Answer the officer's question using only the record. If the record does not "
+        "sections": _CORE + ("product", "standards", "declarations", "hallmarking", "completeness",
+                             "certification", "laboratories", "product_context", "ocr_text"),
+        "instruction": "Answer the question using only the record. If the record does not "
                        "contain the answer, say: Insufficient evidence in the inspection record.",
     },
 }
@@ -314,10 +325,11 @@ QUESTION_MAX = 400
 
 # Caps that keep one request small on the free tier.
 _MAX_DECLARATIONS = 24
-_MAX_CHECKS = 16
 _MAX_STANDARDS = 3
 _MAX_JOURNEY_STEPS = 8
 _MAX_LABS = 8
+_MAX_GRAPH_NODES = 40
+_MAX_GRAPH_EDGES = 40
 _MAX_OCR_LINES = 45
 _MAX_OCR_CHARS = 1800
 _VALUE_CHARS = 160
@@ -379,48 +391,6 @@ class SourceBook:
         return sid
 
 
-# A check MetrIQ has no rule for carries no observation and no evidence chain,
-# so it is sent as one line. The informative ones keep their full evidence.
-_BRIEF_RESULTS = {"NOT_SUPPORTED", "NOT_APPLICABLE"}
-
-
-def _check(check: dict, book: SourceBook) -> dict:
-    if check.get("result") in _BRIEF_RESULTS:
-        brief = {
-            "rule_id": check.get("rule_id"),
-            "requirement": _clean(check.get("requirement"), 160),
-            "result": check.get("result"),
-            "reason": _clean(check.get("reason"), 160),
-            "authority": check.get("source_category", "BIS"),
-        }
-        if check.get("reference"):
-            brief["reference"] = _clean(check["reference"], 80)
-        return brief
-
-    out = {
-        "rule_id": check.get("rule_id"),
-        "requirement": _clean(check.get("requirement"), 200),
-        "result": check.get("result"),
-        "reason_code": check.get("reason_code"),
-        "reason": _clean(check.get("reason"), 240),
-        "expected": _clean(check.get("expected_condition"), 200),
-        "observed": _clean(check.get("observed_value")) or None,
-        "evidence_status": check.get("evidence_status"),
-        "authority": check.get("source_category", "BIS"),
-    }
-    if check.get("reference"):
-        out["reference"] = _clean(check["reference"], 80)
-    if check.get("standard_number"):
-        out["standard_number"] = check["standard_number"]
-    regions = [r for ev in check.get("evidence", []) for r in ev.get("source_regions", [])]
-    if regions:
-        out["source_regions"] = sorted(set(regions))[:6]
-    source_id = book.add(check.get("source"))
-    if source_id:
-        out["source_id"] = source_id
-    return out
-
-
 def _declaration(dec: dict) -> dict:
     if dec.get("status") == "NOT_DETECTED":
         return {"field": dec.get("field"), "label": _clean(dec.get("label"), 80), "status": "NOT_DETECTED",
@@ -442,14 +412,6 @@ def _declaration(dec: dict) -> dict:
     if dec.get("ocr_confidence") is not None:
         out["ocr_confidence"] = round(float(dec["ocr_confidence"]), 2)
     return out
-
-
-_CHECK_ORDER = {"FAIL": 0, "REVIEW": 1, "PASS": 2, "NOT_SUPPORTED": 3, "NOT_APPLICABLE": 4}
-
-
-def _ordered(checks: list[dict]) -> list[dict]:
-    """Keep the checks that carry information when the cap bites."""
-    return sorted(checks, key=lambda c: _CHECK_ORDER.get(c.get("result"), 5))[:_MAX_CHECKS]
 
 
 def _observation(obs: dict) -> dict:
@@ -540,13 +502,11 @@ def build_context(
     """Compact, trusted evidence for one question. Only application data.
 
     ``analysis`` is a finished InspectionAnalysisOut as JSON; ``record`` is the
-    persisted inspection when the question is about a saved one (it adds the
-    officer review). Nothing here is recomputed — every value is read.
+    persisted inspection when the question is about a saved one. Nothing here is
+    recomputed — every value is read.
     """
     sections = set(CAPABILITIES.get(capability, CAPABILITIES["QUESTION"])["sections"])
     book = SourceBook()
-    compliance = analysis.get("compliance") or {}
-    label = analysis.get("package_label") or {}
     hallmark = analysis.get("hallmark") or {}
     escalation = analysis.get("escalation") or {}
     package = analysis.get("package") or {}
@@ -561,24 +521,11 @@ def build_context(
             "photos_failed": package.get("images_failed", []),
             "photos_without_reliable_text": package.get("images_no_reliable_text", []),
         },
-        "system_result": {
-            "result": (record or {}).get("system_result") or escalation.get("system_result"),
-            "authority": "Computed by MetrIQ's deterministic rule engine. It is final for this record "
-                         "and cannot be changed by this explanation.",
-            "bis_result": compliance.get("overall_status"),
-            "bis_reason": _clean(compliance.get("reason"), 300),
-            "legal_metrology_result": label.get("overall_status"),
-            "legal_metrology_scope": label.get("scope_status"),
-            "legal_metrology_reason": _clean(label.get("reason"), 300),
-        },
     }
-    if hallmark:
-        ctx["system_result"]["hallmarking_result"] = hallmark.get("overall_status")
-        ctx["system_result"]["hallmark_verification_status"] = hallmark.get("verification_status")
 
     if "escalation" in sections:
         ctx["escalation"] = {
-            "officer_review_required": escalation.get("required"),
+            "resolvable_by_system": not escalation.get("required"),
             "reasons": [
                 {
                     "code": r.get("code"),
@@ -668,36 +615,6 @@ def build_context(
         fields = sorted(fields, key=lambda d: (order.get(d.get("status"), 3),))
         ctx["declarations"] = [_declaration(d) for d in fields[:_MAX_DECLARATIONS]]
 
-    if "bis_compliance" in sections:
-        coverage = compliance.get("coverage") or {}
-        ctx["bis_compliance"] = {
-            "overall_status": compliance.get("overall_status"),
-            "coverage_status": compliance.get("coverage_status"),
-            "reason_code": compliance.get("reason_code"),
-            "reason": _clean(compliance.get("reason"), 300),
-            "standard_number": compliance.get("standard_number"),
-            "product_applicability": coverage.get("product_applicability"),
-            "coverage_explanation": _clean(coverage.get("explanation"), 400),
-            "checks": [_check(c, book) for c in _ordered(compliance.get("checks", []))],
-            "summary": [_clean(s, 200) for s in compliance.get("summary", [])[:8]],
-        }
-
-    if "legal_metrology" in sections:
-        ctx["legal_metrology"] = {
-            "authority": label.get("source_authority"),
-            "overall_status": label.get("overall_status"),
-            "scope_status": label.get("scope_status"),
-            "reason_code": label.get("reason_code"),
-            "reason": _clean(label.get("reason"), 300),
-            "exclusions_found": [
-                {"description": _clean(e.get("description"), 160), "observed": _clean(e.get("observed"))}
-                for e in label.get("exclusions_found", [])[:4]
-            ],
-            "assumptions": [_clean(a, 180) for a in label.get("assumptions", [])[:3]],
-            "checks": [_check(c, book) for c in _ordered(label.get("checks", []))],
-            "summary": [_clean(s, 200) for s in label.get("summary", [])[:8]],
-        }
-
     if "hallmarking" in sections and hallmark:
         huid, purity = hallmark.get("huid") or {}, hallmark.get("purity") or {}
         ctx["hallmarking"] = {
@@ -780,22 +697,36 @@ def build_context(
             ],
         }
 
-    if "coverage" in sections:
-        coverage = compliance.get("coverage") or {}
-        ctx["inspection_coverage"] = {
-            "verified_requirements": coverage.get("verified_requirements"),
-            "deterministic_rules": coverage.get("deterministic_rules"),
-            "unsupported_requirements": coverage.get("unsupported_requirements"),
-            "explanation": _clean(coverage.get("explanation"), 400),
-        }
-
     if "product_context" in sections and analysis.get("product_context"):
         ctx["product_context"] = _product_context(analysis["product_context"], book)
 
+    if "evidence_graph" in sections:
+        # Milestone 22. A PROJECTION of this same analysis: the relationships the
+        # deterministic pipeline already recorded, nothing more. It adds no fact —
+        # every node it names is a node built from the evidence above.
+        from app.evidence_graph import build_from_analysis as _graph
+
+        graph = _graph(analysis)
+        ctx["evidence_graph"] = {
+            "what_this_is": "A read-only projection of relationships MetrIQ's deterministic pipeline "
+                            "already established for THIS inspection. It infers nothing: a relationship "
+                            "appears only because a MetrIQ system recorded it.",
+            "node_count": len(graph.nodes),
+            "edge_count": len(graph.edges),
+            "nodes": [
+                {"id": n.id, "type": n.type, "label": _clean(n.label, 120), "status": n.status}
+                for n in graph.nodes[:_MAX_GRAPH_NODES]
+            ],
+            "relationships": [
+                f"{e.source} --{e.type}--> {e.target}: {_clean(e.explanation, 160)}"
+                for e in graph.edges[:_MAX_GRAPH_EDGES]
+            ],
+            "limitations": list(graph.limitations)[:8],
+        }
+
     if "laboratories" in sections:
         # Milestone 18/20. A DATED SNAPSHOT of a BIS LIMS listing, informational
-        # only: it never touched the compliance result and it establishes nothing
-        # about a laboratory's current status.
+        # only: it establishes nothing about a laboratory's current status.
         labs = analysis.get("laboratories") or []
         ctx["testing_laboratories"] = {
             "what_this_is": "Laboratories BIS's LIMS listed against the identified standard, read from "
@@ -835,17 +766,6 @@ def build_context(
                 "this standard. That is a statement about MetrIQ's coverage, not about which "
                 "laboratories exist."
             )
-
-    if "officer_review" in sections and record:
-        ctx["officer_review"] = {
-            "status": record.get("officer_status"),
-            "decision": record.get("officer_decision"),
-            "officer_result": record.get("officer_result"),
-            "officer_note": _clean(record.get("officer_note"), 400),
-            "final_result": record.get("final_result"),
-        }
-    elif record:
-        ctx["officer_review"] = {"status": record.get("officer_status")}
 
     ctx["evidence_vocabulary"] = EVIDENCE_VOCABULARY
 
@@ -889,7 +809,7 @@ FEATURE_CAPABILITIES: dict[str, tuple[str, ...]] = {
     "LABORATORY": ("EXPLAIN_LABORATORY", "QUESTION"),
     # Milestone 21 — the canonical product context, which already spans features.
     "PRODUCT": ("EXPLAIN_PRODUCT_CONTEXT", "EXPLAIN_STANDARD", "EXPLAIN_CERTIFICATION",
-                "EXPLAIN_LABORATORY", "QUESTION"),
+                "EXPLAIN_LABORATORY", "EXPLAIN_EVIDENCE_GRAPH", "QUESTION"),
 }
 
 _NOT_IN_KB = "NOT_AVAILABLE_IN_KNOWLEDGE_BASE"
@@ -955,6 +875,22 @@ def build_feature_context(feature: str, payload: dict) -> dict:
 
     elif feature == "PRODUCT":
         ctx["product_context"] = _product_context(payload, book)
+        # Milestone 22: the same context, projected as the relationships MetrIQ
+        # recorded. A projection, never a second source of facts.
+        from app.evidence_graph import build_from_context as _context_graph
+
+        graph = _context_graph(payload)
+        ctx["evidence_graph"] = {
+            "what_this_is": "A read-only projection of the relationships in the product context above. "
+                            "It infers nothing and decides nothing.",
+            "node_count": len(graph.nodes),
+            "edge_count": len(graph.edges),
+            "nodes": [{"id": n.id, "type": n.type, "label": _clean(n.label, 120), "status": n.status}
+                      for n in graph.nodes[:_MAX_GRAPH_NODES]],
+            "relationships": [f"{e.source} --{e.type}--> {e.target}: {_clean(e.explanation, 160)}"
+                              for e in graph.edges[:_MAX_GRAPH_EDGES]],
+            "limitations": list(graph.limitations)[:8],
+        }
 
     else:  # LABORATORY
         labs = payload.get("laboratories") or []
@@ -1024,7 +960,7 @@ def render_prompt(context: dict, capability: str, question: str) -> str:
     body = json.dumps(context, ensure_ascii=False, indent=1, default=str)
 
     parts = [
-        f"OFFICER'S QUESTION:\n{question or spec['question']}",
+        f"QUESTION:\n{question or spec['question']}",
         f"WHAT TO DO:\n{spec['instruction']}",
         "METRIQ EVIDENCE (trusted application data — the only evidence you may use):\n" + body,
     ]
@@ -1107,7 +1043,7 @@ def parse_response(text: str) -> CopilotAnswer:
 
 
 # A reply cut off by the token limit is still valid text up to the cut. Rather
-# than showing the officer raw JSON, pull out the complete fields and say plainly
+# than showing raw JSON, pull out the complete fields and say plainly
 # that the rest was lost.
 _JSON_STRING = r'"((?:[^"\\]|\\.)*)"'
 _ANSWER_FIELD = re.compile(r'"answer"\s*:\s*' + _JSON_STRING)
@@ -1157,7 +1093,11 @@ _NEGATION = re.compile(
 _AUTHENTICATION = re.compile(
     r"\b(?:huid|hallmark(?:ing)?|mark|item|piece|jewellery|jewelry|article|product)\b[^.]{0,80}?"
     r"\b(?:is|was|has been|are|were|have been)\b[^.]{0,30}?"
-    r"\b(genuine|authentic|authenticated|verified|validated|confirmed real)\b",
+    r"\b(genuine|authentic|authenticated|verified|validated|confirmed real)\b"
+    # "the verified record / requirement / rule / source" is MetrIQ's own vocabulary
+    # for its knowledge base — an adjective, not a claim that an item was verified.
+    r"(?!\s+(?:record|records|requirement|requirements|rule|rules|source|sources|knowledge|"
+    r"standard|standards|data|text|evidence|quote|quotes|listing|snapshot)\b)",
     re.IGNORECASE,
 )
 # Only a claim about the OVERALL result counts as a contradiction. A sentence
@@ -1206,8 +1146,8 @@ WITHHELD_MESSAGES = {
     "FABRICATED_SOURCE": "the generated text cited a source URL that is not in the inspection record",
     "AUTHENTICATION_CLAIM": "the generated text claimed a hallmark, HUID or item was authenticated, "
                             "which MetrIQ can never establish from a photograph",
-    "CONTRADICTS_SYSTEM_RESULT": "the generated text stated a result other than the deterministic "
-                                 "system result",
+    "FABRICATED_VERDICT": "the generated text stated a compliance verdict (pass, fail, review, or "
+                          "compliant/non-compliant), which MetrIQ does not produce",
     "LABORATORY_STATUS_CLAIM": "the generated text claimed a laboratory's current accreditation, "
                                "recognition or availability, which a dated MetrIQ snapshot can never "
                                "establish",
@@ -1225,27 +1165,25 @@ def _huids(text: str) -> set[str]:
     return {m.group(1).upper() for m in _HUID.finditer(text)}
 
 
-def _verdicts(text: str) -> set[str]:
-    found = {m.group(1).upper().replace("PASSED", "PASS").replace("FAILED", "FAIL")
-             for m in _VERDICT_CLAIM.finditer(text)}
-    for match in _COMPLIANT_CLAIM.finditer(text):
-        word = match.group(1).lower()
-        found.add("REVIEW" if word.startswith("non") else "PASS")
-    return found
+def _has_verdict_claim(text: str) -> bool:
+    """MetrIQ produces no PASS/FAIL/compliance verdict, so any such claim in the
+    generated text is fabricated by definition — there is nothing to compare it
+    against."""
+    return bool(_VERDICT_CLAIM.search(text) or _COMPLIANT_CLAIM.search(text))
 
 
 def _amounts(text: str) -> set[str]:
     return {m.group(1).replace(",", "").rstrip(".") for m in _AMOUNT.finditer(text)}
 
 
-def guard(answer: CopilotAnswer, context_text: str, system_result: str | None,
-          language: str = lang.EN) -> CopilotAnswer:
+def guard(answer: CopilotAnswer, context_text: str, language: str = lang.EN) -> CopilotAnswer:
     """Deterministic verification of the generated text. Withhold, never patch.
 
     The model is not trusted to have obeyed its instructions, so the application
     re-reads what it produced: any standard number, HUID or URL it used must
     already appear in the context we sent, it may not claim an authentication,
-    and it may not state a verdict other than the deterministic one.
+    and it may not state a compliance verdict — MetrIQ produces none, so any
+    such claim is fabricated regardless of what it says.
     """
     text = "\n".join(
         [answer.answer]
@@ -1264,6 +1202,8 @@ def guard(answer: CopilotAnswer, context_text: str, system_result: str | None,
         reason = "FABRICATED_SOURCE"
     elif _amounts(text) - _amounts(context_text):
         reason = "FABRICATED_AMOUNT"
+    elif _has_verdict_claim(text):
+        reason = "FABRICATED_VERDICT"
     else:
         for sentence in re.split(r"(?<=[.!?])\s+", text):
             if _AUTHENTICATION.search(sentence) and not _NEGATION.search(sentence):
@@ -1277,11 +1217,6 @@ def guard(answer: CopilotAnswer, context_text: str, system_result: str | None,
                     reason = "LABORATORY_STATUS_CLAIM"
                     break
 
-    if not reason and system_result:
-        stated = _verdicts(text)
-        if stated and stated != {system_result.upper()}:
-            reason = "CONTRADICTS_SYSTEM_RESULT"
-
     if not reason:
         return answer
 
@@ -1289,16 +1224,14 @@ def guard(answer: CopilotAnswer, context_text: str, system_result: str | None,
     # model is involved in producing it.
     english = (
         f"This explanation was withheld because {WITHHELD_MESSAGES[reason]}. "
-        + (f"The deterministic system result is {system_result} and is unchanged. "
-           if system_result else "")
-        + "Read the MetrIQ evidence on this page, which is the record itself."
+        "Read the MetrIQ evidence on this page, which is the record itself."
     )
     return CopilotAnswer(
         answer=english if language == lang.EN else f"{lang.withheld(language)} ({english})",
         evidence=[],
         limitations=[
             "MetrIQ verified the generated explanation against its own evidence and rejected it.",
-            "The deterministic result, the evidence and the officer workflow are not affected.",
+            "The deterministic result and the stored evidence are not affected.",
         ],
         withheld=True,
         withheld_reason=reason,
@@ -1348,7 +1281,6 @@ def collect_sources(context: dict) -> list[dict]:
 class CopilotResult:
     capability: str
     question: str
-    system_result: str | None
     escalation_required: bool | None
     answer: CopilotAnswer
     sources: list[dict]
@@ -1393,23 +1325,17 @@ class InspectionCopilot:
             raise ValueError(f"unknown capability '{capability}'")
 
         question = _clean(question, QUESTION_MAX) or CAPABILITIES[capability]["question"]
-        # The officer's own words decide the language when none was requested.
+        # The user's own words decide the language when none was requested.
         language = lang.resolve(question, language)
         context = build_context(analysis, capability, record=record, rule_id=rule_id)
 
-        # The result shown to the user always comes from the record.
         escalation = analysis.get("escalation") or {}
-        system_result = (record or {}).get("system_result") or escalation.get("system_result")
         escalation_required = (
             record.get("escalation_required") if record and "escalation_required" in record
             else escalation.get("required")
         )
 
-        return self._run(
-            context, capability, question, language,
-            system_result=system_result,
-            escalation_required=escalation_required,
-        )
+        return self._run(context, capability, question, language, escalation_required=escalation_required)
 
     def explain_feature(
         self,
@@ -1422,8 +1348,8 @@ class InspectionCopilot:
     ) -> CopilotResult:
         """Explain a feature page's deterministic result (Milestone 20).
 
-        There is no inspection and no system result here — the evidence is the
-        retrieval / journey / laboratory lookup the backend already produced.
+        There is no inspection here — the evidence is the retrieval / journey /
+        laboratory lookup the backend already produced.
         """
         if feature not in FEATURES:
             raise ValueError(f"unknown feature context '{feature}'")
@@ -1447,7 +1373,6 @@ class InspectionCopilot:
         question: str,
         language: str,
         *,
-        system_result: str | None = None,
         escalation_required: bool | None = None,
         context_type: str = "INSPECTION",
     ) -> CopilotResult:
@@ -1462,12 +1387,11 @@ class InspectionCopilot:
             max_tokens=1600,
         )
 
-        answer = guard(parse_response(text), prompt, system_result, language)
+        answer = guard(parse_response(text), prompt, language)
 
         return CopilotResult(
             capability=capability,
             question=question,
-            system_result=system_result,
             escalation_required=escalation_required,
             answer=answer,
             sources=sources,

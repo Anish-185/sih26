@@ -120,10 +120,9 @@ def test_no_text_returns_empty_not_fake() -> None:
     check("blank image -> product REVIEW", result.product.status == "REVIEW")
     check("blank image -> no product invented", result.product.name is None)
     check("blank image -> no standard candidates invented", result.standards == [])
-    check("blank image -> pipeline summary present, ocr COMPLETED",
+    check("blank image -> pipeline summary present, ocr COMPLETED, no compliance verdict",
           result.pipeline.ocr == "COMPLETED"
-          and result.pipeline.compliance == "REVIEW"
-          and result.compliance.coverage_status == "NO_STANDARD")
+          and not hasattr(result.pipeline, "compliance") and not hasattr(result, "compliance"))
 
 
 def test_rejects_non_image_bytes() -> None:

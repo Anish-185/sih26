@@ -32,13 +32,12 @@ warnings.filterwarnings("ignore")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app.compliance import evaluate_compliance  # noqa: E402
 from app.declarations import DeclarationKnowledge, extract_declarations  # noqa: E402
 from app.inspection import InspectionAnalyzer, PackageUpload  # noqa: E402
 from app.main import app  # noqa: E402
 from app.product import ProductStandardFinder  # noqa: E402
 from app.product_identification import identify_product  # noqa: E402
-from app.requirements import coverage_by_standard, knowledge_domain, load_requirements  # noqa: E402
+from app.requirements import confirm_product, coverage_by_standard, knowledge_domain, load_requirements  # noqa: E402
 from app.retrieval.engine import SearchEngine  # noqa: E402
 
 PASS = 0
@@ -85,11 +84,11 @@ def fields(lines, knowledge=None):
     return {d.field: d for d in stage.fields}
 
 
-def evaluate(lines, requirements=REAL):
+def identify(lines, requirements=REAL):
     regions = label(lines)
     stage = extract_declarations(regions)
     product = identify_product(stage, regions, FINDER)
-    return evaluate_compliance(product, stage, requirements, ITEMS), product, stage
+    return product, stage
 
 
 def data_file(rows: list[dict]):
@@ -108,11 +107,11 @@ WATER = ["AQUA PURE", "PACKAGED DRINKING WATER", "NET QUANTITY: 1 L"]
 def test_standard_numbers() -> None:
     one = fields(["MRP Rs 20", "ISI  IS 14543"])["standard_number"]
     check("1 'ISI  IS 14543' -> IS 14543 read", one.status == "DETECTED" and one.value == "IS 14543", str(one))
-    _, product, _ = evaluate(WATER + ["ISI  IS 14543"])
+    product, _ = identify(WATER + ["ISI  IS 14543"])
     check("1 ... and linked to the verified knowledge-base standard",
           product.status == "MATCHED" and product.standard_number == "IS 14543:2016"
           and any(ev.match == "standard_number" for ev in product.evidence), product.reason)
-    _, product, _ = evaluate(WATER + ["ISI  IS 99999"])
+    product, _ = identify(WATER + ["ISI  IS 99999"])
     check("1 'ISI  IS 99999' is never treated as a verified standard",
           product.unverified_standard_numbers == ["IS 99999"] and product.standard_number == "IS 14543:2016",
           str(product.unverified_standard_numbers))
@@ -147,22 +146,11 @@ def test_standard_numbers() -> None:
     check("3 an unverified corrupt reference does not conflict with a clean read",
           both.status == "DETECTED" and both.value == "IS 14543", str(both))
 
-    ev, _, _ = evaluate(WATER + ["ISTIS 14543"])
-    rule = next(c for c in ev.checks if c.rule_type == "printed_standard_number")
-    check("normalized verified IS number can confirm a match (PASS)", rule.result == "PASS", rule.reason)
-    _, conflict_product, _ = evaluate(WATER + ["ISTIS 13428"])
+    match_product, _ = identify(WATER + ["ISTIS 14543"])
+    check("normalized verified IS number can confirm a match", match_product.status == "MATCHED", match_product.reason)
+    conflict_product, _ = identify(WATER + ["ISTIS 13428"])
     check("a normalized number of a different verified record puts identification in REVIEW",
           conflict_product.status == "REVIEW", conflict_product.reason)
-    _, water_product, _ = evaluate(WATER)
-    other = extract_declarations(label(WATER + ["ISTIS 13428"]))
-    ev = evaluate_compliance(water_product, other, REAL, ITEMS)
-    rule = next(c for c in ev.checks if c.rule_type == "printed_standard_number")
-    check("normalized reading is never used to FAIL a package -> REVIEW",
-          rule.result == "REVIEW" and rule.reason_code == "EVIDENCE_NORMALIZED" and ev.overall_status == "REVIEW",
-          rule.reason)
-    ev, _, _ = evaluate(WATER + ["IS 14534"])
-    check("clean different IS number still FAILs (existing rule preserved)",
-          next(c for c in ev.checks if c.rule_type == "printed_standard_number").result == "FAIL")
 
 
 # ------------------------------------------------------------ 4-5 product name
@@ -307,14 +295,14 @@ def test_knowledge() -> None:
           and totals["standard_only"] == totals["total"] - 6
           and all(s["reason"] for s in body["standards"]), str(totals))
 
-    _, water_product, stage = evaluate(WATER + ["IS 14543"])
     gold_record = KB["is-1417-2016-gold-hallmarking-fineness"]
-    gold_match = replace(water_product, knowledge_id=gold_record.id, standard_number=gold_record.standard_number,
-                         name="Gold fineness grades used for hallmarking")
-    ev = evaluate_compliance(gold_match, stage, REAL, ITEMS)
-    check("a hallmarking standard in package inspection -> UNSUPPORTED REVIEW, no checks",
-          ev.coverage_status == "UNSUPPORTED" and ev.overall_status == "REVIEW" and ev.checks == []
-          and ev.reason_code == "DOMAIN_NOT_PACKAGE_LABEL", ev.reason)
+    applicability, confirmed, _ = confirm_product(
+        replace(identify(WATER + ["IS 14543"])[0], knowledge_id=gold_record.id,
+               standard_number=gold_record.standard_number, name="Gold fineness grades used for hallmarking"),
+        REAL,
+    )
+    check("a hallmarking standard has no modelled package-label product (data-level protection)",
+          applicability == "PRODUCT_NOT_MODELLED" and confirmed is None, applicability)
 
 
 # ------------------------------------------------------------ 12-14 regression
@@ -323,13 +311,12 @@ def test_knowledge() -> None:
 def test_regression() -> None:
     upload = PackageUpload((SAMPLES / "synth_packaged-water.png").read_bytes(), filename="water.png")
     water = InspectionAnalyzer(llm=None, product_finder=FINDER).analyze_package([upload])
-    rule = next(c for c in water.compliance.checks if c.rule_id == "packaged-water-label-shows-is-number")
     names = {d.field: d for d in water.declaration_stage.fields}
     check("12 real water label: standard identified, product confirmed",
           water.product.standard_number == "IS 14543:2016"
-          and water.compliance.coverage.product_applicability == "PRODUCT_CONFIRMED")
-    check("12 real water label: IS-number check PASS, overall REVIEW (unchanged)",
-          rule.result == "PASS" and water.compliance.overall_status == "REVIEW", rule.reason)
+          and water.product.product_applicability == "PRODUCT_CONFIRMED")
+    check("12 real water label: IS number declared and DETECTED (unchanged)",
+          names["standard_number"].status == "DETECTED" and names["standard_number"].value == "IS 14543")
     check("12 real water label: 'AQUA SPRING' is no longer the product name",
           names["product_name"].value != "Aqua Spring", str(names["product_name"].value))
     check("12 real water label: OCR 'care@ clearflow.example' recovered with provenance",
@@ -351,12 +338,13 @@ def test_regression() -> None:
     check("13 multi-side regions keep per-image ids",
           all(r["id"].startswith(("I1-", "I2-")) for img in j["images"] for r in img["ocr"]["regions"]))
 
-    ev, _, _ = evaluate(WATER + ["IS 14543"])
-    check("14 compliance engine: water PASS + unsupported areas -> REVIEW (unchanged)",
-          ev.overall_status == "REVIEW" and ev.reason_code == "REQUIREMENTS_NOT_CHECKABLE"
-          and ev.coverage_status == "INSPECTION_SUPPORTED")
-    check("14 compliance engine: IS number not detected -> REVIEW (unchanged)",
-          evaluate(WATER)[0].checks[0].reason_code == "EVIDENCE_NOT_DETECTED")
+    water_product, _ = identify(WATER + ["IS 14543"])
+    applicability, _, _ = confirm_product(water_product, REAL)
+    check("14 water: product still confirmed under its verified requirement data (unchanged)",
+          applicability == "PRODUCT_CONFIRMED", applicability)
+    _, water_stage = identify(WATER)
+    check("14 declaration extraction: IS number not printed -> NOT_DETECTED (unchanged)",
+          next(d for d in water_stage.fields if d.field == "standard_number").status == "NOT_DETECTED")
     body = client.post("/product-standard", json={"product": "packaged drinking water"}).json()
     check("Product -> Standard unchanged", body["results"][0]["standard_number"] == "IS 14543:2016")
 

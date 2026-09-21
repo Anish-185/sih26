@@ -7,11 +7,14 @@ and never writes anything: every value comes from the stored record, and a value
 that is not there is reported as not established.
 
 Sections: header · inspection summary · package photos · OCR evidence ·
-declarations · BIS standard evidence · certification guidance · relevant testing laboratories ·
-Legal Metrology evidence ·
-compliance results · automated system result · officer review · final outcome · evidence
-and sources. The system result and the officer's decision are always shown
-separately.
+declarations · BIS standard evidence (with the verified requirements the standard
+specifies, as knowledge — never a pass/fail check) · certification guidance ·
+relevant testing laboratories · Legal Metrology evidence (package-label
+requirement knowledge) · hallmarking · visual observations · what MetrIQ could
+establish from the evidence · sources. MetrIQ produces no automatic PASS/FAIL/
+REVIEW compliance verdict, so the report contains none: a requirement is
+reported as verified knowledge the standard specifies, never as a check
+outcome.
 
 All stored text (OCR, product names, notes) is escaped before it reaches the
 layout, so package text can never inject markup into the PDF.
@@ -21,9 +24,12 @@ from __future__ import annotations
 
 import io
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from xml.sax.saxutils import escape
+
+from app.requirements import BIS as REQ_BIS, load_requirements
 
 from PIL import Image as PILImage, ImageDraw
 from reportlab.lib import colors
@@ -83,17 +89,6 @@ PAGE_W, PAGE_H = A4
 MARGIN = 18 * mm
 CONTENT_W = PAGE_W - 2 * MARGIN
 
-OFFICER_STATUS = {
-    "NOT_REQUIRED": "Not required — resolved by the system",
-    "PENDING": "Pending officer review",
-    "IN_REVIEW": "In review",
-    "COMPLETED": "Completed",
-}
-DECISIONS = {
-    "ACCEPT_SYSTEM_RESULT": "Accept system result",
-    "OVERRIDE": "Override",
-    "MANUAL_REVIEW": "Manual review",
-}
 CHECK_RESULT = {"NOT_SUPPORTED": "UNSUPPORTED", "NOT_APPLICABLE": "NOT APPLICABLE"}
 AUTHORITY = {"BIS": "BIS", "LEGAL_METROLOGY": "Legal Metrology", "HALLMARKING": "Hallmarking"}
 REASON_SOURCE = {**AUTHORITY, "OCR": "OCR evidence", "PRODUCT": "Product", "PIPELINE": "Pipeline"}
@@ -332,33 +327,30 @@ def _summary(d: _Doc, rec: dict, an: dict) -> list:
          else "<font color='#8b8e94'>No verified standard identified</font>"),
         ("Package sides inspected", _t(", ".join(rec["sides"])) + f" ({rec['image_count']} "
          f"{'photo' if rec['image_count'] == 1 else 'photos'})"),
-        ("Officer review status", _t(OFFICER_STATUS[rec["officer_status"]])),
+        ("Resolved by the deterministic system", "No — some evidence could not be established from the photos"
+         if rec["escalation_required"] else "Yes — every applicable check was decided on the stored evidence"),
     ]))
     out += [Spacer(1, 4 * mm), _outcome_boxes(d, rec)]
     return out
 
 
 def _outcome_boxes(d: _Doc, rec: dict) -> Table:
-    """System result and officer decision side by side — never merged."""
-    status = rec["officer_status"]
-    if status == "NOT_REQUIRED":
-        officer = [d.p("Not required", "h3"),
-                   d.p("The system resolved this inspection; it was not escalated to an officer.", "small")]
-    elif status == "COMPLETED":
-        officer = [d.p(_t(DECISIONS[rec["officer_decision"]]), "h3")]
-        if rec["officer_decision"] == "OVERRIDE":
-            officer += [d.p("Officer result", "kicker"), d.badge(rec["officer_result"])]
-        elif rec["officer_decision"] == "MANUAL_REVIEW":
-            officer.append(d.p("Manual / physical verification required.", "small"))
-        else:
-            officer.append(d.p(f"The officer accepted the system result ({_t(rec['system_result'])}).", "small"))
+    """The identified standard, and whether the system could establish every part of the
+    evidence chain itself. MetrIQ produces no automatic PASS/FAIL/REVIEW compliance verdict."""
+    if rec["escalation_required"]:
+        resolution = [d.p("Not fully established from the photos alone", "h3"),
+                      d.p("At least one part of the evidence chain could not be established from the "
+                          "stored evidence. The reasons are listed below; verification outside MetrIQ "
+                          "is needed.", "small")]
     else:
-        officer = [d.p("None yet", "h3"),
-                   d.p(f"Officer review is {_t(OFFICER_STATUS[status].lower())}; no officer has decided this "
-                       "inspection.", "small")]
-    left = [d.p("AUTOMATED SYSTEM RESULT", "kicker"), Spacer(1, 1.5 * mm), d.badge(rec["system_result"]),
-            Spacer(1, 1.5 * mm), d.p("Deterministic rules over stored evidence. Fixed when saved.", "small")]
-    right = [d.p("OFFICER FINAL DECISION", "kicker"), Spacer(1, 1.5 * mm), *officer]
+        resolution = [d.p("Established by the deterministic system", "h3"),
+                      d.p("Every part of the evidence chain the system needed was decided on the "
+                          "stored evidence.", "small")]
+    left = [d.p("BIS STANDARD IDENTIFIED", "kicker"), Spacer(1, 1.5 * mm),
+            d.badge(None, rec.get("standard_number") or "Not identified"),
+            Spacer(1, 1.5 * mm), d.p("Deterministic retrieval over the verified knowledge base. Fixed "
+                                     "when saved.", "small")]
+    right = [d.p("RESOLUTION", "kicker"), Spacer(1, 1.5 * mm), *resolution]
     half = (CONTENT_W - 4 * mm) / 2
     t = Table([[left, "", right]], colWidths=[half, 4 * mm, half])
     t.setStyle(TableStyle([
@@ -399,6 +391,34 @@ def _photos(d: _Doc, rec: dict, an: dict, images: dict[int, bytes]) -> list:
     t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
                            ("BOTTOMPADDING", (0, 0), (-1, -1), 5 * mm)]))
     return out + [t]
+
+
+@lru_cache(maxsize=1)
+def _requirements_and_items():
+    """The verified requirement knowledge, loaded once. Read-only lookup — the
+    report recomputes no result; this only turns a standard number already in
+    the stored record into the requirement text it specifies."""
+    from app.knowledge.loader import load_knowledge_base
+
+    items = load_knowledge_base().items
+    return load_requirements(items), {item.id: item for item in items}
+
+
+def _requirement_table(d: _Doc, reqs: list, items_by_id: dict) -> Table:
+    """Requirements a standard (or the Legal Metrology packaged-commodity rules)
+    specifies — verified knowledge, quoted from a verified record. Never a
+    pass/fail table: MetrIQ produces no automatic compliance verdict."""
+    rows = []
+    for r in reqs:
+        item = items_by_id.get(r.source_knowledge_id)
+        source = (f"{_t(item.title)}<br/><font name='Mono' color='#585c63'>{_t(item.source_url)}</font>"
+                  if item and item.source_url else "<font color='#8b8e94'>source not stored</font>")
+        text = _t(r.description)
+        if r.applicability:
+            text += f"<br/><font size=7 color='#8b8e94'>{_t(r.applicability)}</font>"
+        rows.append([f"<font name='Mono'>{_t(r.reference or r.id)}</font>", text, source])
+    return d.table(["Reference", "Requirement (verified knowledge, not a check)", "Source"], rows,
+                   [26 * mm, CONTENT_W - 84 * mm, 58 * mm])
 
 
 def _where(region_ids: list[str], sides: dict[str, str]) -> str:
@@ -462,7 +482,7 @@ def _declarations(d: _Doc, an: dict) -> list:
 
 
 def _bis(d: _Doc, rec: dict, an: dict) -> list:
-    product, standards, comp = an["product"], an["standards"], an["compliance"]
+    product, standards = an["product"], an["standards"]
     out = d.section(6, "BIS standard evidence", "Standards come only from MetrIQ's verified BIS knowledge base, ranked "
                     "by deterministic retrieval. A standard match is retrieval evidence — not a certification or "
                     "conformity decision.")
@@ -492,11 +512,16 @@ def _bis(d: _Doc, rec: dict, an: dict) -> list:
                      ("Source", d.source_block(c) if c.get("source_url") or c.get("document_name") else "—"),
                  ])]
         out.append(KeepTogether(block))
-    cov = comp.get("coverage") or {}
-    out += [Spacer(1, 4 * mm), d.definitions([
-        ("BIS inspection coverage", _t(comp.get("coverage_status"))),
-        ("Coverage explanation", _t(cov.get("explanation") or comp.get("reason"))),
-    ])]
+    requirements_set, items_by_id = _requirements_and_items()
+    modelled_product_id = product.get("modelled_product_id")
+    reqs = (requirements_set.for_product(rec["standard_number"], modelled_product_id)
+            if rec.get("standard_number") else [])
+    out += [Spacer(1, 4 * mm)]
+    if reqs:
+        out += d.h3("Requirements this standard specifies (verified knowledge, not a pass/fail check)")
+        out.append(_requirement_table(d, reqs, items_by_id))
+    else:
+        out.append(d.p("MetrIQ holds no verified requirement text for this standard.", "soft"))
     return out
 
 
@@ -599,56 +624,27 @@ def _laboratories(d: _Doc, an: dict) -> list:
 
 
 def _legal_metrology(d: _Doc, an: dict) -> list:
-    pl = an["package_label"]
-    if pl.get("scope_status") == "NOT_APPLIED":
-        return d.section(7, "Legal Metrology evidence") + [d.callout(_t(pl["reason"]))]
-    out = d.section(7, "Legal Metrology evidence", f"Source authority: {_t(pl['source_authority'])}. These are "
-                    "package-label requirements of the Legal Metrology (Packaged Commodities) Rules, 2011 as "
-                    "amended — not BIS requirements — and are reported separately from BIS.")
-    out.append(d.definitions([
-        ("Applicability", _t(pl.get("scope")) or "—"),
-        ("Scope status", _t(pl["scope_status"])),
-        ("Legal Metrology result", d.badge(pl["overall_status"])),
-        ("Reason", _t(pl["reason"])),
-    ]))
-    for f in pl.get("exclusions_found", []):
-        out += [Spacer(1, 2 * mm), d.callout(f"Exclusion read on the label: {_t(f['description'])} "
-                                             f"(read: {_t(f['observed'])})", "REVIEW")]
-    header = [d.p(_t(h.upper()), "kicker") for h in ("Requirement", "Checkable", "Evidence", "Status")]
-    data, style = [header], []
-    widths = [72 * mm, 30 * mm, CONTENT_W - 136 * mm, 34 * mm]
-    for c in pl["checks"]:
-        checkable = c["result"] != "NOT_SUPPORTED"
-        evidence = _t(c.get("observed_value")) if c.get("observed_value") else "—"
-        regions = [r for e in c.get("evidence", []) for r in e["source_regions"]]
-        if regions:
-            evidence += f"<br/><font name='Mono' color='#8b8e94'>{_t(', '.join(regions))}</font>"
-        src = c.get("source") or {}
-        data.append([
-            d.p(f"<font name='Mono'>{_t(c['reference'])}</font><br/>{_t(c['requirement'])}", "cell"),
-            d.p("Checkable" if checkable else "<font color='#8a6200'>Not checkable from an image</font>", "cell"),
-            d.p(evidence, "cell"),
-            d.badge(c["result"] if c["result"] in RESULT_COLORS else None, CHECK_RESULT.get(c["result"], c["result"])),
-        ])
-        source = (f"<font color='#8b8e94'>SOURCE · {_t(AUTHORITY.get(src.get('source_authority'), 'Legal Metrology'))}"
-                  f"</font>  {_t(src.get('title'))}<br/><font name='Mono' color='#585c63'>{_t(src.get('source_url'))}</font>"
-                  if src else "<font color='#8b8e94'>SOURCE · none stored</font>")
-        data.append([d.p(source, "cellsoft"), "", "", ""])
-        row = len(data) - 1
-        style += [("SPAN", (0, row), (-1, row)), ("NOSPLIT", (0, row - 1), (-1, row)),
-                  ("LINEBELOW", (0, row), (-1, row), 0.5, LINE_STRONG),
-                  ("TOPPADDING", (0, row), (-1, row), 0), ("LINEBELOW", (0, row - 1), (-1, row - 1), 0, colors.white)]
-    table = Table(data, colWidths=widths, repeatRows=1)
-    table.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 2 * mm),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 2 * mm), ("TOPPADDING", (0, 0), (-1, -1), 2.6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3.2), ("BACKGROUND", (0, 0), (-1, 0), SURFACE),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.6, LINE_STRONG), ("BOX", (0, 0), (-1, -1), 0.5, LINE_STRONG), *style,
-    ]))
-    out += [Spacer(1, 3 * mm), table]
-    if pl.get("assumptions"):
+    """Legal Metrology package-label requirement KNOWLEDGE — the Legal Metrology
+    (Packaged Commodities) Rules, 2011 as amended, quoted from verified records.
+    Reported as knowledge, never as a pass/fail check: MetrIQ produces no
+    automatic compliance verdict."""
+    if an.get("inspection_type", "PACKAGE") == "HALLMARK":
+        return d.section(7, "Legal Metrology evidence") + [d.callout(
+            "Legal Metrology packaged-commodity rules do not apply to a hallmark / jewellery inspection.")]
+    requirements_set, items_by_id = _requirements_and_items()
+    out = d.section(7, "Legal Metrology evidence", "Package-label requirements of the Legal Metrology "
+                    "(Packaged Commodities) Rules, 2011 as amended — not BIS requirements — reported as "
+                    "verified knowledge, separately from BIS.")
+    scope = requirements_set.package_scope
+    if scope is not None:
+        out.append(d.p(_t(scope.description), "soft"))
+    reqs = requirements_set.for_package()
+    if not reqs:
+        return out + [d.p("MetrIQ holds no verified Legal Metrology package-label requirement data.", "soft")]
+    out += [Spacer(1, 2 * mm), _requirement_table(d, reqs, items_by_id)]
+    if scope is not None and scope.assumptions:
         out.append(KeepTogether([d.p("Applies on these assumptions (not visible on a label)", "h3"),
-                                 *[d.p(f"· {_t(a)}", "small") for a in pl["assumptions"]]]))
+                                 *[d.p(f"· {_t(a)}", "small") for a in scope.assumptions]]))
     return out
 
 
@@ -706,7 +702,7 @@ def _hallmark(d: _Doc, an: dict) -> list:
         out.append(d.p("\u201cNot detected\u201d means this photograph did not show the mark. It is not a "
                        "finding that the article lacks it.", "faint"))
 
-    # A HUID typed by the officer or consumer: recorded, compared as text, never verified.
+    # A HUID typed by the user or consumer: recorded, compared as text, never verified.
     entered = h.get("user_huid")
     if entered:
         out += [Spacer(1, 3 * mm), d.p("USER-PROVIDED HUID", "kicker"), d.definitions([
@@ -816,45 +812,19 @@ def _vision(d: _Doc, an: dict) -> list:
     return out
 
 
-def _compliance(d: _Doc, an: dict) -> list:
-    out = d.section(8, "Compliance results", "Each row is one deterministic rule applied to the stored OCR evidence "
-                    "and a verified requirement. No language model produced or changed these results. UNSUPPORTED "
-                    "means the requirement cannot be checked from a package image — it is never counted as PASS.")
-    rows = []
-    for source, ev in (("BIS", an["compliance"]), ("LEGAL_METROLOGY", an["package_label"])):
-        for c in ev["checks"]:
-            label = CHECK_RESULT.get(c["result"], c["result"])
-            regions = [r for e in c.get("evidence", []) for r in e["source_regions"]]
-            evidence = (_t(c["observed_value"]) if c.get("observed_value") else "<i>nothing read</i>") + (
-                f"<br/><font name='Mono' color='#8b8e94'>{_t(', '.join(regions))}</font>" if regions else "")
-            rows.append([
-                f"{_t(c['requirement'])}<br/><font name='Mono' color='#8b8e94'>{_t(AUTHORITY[source])}"
-                f"{' · ' + _t(c['reference']) if c.get('reference') else ''}</font>",
-                d.badge(c["result"] if c["result"] in RESULT_COLORS else None, label),
-                evidence,
-                f"{_t(c['reason'])}<br/><font name='Mono' color='#8b8e94'>{_t(c['reason_code'])}</font>",
-            ])
-    if not rows:
-        return out + [d.p("No deterministic checks are stored for this inspection.", "soft")]
-    return out + [d.table(["Requirement", "Result", "Evidence", "Reason (from the rule)"], rows,
-                          [50 * mm, 32 * mm, 33 * mm, CONTENT_W - 115 * mm])]
-
-
-def _system_result(d: _Doc, rec: dict, an: dict) -> list:
-    out = d.section(9, "Automated system result")
+def _resolution(d: _Doc, rec: dict, an: dict) -> list:
+    """What MetrIQ could establish from the evidence — never a compliance verdict.
+    ``escalation_required``/``escalation_reasons`` are MetrIQ's own record of what
+    the deterministic pipeline could not settle from the photographs; nothing
+    here is a PASS/FAIL/REVIEW result."""
+    out = d.section(9, "What MetrIQ could establish from the evidence")
     out.append(d.definitions([
-        ("System result", d.badge(rec["system_result"])),
-        ("How it is combined", "FAIL if any applicable evidence system (BIS, Legal Metrology, hallmarking) is FAIL; "
-                               "PASS only if all are PASS; otherwise REVIEW."),
-        *[(f"{AUTHORITY[r['source']]} result",
-           [d.badge(r["result"]), Spacer(1, 1 * mm), d.p(_t(r["reason"]), "cell"),
-            d.p(_t(r["reason_code"]), "kicker")]) for r in rec["system_reasons"]],
-        ("Escalation", "Officer review required — the system could not confidently resolve this inspection."
-         if rec["escalation_required"] else "Not required — the system resolved this inspection."),
+        ("Established from the photographed evidence", "No — see the reasons below."
+         if rec["escalation_required"] else "Yes — nothing further is outstanding."),
     ]))
     reasons = rec.get("escalation_reasons") or []
     if reasons:
-        out += d.h3("Why the system could not resolve it" if rec["escalation_required"] else "Recorded observations")
+        out += d.h3("What could not be established" if rec["escalation_required"] else "Recorded observations")
         out.append(d.table(["Reason", "Source", "Detail", "Evidence"], [[
             _t(r["label"]), _t(REASON_SOURCE.get(r["source"], r["source"])), _t(r["message"]),
             f"<font name='Mono'>{_t(', '.join(r['source_regions'] + r['checks'])) or '—'}</font>",
@@ -862,8 +832,14 @@ def _system_result(d: _Doc, rec: dict, an: dict) -> list:
     fields = an["declaration_stage"]["fields"]
     unresolved = [f["label"] for f in fields if f["status"] == "UNCERTAIN"]
     conflicts = [f["label"] for f in fields if f.get("consistency") == "CONFLICT"]
-    unsupported = [(c.get("reference") or c["requirement"]).rstrip(".") for ev in (an["compliance"], an["package_label"])
-                   for c in ev["checks"] if c["result"] == "NOT_SUPPORTED"]
+    requirements_set, items_by_id = _requirements_and_items()
+    product = an.get("product") or {}
+    applicable_reqs = []
+    if rec.get("standard_number"):
+        applicable_reqs += requirements_set.for_product(rec["standard_number"], product.get("modelled_product_id"))
+    if an.get("inspection_type", "PACKAGE") != "HALLMARK":
+        applicable_reqs += requirements_set.for_package()
+    unsupported = [(r.reference or r.id) for r in applicable_reqs if not r.supported]
     if _hallmark_shown(an):
         h = an["hallmark"]
         unresolved += [f"Hallmark {k}" for k in ("HUID", "purity") if h["huid" if k == "HUID" else "purity"]["status"]
@@ -873,59 +849,14 @@ def _system_result(d: _Doc, rec: dict, an: dict) -> list:
     out += [Spacer(1, 3 * mm), d.definitions([
         ("Uncertain declarations", _t(", ".join(unresolved)) or "None"),
         ("Conflicting declarations", _t(", ".join(conflicts)) or "None"),
-        ("Unsupported checks", _t("; ".join(unsupported)) or "None"),
+        ("Requirements with no verified deterministic rule", _t("; ".join(unsupported)) or "None"),
     ])]
     return out
 
 
-def _officer(d: _Doc, rec: dict) -> list:
-    out = d.section(10, "Officer review")
-    status = rec["officer_status"]
-    if status == "NOT_REQUIRED":
-        return out + [d.callout("Officer review was not required: the system resolved this inspection and it was "
-                                "never sent to the officer queue.")]
-    rows = [("Status", _t(OFFICER_STATUS[status])),
-            ("Review started", _t(_fmt_time(rec.get("review_started_at"))))]
-    if status == "COMPLETED":
-        rows += [("Officer decision", _t(DECISIONS[rec["officer_decision"]])),
-                 ("Officer result", d.badge(rec["officer_result"]) if rec.get("officer_result") else "— (only an override records one)"),
-                 ("Officer note", _t(rec.get("officer_note")) or "<font color='#8b8e94'>No note recorded</font>"),
-                 ("Review completed", _t(_fmt_time(rec.get("review_completed_at"))))]
-    out.append(d.definitions(rows))
-    if status != "COMPLETED":
-        out += [Spacer(1, 3 * mm), d.callout("Officer review has not yet been completed. No officer has approved, "
-                                             "overridden or otherwise decided this inspection.", "REVIEW")]
-    out += [Spacer(1, 2 * mm), d.p("MetrIQ has no officer accounts, so no officer identity is recorded or shown.",
-                                   "faint")]
-    return out
-
-
-def _final(d: _Doc, rec: dict) -> list:
-    out = d.section(11, "Final outcome", "The automated system result and the officer's decision are recorded "
-                    "separately. The officer's decision never replaces the system result.")
-    status = rec["officer_status"]
-    rows = [("System result", d.badge(rec["system_result"]))]
-    if status == "NOT_REQUIRED":
-        rows += [("Officer final decision", "Not required"),
-                 ("Final result", [d.badge(rec["system_result"]), d.p("The system result is final.", "small")])]
-    elif status == "COMPLETED":
-        rows.append(("Officer final decision", _t(DECISIONS[rec["officer_decision"]])))
-        if rec["officer_decision"] == "OVERRIDE":
-            rows.append(("Officer result", d.badge(rec["officer_result"])))
-        rows.append(("Officer note", _t(rec.get("officer_note")) or "<font color='#8b8e94'>No note recorded</font>"))
-        final = rec.get("final_result")
-        rows.append(("Final result", d.badge(final) if final in RESULT_COLORS
-                     else d.badge(None, "MANUAL REVIEW")))
-    else:
-        rows += [("Officer final decision", "<font color='#8a6200'>Pending — officer review "
-                  f"{_t(OFFICER_STATUS[status].lower())}</font>"),
-                 ("Final result", "<font color='#8a6200'>Not final until the officer review is completed</font>")]
-    out.append(KeepTogether([d.definitions(rows)]))
-    return out
-
-
 def _sources(d: _Doc, rec: dict, an: dict) -> list:
-    out = d.section(12, "Evidence and sources", "Only the sources stored with this inspection's evidence.")
+    out = d.section(10, "Evidence and sources", "Sources for the evidence and verified knowledge in this "
+                    "inspection record.")
     seen: set[tuple] = set()
 
     def collect(sources) -> list:
@@ -940,13 +871,33 @@ def _sources(d: _Doc, rec: dict, an: dict) -> list:
             items.append(KeepTogether([*d.source_block(s), Spacer(1, 2.5 * mm)]))
         return items
 
+    requirements_set, items_by_id = _requirements_and_items()
+    product = an.get("product") or {}
+
+    def _req_sources(reqs) -> tuple[list, list]:
+        bis_sources, lm_sources = [], []
+        for r in reqs:
+            item = items_by_id.get(r.source_knowledge_id)
+            if item is None:
+                continue
+            entry = {"title": item.title, "source_url": item.source_url,
+                     "document_name": item.document_name,
+                     "last_verified": str(item.last_verified) if item.last_verified else None}
+            (bis_sources if r.source_category == REQ_BIS else lm_sources).append(entry)
+        return bis_sources, lm_sources
+
+    std_reqs = (requirements_set.for_product(rec["standard_number"], product.get("modelled_product_id"))
+                if rec.get("standard_number") else [])
+    std_bis_sources, std_lm_sources = _req_sources(std_reqs)
+    package_reqs = (requirements_set.for_package()
+                    if an.get("inspection_type", "PACKAGE") != "HALLMARK" else [])
+    _, package_lm_sources = _req_sources(package_reqs)
+
     bis = [c for c in an["standards"] if c.get("source_url") or c.get("document_name")]
-    bis_checks = [s for c in an["compliance"]["checks"] for s in [c.get("source"), *c.get("supporting_sources", [])]]
-    lm = [an["package_label"].get("scope_source")] + [
-        s for c in an["package_label"]["checks"] for s in [c.get("source"), *c.get("supporting_sources", [])]]
     hallmark_sources = an["hallmark"].get("sources", []) if _hallmark_shown(an) else []
     hallmark_sources = [{**s, "reference": None} for s in hallmark_sources]
-    groups = [("BIS", collect(bis + bis_checks)), ("Legal Metrology", collect(lm))]
+    groups = [("BIS", collect(bis + std_bis_sources)),
+              ("Legal Metrology", collect(std_lm_sources + package_lm_sources))]
     if hallmark_sources:
         groups.append(("BIS Hallmarking", collect(hallmark_sources)))
     for title, items in groups:
@@ -968,7 +919,6 @@ def build_story(record: dict, images: dict[int, bytes], generated_at: datetime) 
     an = record["analysis"]
     generated = _fmt_time(generated_at)
 
-    status = OFFICER_STATUS[record["officer_status"]]
     story: list = [
         d.p("MetrIQ", "brand"),
         Spacer(1, 1 * mm),
@@ -980,12 +930,13 @@ def build_story(record: dict, images: dict[int, bytes], generated_at: datetime) 
             ("Inspection ID", f"<font name='Mono'>{_t(record['inspection_id'])}</font>"),
             ("Inspection saved", _t(_fmt_time(record["created_at"]))),
             ("Report generated", _t(generated)),
-            ("Current status", f"System result {_t(record['system_result'])} · officer review: {_t(status)}"),
+            ("BIS standard identified", _t(record.get("standard_number")) or "Not identified"),
         ]),
         Spacer(1, 3 * mm),
         d.callout("This report is an audit trail of the persisted inspection record. It was generated from stored "
                   "data only: no result was recomputed, no language model was used, and nothing was changed. "
-                  "It is not a BIS certification or a legal determination."),
+                  "It is not a BIS certification or a legal determination, and it contains no automatic "
+                  "PASS/FAIL/REVIEW compliance verdict."),
     ]
     story += _summary(d, record, an)
     story += _photos(d, record, an, images)
@@ -997,10 +948,7 @@ def build_story(record: dict, images: dict[int, bytes], generated_at: datetime) 
     story += _legal_metrology(d, an)
     story += _hallmark(d, an)
     story += _vision(d, an)
-    story += _compliance(d, an)
-    story += _system_result(d, record, an)
-    story += _officer(d, record)
-    story += _final(d, record)
+    story += _resolution(d, record, an)
     story += _sources(d, record, an)
     return story
 

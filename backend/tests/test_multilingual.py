@@ -381,6 +381,67 @@ def test_the_model_is_told_the_language() -> None:
           lang.apply(SYSTEM_PROMPT, lang.EN) == SYSTEM_PROMPT)
 
 
+# ----------------------------------- 6b. the RETURNED ANSWER is in that language
+#
+# The above only proves the right instruction reaches the model. This proves
+# the plumbing that carries the model's reply back to the user does not lose,
+# translate or re-English it — using a stub whose reply genuinely varies by
+# language (real Hindi/Telugu Unicode text), not a fixed English string. This
+# does NOT prove a live deployed model actually obeys the instruction — no
+# OpenRouter call is made anywhere in this suite — it proves that IF the model
+# writes Hindi/Telugu, that is exactly what reaches the HTTP response.
+
+_CANNED = {
+    lang.EN: "This is the answer, in English, grounded in the retrieved BIS evidence for IS 367:1993.",
+    lang.HI: "यह उत्तर हिंदी में है, IS 367:1993 के लिए प्राप्त BIS साक्ष्य पर आधारित है।",
+    lang.TE: "ఈ సమాధానం తెలుగులో ఉంది, IS 367:1993 కోసం పొందిన BIS ఆధారాలపై ఆధారపడి ఉంది।",
+}
+
+
+class LanguageAwareLLM:
+    """Returns a reply actually written in whatever language the system prompt
+    instructs — proving the response-language plumbing, not the model's own
+    compliance (no live call is ever made)."""
+
+    def generate(self, *, system_prompt: str, user_prompt: str,
+                 temperature: float = 0.1, max_tokens: int = 400) -> str:
+        for code, name in ((lang.HI, "Hindi"), (lang.TE, "Telugu")):
+            if f"LANGUAGE OF THE ANSWER: {name}" in system_prompt:
+                return _CANNED[code]
+        return _CANNED[lang.EN]
+
+
+def test_the_returned_answer_is_actually_in_the_requested_language() -> None:
+    print("\n[6b] the answer text itself — not just the prompt — is in the requested language")
+
+    for code in (lang.EN, lang.HI, lang.TE):
+        out = ask_http(KETTLE[lang.EN], language=code, llm=LanguageAwareLLM())
+        answer = out["body"]["answer"]
+        check(f"/ask {code}: the response reports the requested language",
+              out["body"]["language"] == code)
+        check(f"/ask {code}: the ANSWER TEXT is actually in that script",
+              lang.detect(answer) == code, answer)
+
+    # Certification's explain=true path goes through the same lang.apply()
+    # pattern; verify its answer text the same way.
+    real = api_module.get_certification_service()
+    saved = real.llm
+    real.llm = LanguageAwareLLM()
+    try:
+        for code in (lang.EN, lang.HI, lang.TE):
+            res = CLIENT.post("/certification-guidance", json={
+                "question": "electric kettle certification", "explain": True, "language": code,
+            })
+            check(f"/certification-guidance {code}: 200", res.status_code == 200, res.text[:200])
+            body = res.json()
+            check(f"/certification-guidance {code}: the response reports the requested language",
+                  body["language"] == code)
+            check(f"/certification-guidance {code}: the ANSWER TEXT is actually in that script",
+                  lang.detect(body["answer"]) == code, body["answer"])
+    finally:
+        real.llm = saved
+
+
 # --------------------------------------------------------- 7. HTTP contract
 
 
@@ -515,6 +576,7 @@ def main() -> int:
     test_same_evidence_in_every_language()
     test_no_invented_standards()
     test_the_model_is_told_the_language()
+    test_the_returned_answer_is_actually_in_the_requested_language()
     test_http_contract()
     test_other_grounded_routes()
     test_nothing_else_changed()

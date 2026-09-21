@@ -11,7 +11,7 @@ A requirement is only accepted when it is grounded in the knowledge base:
   ``indian_standards`` record;
 * ``rule_type`` is a rule the engine implements (``RULE_TYPES``) or
   ``"not_supported"`` (a verified requirement that cannot be checked from a
-  package image — it is shown to the officer, never scored);
+  package image — it is shown to the user, never scored);
 * a checkable rule names a real declaration field and valid parameters.
 
 Anything else is rejected with an error and never reaches the engine.
@@ -103,7 +103,8 @@ RULE_TYPES: dict[str, dict[str, tuple[float, float]]] = {
     },
 }
 
-# format -> (rule_type, declaration field it reads). Each is implemented in app.compliance.
+# format -> (rule_type, declaration field it reads). Each rule_type/format pair is data only;
+# no engine evaluates it since MetrIQ produces no automatic compliance verdict.
 RULE_FORMATS: dict[str, tuple[str, str]] = {
     "retail_sale_price_inclusive_of_taxes_in_indian_currency": ("value_format", "mrp"),
     "net_quantity_in_standard_units": ("value_format", "net_quantity"),
@@ -119,7 +120,7 @@ SCOPE_STANDARD = "STANDARD"  # applies to the BIS standards in ``applies_to``
 SCOPE_PACKAGED_COMMODITY = "PACKAGED_COMMODITY"  # applies to pre-packaged commodities in general
 SCOPE_AUTHORITY = {SCOPE_STANDARD: BIS, SCOPE_PACKAGED_COMMODITY: LEGAL_METROLOGY}
 
-# Exclusion id -> where it may be used. Evaluated deterministically in app.package_label.
+# Exclusion id -> where it may be used. Data only; MetrIQ does not evaluate exclusions into a verdict.
 EXCLUSION_TYPES: dict[str, str] = {
     "NET_QUANTITY_ABOVE_25_KG_OR_25_L": "package",
     "NOT_FOR_RETAIL_SALE_DECLARED": "package",
@@ -140,6 +141,13 @@ _RE_HALLMARK = re.compile(r"hallmark|\bhuid\b|jewell", re.IGNORECASE)
 
 # A product -> standard link is only usable when it is verified.
 APPLICABILITY_VERIFIED = "VERIFIED"
+
+# Which modelled product the package is, under the identified standard
+# (``confirm_product``). Pure requirements-lookup; no rule is run.
+PRODUCT_CONFIRMED = "PRODUCT_CONFIRMED"  # the package text names exactly one modelled product
+PRODUCT_NOT_MODELLED = "PRODUCT_NOT_MODELLED"  # no product record for this standard (standard-level data only)
+PRODUCT_NOT_CONFIRMED = "PRODUCT_NOT_CONFIRMED"  # products are modelled, the package text names none of them
+PRODUCT_AMBIGUOUS = "PRODUCT_AMBIGUOUS"  # the package text names more than one modelled product
 
 # Coverage-matrix status of one requirement row.
 ROW_SUPPORTED = "SUPPORTED"  # verified requirement with a deterministic rule
@@ -253,7 +261,7 @@ class RequirementSet:
     def for_package(self) -> list[Requirement]:
         """Legal Metrology package-label requirements for pre-packaged commodities.
         Applicability (scope exclusions, requirement exclusions) is decided per package
-        in app.package_label; without a valid package scope none are returned."""
+        reported for information only; without a valid package scope none are returned."""
         if self.package_scope is None:
             return []
         return [r for r in self.requirements if r.scope == SCOPE_PACKAGED_COMMODITY and r.domain == PACKAGE_LABEL]
@@ -286,6 +294,27 @@ class RequirementSet:
             p for p in self.products_for_standard(standard_number)
             if any(_contains(tuple(_tokens(a)), toks) for a in (p.name, *p.aliases) for toks in token_lists)
         ]
+
+
+def confirm_product(product, requirements: RequirementSet):
+    """Which modelled product (``RequirementSet.products``) this package is, under
+    ``product.standard_number`` — using only the phrases and label text product
+    identification already matched. Deterministic containment; no new scoring
+    and no rule is run. Returns ``(applicability, confirmed_or_None, candidates)``."""
+    standard = product.standard_number
+    modelled = requirements.products_for_standard(standard)
+    if not modelled:
+        return PRODUCT_NOT_MODELLED, None, []
+    phrases: list[str] = []
+    for ev in product.evidence:
+        if ev.match in ("product", "alias"):
+            phrases.extend(t for t in (ev.matched_phrase, ev.clue.text, ev.clue.search_text) if t)
+    matched = requirements.match_products(standard, phrases)
+    if len(matched) == 1:
+        return PRODUCT_CONFIRMED, matched[0], matched
+    if len(matched) > 1:
+        return PRODUCT_AMBIGUOUS, None, matched
+    return PRODUCT_NOT_CONFIRMED, None, modelled
 
 
 def load_requirements(knowledge_items, path: Path | str | None = None) -> RequirementSet:

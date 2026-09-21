@@ -2,10 +2,14 @@
 
     PRODUCT -> STANDARD -> APPLICABLE REQUIREMENTS -> DETERMINISTIC RULES -> EVIDENCE
 
-Covers product-specific applicability (app/requirements.py), coverage states and
-explanations (app/compliance.py), conservative extraction of names
-(app/declarations.py), the coverage matrix + GET /inspection/coverage, and
-regressions. Plain Python, no test framework (matches the other runners). Run:
+Covers product-specific applicability (app/requirements.py: ``confirm_product``,
+``coverage``), conservative extraction of names (app/declarations.py), the
+coverage matrix + GET /inspection/coverage, declaration completeness, and
+regressions. MetrIQ produces no automatic PASS/FAIL/REVIEW compliance verdict —
+these checks are about what MetrIQ can identify and connect to verified
+requirement data, not about a legal determination.
+
+Plain Python, no test framework (matches the other runners). Run:
 
     cd backend
     ./.venv/bin/python tests/test_coverage.py
@@ -32,14 +36,13 @@ warnings.filterwarnings("ignore")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.completeness import declaration_completeness  # noqa: E402
-from app.compliance import evaluate_compliance  # noqa: E402
 from app.declarations import extract_declarations  # noqa: E402
 from app.inspection import InspectionAnalyzer, PackageUpload  # noqa: E402
 from app.main import app  # noqa: E402
 from app.pipeline import run_downstream  # noqa: E402
 from app.product import ProductStandardFinder  # noqa: E402
 from app.product_identification import identify_product  # noqa: E402
-from app.requirements import coverage_by_standard, coverage_matrix, load_requirements  # noqa: E402
+from app.requirements import confirm_product, coverage_by_standard, coverage_matrix, load_requirements  # noqa: E402
 from app.retrieval.engine import SearchEngine  # noqa: E402
 
 PASS = 0
@@ -50,7 +53,6 @@ KB = {i.id: i for i in ITEMS}
 REAL = load_requirements(ITEMS)
 SAMPLES = Path(__file__).resolve().parents[2] / "samples" / "ocr-labels"
 
-WATER_QUOTE = "A consumer should therefore expect to see the ISI Mark with the IS number (IS 14543 or IS 13428) on the bottle."
 WATER_LINK_QUOTE = "packaged drinking water (other than natural mineral water) as per IS 14543:2016"
 FORBIDDEN = re.compile(r"legally missing|\b(?:is|are) missing|\b(?:is|are) absent", re.IGNORECASE)
 
@@ -108,16 +110,18 @@ def is_number_rule(**over) -> dict:
         "description": "The package shows the IS number of its Indian Standard.",
         "rule_type": "printed_standard_number", "declaration_field": "standard_number",
         "parameters": {"min_ocr_confidence_pass": 0.8, "min_ocr_confidence_fail": 0.9},
-        "source_knowledge_id": "packaged-water-must-carry-bis-mark", "source_quote": WATER_QUOTE,
+        "source_knowledge_id": "packaged-water-must-carry-bis-mark",
+        "source_quote": "A consumer should therefore expect to see the ISI Mark with the IS number "
+                        "(IS 14543 or IS 13428) on the bottle.",
         **over,
     }
 
 
-def evaluate(lines, requirements=REAL):
+def identify(lines, requirements=REAL):
     regions = label(lines)
     stage = extract_declarations(regions)
     product = identify_product(stage, regions, FINDER)
-    return evaluate_compliance(product, stage, requirements, ITEMS), product, stage
+    return product, stage, requirements
 
 
 WATER = ["AQUA PURE", "PACKAGED DRINKING WATER", "NET QUANTITY: 1 L"]
@@ -133,84 +137,60 @@ def field(stage, name):
 def test_knowledge() -> None:
     check("real coverage data loads with no errors", REAL.errors == (), str(REAL.errors))
 
-    ev, product, _ = evaluate(["ELECTRIC KETTLE 1.5 L", "Net Quantity: 1 N"])
-    cov = ev.inspection_coverage
+    product, _, _ = identify(["ELECTRIC KETTLE 1.5 L", "Net Quantity: 1 N"])
+    applicability, confirmed, _ = confirm_product(product, REAL)
+    coverage = REAL.coverage(product.standard_number, confirmed.id if confirmed else None)
     check("1 standard-only: kettle identified, coverage STANDARD_ONLY",
-          product.status == "MATCHED" and ev.coverage_status == "STANDARD_ONLY" and ev.checks == [], ev.reason)
+          product.status == "MATCHED" and coverage == "STANDARD_ONLY")
     check("1 standard-only: product not modelled, zero requirements and rules",
-          cov.product_applicability == "PRODUCT_NOT_MODELLED" and cov.verified_requirements == 0
-          and cov.deterministic_rules == 0, str(cov))
-    check("1 standard-only explanation names the knowledge-base limit, not the package",
-          "does not yet have structured verified requirement data" in cov.explanation
-          and "not a finding about the package" in cov.explanation, cov.explanation)
+          applicability == "PRODUCT_NOT_MODELLED"
+          and REAL.for_product(product.standard_number, None) == [], str(applicability))
 
-    ev, _, _ = evaluate(WATER + ["IS 14543"])
-    cov = ev.inspection_coverage
-    check("2 inspection-supported: water is INSPECTION_SUPPORTED",
-          ev.coverage_status == "INSPECTION_SUPPORTED", ev.coverage_status)
-    check("2 inspection-supported: counts 3 requirements, 1 rule, 2 unsupported",
-          (cov.verified_requirements, cov.deterministic_rules, cov.unsupported_requirements) == (3, 1, 2), str(cov))
-    check("2 explanation counts the deterministic rules for this product and standard",
-          "1 deterministic inspection rule for Packaged Drinking Water under IS 14543:2016" in cov.explanation,
-          cov.explanation)
+    product, _, _ = identify(WATER + ["IS 14543"])
+    applicability, confirmed, _ = confirm_product(product, REAL)
+    applicable = REAL.for_product(product.standard_number, confirmed.id if confirmed else None)
+    coverage = REAL.coverage(product.standard_number, confirmed.id if confirmed else None)
+    check("2 inspection-supported: water is INSPECTION_SUPPORTED", coverage == "INSPECTION_SUPPORTED", coverage)
+    check("2 inspection-supported: counts 3 requirements, 1 rule",
+          (len(applicable), sum(r.supported for r in applicable)) == (3, 1), str(applicable))
 
     check("3 product-specific: packaged water confirmed from the label phrase",
-          cov.product_applicability == "PRODUCT_CONFIRMED" and cov.product_id == "packaged-drinking-water")
+          applicability == "PRODUCT_CONFIRMED" and confirmed is not None and confirmed.id == "packaged-drinking-water")
     two_products = data_file({
         "products": [water_product()],
         "requirements": [is_number_rule(applies_to_products=["packaged-drinking-water"])],
     })
-    ev, _, _ = evaluate(["AQUA PURE", "BOTTLED WATER", "PACKAGED DRINKING WATER"], two_products)
+    product, _, _ = identify(["AQUA PURE", "BOTTLED WATER", "PACKAGED DRINKING WATER"], two_products)
+    applicability, confirmed, _ = confirm_product(product, two_products)
+    applied = two_products.for_product(product.standard_number, confirmed.id if confirmed else None)
     check("3 product-limited requirement applies to the confirmed product",
-          [c.rule_id for c in ev.checks] == ["water-is-number"], str([c.rule_id for c in ev.checks]))
-    product = identify_product(extract_declarations(label(WATER)), label(WATER), FINDER)
-    unconfirmed = dataclass_replace_evidence(product)
-    ev = evaluate_compliance(unconfirmed, extract_declarations(label(WATER)), two_products, ITEMS)
-    check("3 product not confirmed -> product-limited requirement NOT applied",
-          ev.checks == [] and ev.inspection_coverage.product_applicability == "PRODUCT_NOT_CONFIRMED"
-          and ev.inspection_coverage.not_applied_requirements == ["water-is-number"], str(ev.inspection_coverage))
-    check("3 product not confirmed -> REVIEW with a product-specific reason",
-          ev.overall_status == "REVIEW" and ev.reason_code == "PRODUCT_NOT_CONFIRMED"
-          and "did not name that product" in ev.inspection_coverage.explanation, ev.reason)
-    standard_wide = data_file({"products": [water_product()], "requirements": [is_number_rule()]})
-    ev = evaluate_compliance(unconfirmed, extract_declarations(label(WATER)), standard_wide, ITEMS)
-    check("3 standard-wide requirement applies even without product confirmation",
-          [c.rule_id for c in ev.checks] == ["water-is-number"])
+          [r.id for r in applied] == ["water-is-number"], str([r.id for r in applied]))
 
-    ev, _, _ = evaluate(["LED BULB 9W", "Self-ballasted LED lamp, Cool Daylight 6500K", "Net Quantity: 1 N"])
-    led = ev.inspection_coverage
+    unconfirmed_product = identify_product(extract_declarations(label(WATER)), label(WATER), FINDER)
+    unconfirmed_product = dataclass_replace_evidence(unconfirmed_product)
+    applicability, confirmed, _ = confirm_product(unconfirmed_product, two_products)
+    applied = two_products.for_product(unconfirmed_product.standard_number, confirmed.id if confirmed else None)
+    check("3 product not confirmed -> product-limited requirement NOT applied",
+          applied == [] and applicability == "PRODUCT_NOT_CONFIRMED", applicability)
+    standard_wide = data_file({"products": [water_product()], "requirements": [is_number_rule()]})
+    applied = standard_wide.for_product(unconfirmed_product.standard_number, None)
+    check("3 standard-wide requirement applies even without product confirmation",
+          [r.id for r in applied] == ["water-is-number"])
+
+    product, _, _ = identify(["LED BULB 9W", "Self-ballasted LED lamp, Cool Daylight 6500K", "Net Quantity: 1 N"])
+    applicability, confirmed, _ = confirm_product(product, REAL)
+    applied = REAL.for_product(product.standard_number, confirmed.id if confirmed else None)
     check("4 unsupported requirement: LED confirmed, 1 verified requirement, 0 rules",
-          led.product_applicability == "PRODUCT_CONFIRMED" and (led.verified_requirements, led.deterministic_rules) == (1, 0),
-          str(led))
-    check("4 unsupported requirement is shown as NOT_SUPPORTED, never scored",
-          [c.result for c in ev.checks] == ["NOT_SUPPORTED"] and ev.supported_checks == 0
-          and ev.coverage_status == "STANDARD_ONLY" and ev.overall_status == "REVIEW")
+          applicability == "PRODUCT_CONFIRMED" and (len(applied), sum(r.supported for r in applied)) == (1, 0),
+          str(applied))
 
     for r in REAL.requirements:
         src = KB[r.source_knowledge_id]
         check(f"5 {r.id} is verified: quote word for word in a verified record",
               r.source_quote in src.content and src.verification_status == "verified")
-    # Milestone 8 adds Legal Metrology requirements (tested in test_legal_metrology.py);
-    # the BIS side still has exactly one checkable rule.
     check("5 only the printed IS-number rule is checkable among BIS requirements (no invented rules)",
           [r.id for r in REAL.requirements if r.supported and r.scope == "STANDARD"]
           == ["packaged-water-label-shows-is-number"])
-
-    ev, _, _ = evaluate(WATER + ["IS 14543"])
-    for c in ev.checks:
-        check(f"6 requirement evidence: {c.rule_id} -> verified BIS record with URL",
-              c.source is not None and c.source.quote in KB[c.source.knowledge_id].content
-              and c.source.source_url and c.source.last_verified)
-    link = ev.inspection_coverage.applicability_source
-    check("6 product -> standard evidence: verified record quote + URL",
-          link is not None and link.knowledge_id == "packaged-drinking-water-certification"
-          and link.quote in KB[link.knowledge_id].content and link.source_url.startswith("https://"))
-    rule = next(c for c in ev.checks if c.rule_id == "packaged-water-label-shows-is-number")
-    e = rule.evidence[0]
-    check("7 rule evidence: package chain image -> OCR region -> declaration -> observed value",
-          rule.result == "PASS" and e.image_id == "IMG-TEST" and e.source_regions == ["OCR-004"]
-          and e.declaration_field == "standard_number" and rule.observed_value == "IS 14543")
-    check("7 rule evidence: rule condition states its thresholds", "≥80%" in rule.rule_condition)
 
     bad = data_file({
         "products": [
@@ -326,46 +306,17 @@ def test_extraction() -> None:
     check("OCR 'FSSAl' misread still reads the licence digits", fssai.value == "10099999000456", str(fssai))
 
 
-# ------------------------------------------------------------------ 14-18 compliance
+# ------------------------------------------------------------------ 14-18 completeness
 
 
-def test_compliance() -> None:
-    ev, _, _ = evaluate(WATER + ["IS 14543"])
-    rule = next(c for c in ev.checks if c.rule_id == "packaged-water-label-shows-is-number")
-    check("14 supported rule works (PASS on the correct printed number)", rule.result == "PASS", rule.reason)
-    check("18 existing IS-number rule: wrong number read clearly -> FAIL",
-          next(c for c in evaluate(WATER + ["IS 14534"])[0].checks if c.rule_type == "printed_standard_number").result == "FAIL")
-
-    check("15 unsupported requirements never PASS",
-          all(c.result == "NOT_SUPPORTED" for c in ev.checks if c.rule_type == "not_supported"))
-    check("15 PASS rule + unsupported areas -> overall REVIEW, not PASS",
-          ev.overall_status == "REVIEW" and ev.reason_code == "REQUIREMENTS_NOT_CHECKABLE", ev.reason)
-
-    ev, _, _ = evaluate(["ROASTED MASALA CHANA", "(Roasted Bengal gram with spices)"])
-    check("16 standard-only -> REVIEW", ev.overall_status == "REVIEW" and ev.coverage_status == "STANDARD_ONLY")
-    check("16 summary explains why it is only REVIEW",
-          any("no deterministic inspection is possible" in s for s in ev.summary), str(ev.summary))
-
-    ev, _, _ = evaluate(WATER)
-    rule = ev.checks[0]
-    check("17 insufficient evidence (IS number not detected) -> REVIEW",
-          rule.result == "REVIEW" and rule.reason_code == "EVIDENCE_NOT_DETECTED" and ev.overall_status == "REVIEW")
-    unknown = evaluate(WATER + ["ISTIS 99999 CM/L-7654321"])[0]
-    check("17 OCR-merged 'ISTIS 99999' (not a verified standard) is not recovered -> REVIEW, never PASS",
-          unknown.checks[0].result == "REVIEW" and unknown.checks[0].reason_code == "EVIDENCE_UNCERTAIN",
-          unknown.checks[0].reason)
-    low = evaluate([*WATER, "IS 14543"], REAL)
-    check("17 all explanations avoid 'missing' claims",
-          not any(FORBIDDEN.search(s) for s in low[0].summary + [c.reason for c in low[0].checks]))
-
+def test_completeness() -> None:
     res = run_downstream(label(WATER + ["IS 14543"]), finder=FINDER, requirements=REAL)
     bis_ids = {r.id for r in REAL.requirements if r.scope == "STANDARD"}
     linked = [i.field for i in res.completeness.items if set(i.requirement_ids) & bis_ids]
     check("completeness links only the field a verified BIS rule uses", linked == ["standard_number"], str(linked))
     mrp = next(i for i in res.completeness.items if i.field == "mrp")
-    check("completeness: MRP is never linked to a BIS requirement (only to Legal Metrology)",
-          not set(mrp.requirement_ids) & bis_ids
-          and all(rid.startswith("lm-") for rid in mrp.requirement_ids), str(mrp.requirement_ids))
+    check("completeness: MRP is not linked to a BIS requirement (MetrIQ has no verified BIS MRP rule)",
+          not set(mrp.requirement_ids) & bis_ids, str(mrp.requirement_ids))
     led = run_downstream(label(["LED BULB 9W", "Self-ballasted LED lamp, Cool Daylight 6500K"]), finder=FINDER, requirements=REAL)
     check("completeness: LED has no BIS-requirement-linked fields (its BIS requirement is not checkable)",
           not any(set(i.requirement_ids) & bis_ids for i in led.completeness.items))
@@ -378,13 +329,13 @@ def test_compliance() -> None:
 
     import ast
 
-    import app.compliance as compliance_module
+    import app.escalation as escalation_module
     import app.requirements as requirements_module
-    for module in (compliance_module, requirements_module):
+    for module in (requirements_module, escalation_module):
         tree = ast.parse(Path(module.__file__).read_text())
         imported = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
-        check(f"no model decides coverage or results ({module.__name__})",
-              not imported & {"app.llm", "httpx", "requests", "openai"}, str(imported))
+        check(f"no model decides coverage or resolution ({module.__name__})",
+              not imported & {"app.llm", "app.openrouter", "httpx", "requests", "openai"}, str(imported))
 
 
 # ------------------------------------------------------------------ real OCR
@@ -397,25 +348,20 @@ def analyze(name: str):
 
 def test_real_labels() -> None:
     water = analyze("synth_packaged-water.png")
-    cov = water.compliance.coverage
-    rule = next(c for c in water.compliance.checks if c.rule_id == "packaged-water-label-shows-is-number")
     check("real water: product + standard identified", water.product.standard_number == "IS 14543:2016")
-    check("real water: product confirmed, 1 rule of 3 requirements",
-          cov.product_applicability == "PRODUCT_CONFIRMED" and (cov.verified_requirements, cov.deterministic_rules) == (3, 1),
-          str(cov))
-    check("real water: actual deterministic check PASS on OCR evidence",
-          rule.result == "PASS" and rule.evidence and rule.evidence[0].source_regions, rule.reason)
-    check("real water: overall REVIEW (unsupported areas remain)", water.compliance.overall_status == "REVIEW")
+    check("real water: product confirmed",
+          water.product.product_applicability == "PRODUCT_CONFIRMED", water.product.product_applicability)
+    check("real water: declaration for the IS number is DETECTED",
+          field(water.declaration_stage, "standard_number").status == "DETECTED")
 
     led = analyze("synth_led-lamp.png")
-    check("real LED: STANDARD_ONLY REVIEW with its unsupported requirement listed",
-          led.compliance.coverage_status == "STANDARD_ONLY" and led.compliance.overall_status == "REVIEW"
-          and [c.result for c in led.compliance.checks] == ["NOT_SUPPORTED"], led.compliance.reason)
+    check("real LED: identified but not a modelled requirements product",
+          led.product.standard_number is not None, led.product.reason)
 
     kettle = analyze("synth_electric-kettle.png")
-    check("real kettle: in the KB but no requirement data -> transparent REVIEW",
-          kettle.product.standard_number == "IS 367:1993" and kettle.compliance.coverage.product_applicability == "PRODUCT_NOT_MODELLED"
-          and kettle.compliance.checks == [] and "not a finding about the package" in kettle.compliance.coverage.explanation)
+    check("real kettle: in the KB but no requirement data -> PRODUCT_NOT_MODELLED",
+          kettle.product.standard_number == "IS 367:1993"
+          and kettle.product.product_applicability == "PRODUCT_NOT_MODELLED")
 
     noisy = analyze("synth_noisy-qr-label.png")
     fields = {d.field: d for d in noisy.declaration_stage.fields}
@@ -423,9 +369,8 @@ def test_real_labels() -> None:
           fields["manufacturer"].status != "DETECTED" and fields["manufacturer"].value is None, str(fields["manufacturer"]))
     check("real poor OCR: QR text never becomes a confident product name",
           fields["product_name"].status != "DETECTED" and fields["product_name"].value is None, str(fields["product_name"]))
-    check("real poor OCR: no product, no standard, compliance REVIEW",
-          noisy.product.status == "REVIEW" and noisy.compliance.coverage_status == "NO_STANDARD"
-          and noisy.compliance.overall_status == "REVIEW")
+    check("real poor OCR: no product, no standard identified",
+          noisy.product.status == "REVIEW" and noisy.product.standard_number is None)
 
 
 # ------------------------------------------------------------------ 19-25 regression
@@ -457,14 +402,12 @@ def test_regression() -> None:
     j = multi.json()
     check("24 multi-side inspection still works", multi.status_code == 200 and len(j["images"]) == 2, str(multi.status_code))
     check("21 product identification still returned", j["product"]["status"] in ("MATCHED", "REVIEW"))
-    check("25 compliance response keeps its existing fields and adds coverage detail",
-          {"overall_status", "coverage_status", "checks", "summary", "policy"} <= set(j["compliance"])
-          and {"supported_checks", "passed", "product_applicability", "explanation"} <= set(j["compliance"]["coverage"]))
+    check("25 no compliance verdict is returned", "compliance" not in j and "package_label" not in j, str(list(j)))
 
 
 def main() -> int:
     print("knowledge + rule coverage foundation")
-    for fn in (test_knowledge, test_matrix, test_extraction, test_compliance, test_real_labels, test_regression):
+    for fn in (test_knowledge, test_matrix, test_extraction, test_completeness, test_real_labels, test_regression):
         print(f"\n{fn.__name__}")
         fn()
     print(f"\n{PASS} passed, {FAIL} failed")

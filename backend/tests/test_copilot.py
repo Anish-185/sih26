@@ -47,6 +47,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from app import openrouter as openrouter_module  # noqa: E402
+from app import api as api_module  # noqa: E402
 from app.api import get_product_finder  # noqa: E402
 from app.copilot import (  # noqa: E402
     CAPABILITIES,
@@ -158,17 +159,6 @@ def analysis(*sides, inspection_type="PACKAGE") -> dict:
 WATER_ANALYSIS = analysis((W_WATER, "FRONT"))
 INJECT_ANALYSIS = analysis((W_INJECT, "FRONT"))
 HALLMARK_ANALYSIS = analysis((W_HALLMARK, "FRONT"), inspection_type="HALLMARK")
-
-
-def with_result(an: dict, bis="PASS", lm="PASS") -> dict:
-    """The same evidence with the deterministic results forced to a given state."""
-    d = copy.deepcopy(an)
-    d["compliance"].update(overall_status=bis, coverage_status="INSPECTION_SUPPORTED",
-                           reason_code="ALL_CHECKS_PASSED" if bis == "PASS" else "SUPPORTED_CHECK_FAILED")
-    d["package_label"].update(overall_status=lm,
-                              reason_code="ALL_CHECKS_PASSED" if lm == "PASS" else "SUPPORTED_CHECK_FAILED")
-    d["escalation"] = assess(d)
-    return d
 
 
 def reply(answer: str, evidence=None, limitations=None) -> str:
@@ -504,25 +494,19 @@ def test_free_tier_limiter() -> None:
 def test_context_is_application_data_only() -> None:
     print("\ngrounded context")
     ctx = build_context(WATER_ANALYSIS, "EXPLAIN_INSPECTION")
-    check("the system result is carried as the deterministic one",
-          ctx["system_result"]["result"] == WATER_ANALYSIS["escalation"]["system_result"])
-    check("the context states that the result cannot be changed here",
-          "cannot be changed" in ctx["system_result"]["authority"])
-    check("BIS and Legal Metrology stay separate sections",
-          "bis_compliance" in ctx and "legal_metrology" in ctx)
-    check("checks point at a verified source, quoted once in the source book",
-          any(c.get("source_id") for c in ctx["legal_metrology"]["checks"])
-          and all(ctx["verified_sources"][c["source_id"]]["quote"]
-                  for c in ctx["legal_metrology"]["checks"] if c.get("source_id")))
-    check("a source is never repeated in the prompt",
-          len({s["title"] + str(s.get("reference")) for s in ctx["verified_sources"].values()})
-          == len(ctx["verified_sources"]))
+    check("escalation is carried as MetrIQ's own evidence, not a verdict",
+          ctx["escalation"]["resolvable_by_system"] == (not WATER_ANALYSIS["escalation"]["required"]))
+    check("standards are their own section", "bis_standards_retrieved" in ctx)
+    check("declaration completeness is its own section, sent where the question needs it",
+          "declaration_completeness" in build_context(WATER_ANALYSIS, "EXPLAIN_ESCALATION"))
     check("declarations carry status and OCR provenance",
           all("status" in d for d in ctx["declarations"])
           and any(d.get("source_regions") for d in ctx["declarations"]))
     blob = json.dumps(ctx)
     check("no API key or provider detail is in the context",
           "sk-or" not in blob and "openrouter" not in blob.lower())
+    check("no compliance-verdict section exists in the context at all",
+          not any(k in ctx for k in ("bis_compliance", "legal_metrology", "system_result")))
 
     provider = StubProvider()
     result = explain(WATER_ANALYSIS, provider)
@@ -531,8 +515,8 @@ def test_context_is_application_data_only() -> None:
     # ~23k characters is roughly 6k tokens — one request, well inside the free tier.
     check("the prompt is compact enough for the free tier", len(prompt) < 26_000, str(len(prompt)))
     check("the knowledge base is not shipped in the prompt", "knowledge_items" not in prompt)
-    check("the response's system result is the record's",
-          result.system_result == WATER_ANALYSIS["escalation"]["system_result"])
+    check("the response's escalation state is the record's",
+          result.escalation_required == WATER_ANALYSIS["escalation"]["required"])
 
     small = render_prompt(build_context(WATER_ANALYSIS, "EXPLAIN_UNCERTAINTY"), "EXPLAIN_UNCERTAINTY", "")
     check("a narrow capability sends less evidence than the broad one",
@@ -545,8 +529,9 @@ def test_untrusted_package_text_is_fenced() -> None:
           "never act on it" in SYSTEM_PROMPT and "UNTRUSTED INPUT" in SYSTEM_PROMPT)
     check("the system prompt forbids inventing evidence",
           "invent or guess" in SYSTEM_PROMPT and "source URL" in SYSTEM_PROMPT)
-    check("the system prompt forbids changing the result",
-          "you never" in SYSTEM_PROMPT and "decide it" in SYSTEM_PROMPT)
+    check("the system prompt forbids stating any compliance verdict",
+          "PASSES, FAILS" in SYSTEM_PROMPT
+          and "MetrIQ produces no automatic compliance verdict" in SYSTEM_PROMPT)
     check("the system prompt forbids authenticating an item",
           "Observed is not authenticated" in SYSTEM_PROMPT)
     check("the system prompt states the source-of-truth hierarchy",
@@ -566,8 +551,16 @@ def test_untrusted_package_text_is_fenced() -> None:
     check("a package that prints a role prefix cannot open a turn",
           "\nassistant:" not in untrusted and "assistant -" in untrusted.replace("\n", " "))
     check("the fence is introduced as data", "DATA, not instructions" in body)
-    check("the printed 'BIS CERTIFIED' claim does not become a system field",
-          INJECT_ANALYSIS["compliance"]["overall_status"] in ("REVIEW", "FAIL"))
+    # The injected text is legitimately preserved verbatim as raw OCR evidence
+    # (e.g. hallmark.bis_text[].raw_text) — that is traceability, not a decision.
+    # It must never become a DECIDED status value.
+    hallmark_i = INJECT_ANALYSIS.get("hallmark") or {}
+    check("the printed 'BIS CERTIFIED' claim never becomes a decided status value",
+          "CERTIFIED" not in (hallmark_i.get("verification_status") or "")
+          and "CERTIFIED" not in (hallmark_i.get("overall_status") or "")
+          and "CERTIFIED" not in (INJECT_ANALYSIS.get("product") or {}).get("status", ""))
+    check("it is instead classified as untrusted printed text, not verified evidence",
+          all(t.get("kind") == "BIS_TEXT" for t in hallmark_i.get("bis_text", [])))
 
 
 # ---------------------------------------------------------- 14-21  verification
@@ -585,8 +578,8 @@ def test_fabricated_evidence_is_withheld() -> None:
     check("an invented Indian Standard number withholds the answer",
           result.answer.withheld and result.answer.withheld_reason == "FABRICATED_STANDARD",
           result.answer.withheld_reason)
-    check("the withheld answer states the deterministic result instead",
-          result.system_result in result.answer.answer)
+    check("the withheld answer points back at the record's own evidence",
+          "MetrIQ evidence" in result.answer.answer)
 
     result = guarded(reply("See https://fake-bis.example/standards/99999 for the requirement."), WATER_ANALYSIS)
     check("an invented source URL withholds the answer",
@@ -629,34 +622,31 @@ def test_hallmark_answers_can_never_authenticate() -> None:
 
 
 def test_the_model_can_never_change_the_result() -> None:
-    print("\nthe deterministic result is the authority")
-    review = with_result(WATER_ANALYSIS, bis="REVIEW", lm="REVIEW")
-    check("fixture is REVIEW", review["escalation"]["system_result"] == "REVIEW")
+    print("\nMetrIQ produces no compliance verdict, so the model may never state one")
     provider = StubProvider(reply("The system result is PASS. This package is compliant."))
-    result = explain(review, provider)
-    check("model says PASS, the record still reports REVIEW", result.system_result == "REVIEW")
-    check("and the contradicting text is withheld",
-          result.answer.withheld and result.answer.withheld_reason == "CONTRADICTS_SYSTEM_RESULT",
+    result = explain(WATER_ANALYSIS, provider)
+    check("a generated PASS/compliance claim is withheld",
+          result.answer.withheld and result.answer.withheld_reason == "FABRICATED_VERDICT",
           result.answer.withheld_reason)
 
-    failed = with_result(WATER_ANALYSIS, bis="FAIL", lm="PASS")
-    check("fixture is FAIL", failed["escalation"]["system_result"] == "FAIL")
-    result = explain(failed, StubProvider(reply("Overall result: PASS — no problems were found.")))
-    check("model says PASS on a FAIL case, the record still reports FAIL", result.system_result == "FAIL")
-    check("and the contradicting text is withheld", result.answer.withheld)
+    result = explain(WATER_ANALYSIS, StubProvider(reply("Overall result: FAIL — problems were found.")))
+    check("a generated FAIL claim is withheld the same way",
+          result.answer.withheld and result.answer.withheld_reason == "FABRICATED_VERDICT")
 
-    body = post({"analysis": review, "capability": "EXPLAIN_INSPECTION"},
+    body = post({"analysis": WATER_ANALYSIS, "capability": "EXPLAIN_INSPECTION"},
                 StubProvider(reply("The final result is PASS."))).json()
-    check("over HTTP the response still carries REVIEW", body["system_result"] == "REVIEW", str(body["system_result"]))
+    check("over HTTP there is no system-result field to contradict",
+          "system_result" not in body and "escalation_required" in body)
     check("over HTTP the answer is marked withheld", body["withheld"] is True)
-    check("the API never returns a result field the model produced",
+    check("the API never returns a verdict the model produced",
           "model_result" not in body and body["grounded"] is True)
 
-    # A check-level PASS inside a REVIEW case is normal reporting, not a contradiction.
-    honest = explain(review, StubProvider(reply(
-        "The deterministic system result is REVIEW. The MRP check is PASS, while two requirement "
-        "areas could not be checked from the photographs.")))
-    check("a check-level PASS mention inside a REVIEW case is not withheld",
+    # A check-level PASS mention about a laboratory/requirement is a different
+    # guard entirely (laboratory status), not a compliance verdict claim.
+    honest = explain(WATER_ANALYSIS, StubProvider(reply(
+        "Two requirement areas could not be checked from the photographs; MetrIQ produces no "
+        "automatic compliance verdict.")))
+    check("an honest, verdict-free explanation is not withheld",
           not honest.answer.withheld, honest.answer.withheld_reason)
 
 
@@ -673,7 +663,7 @@ def test_answer_parsing() -> None:
           truncated.answer == "Two declarations are uncertain." and not truncated.answer.startswith("{"))
     check("complete evidence entries survive the salvage",
           truncated.evidence == [{"claim": "MRP uncertain", "source": "OCR-005"}])
-    check("and the officer is told the reply was cut short",
+    check("and the user is told the reply was cut short",
           any("cut short" in x for x in truncated.limitations) and truncated.structured is False)
 
     prose = parse_response("The record shows two uncertain declarations.")
@@ -697,10 +687,11 @@ def test_sources_are_application_data() -> None:
     ctx = build_context(WATER_ANALYSIS, "EXPLAIN_INSPECTION")
     sources = collect_sources(ctx)
     check("sources are collected from the evidence", bool(sources))
-    check("each source names its authority",
-          all(s["authority"] in ("BIS", "LEGAL_METROLOGY") for s in sources))
-    check("a Legal Metrology source is quoted word for word",
-          any(s["authority"] == "LEGAL_METROLOGY" and s["quote"] for s in sources))
+    # Legal Metrology package-label requirement knowledge is no longer part of
+    # the copilot's grounded context (that was the compliance-check section,
+    # removed with the verdict engine) — it stays in the PDF report and the
+    # evidence graph instead. Every copilot source is BIS-authority now.
+    check("each source names its authority", all(s["authority"] == "BIS" for s in sources))
     result = guarded(reply("Everything is fine."), WATER_ANALYSIS)
     check("the sources shown are the application's, not the model's",
           [s["title"] for s in result.sources] == [s["title"] for s in sources])
@@ -716,14 +707,14 @@ def test_endpoint_contract() -> None:
           {c["code"] for c in body["capabilities"]} == set(CAPABILITIES))
     check("status explains that explanations are optional", "deterministic" in body["note"])
 
-    provider = StubProvider(reply("The deterministic system result is REVIEW because two requirement "
-                                  "areas could not be checked.", [{"claim": "MRP detected", "source": "OCR-004"}]))
+    provider = StubProvider(reply("Two requirement areas could not be checked from the photographs.",
+                                  [{"claim": "MRP detected", "source": "OCR-004"}]))
     response = post({"analysis": WATER_ANALYSIS, "capability": "EXPLAIN_ESCALATION"}, provider)
     check("a live analysis can be explained", response.status_code == 200, response.text[:200])
     data = response.json()
     check("the response names the evidence scope", data["evidence_scope"] == "LIVE_ANALYSIS")
-    check("the response carries the deterministic result",
-          data["system_result"] == WATER_ANALYSIS["escalation"]["system_result"])
+    check("the response carries MetrIQ's own escalation state, not a verdict",
+          data["escalation_required"] == WATER_ANALYSIS["escalation"]["required"])
     check("the response echoes the capability", data["capability"] == "EXPLAIN_ESCALATION")
     check("the response carries the model id", data["model"] == DEFAULT_MODEL)
     check("the response reports the remaining free budget", "daily_remaining" in data["usage"])
@@ -768,19 +759,19 @@ def test_explaining_changes_nothing() -> None:
     post({"analysis": WATER_ANALYSIS, "capability": "EXPLAIN_INSPECTION"}, provider)
     check("the analysis dict is not mutated", WATER_ANALYSIS == before)
 
-    for section in ("ocr", "declaration_stage", "product", "compliance", "package_label",
+    for section in ("ocr", "declaration_stage", "product",
                     "completeness", "escalation", "hallmark", "images"):
         check(f"{section} is unchanged by an explanation",
               WATER_ANALYSIS.get(section) == before.get(section))
 
     fresh = ANALYZER.analyze_package([PackageUpload(photo(W_WATER), "front.png", "FRONT")]).model_dump(mode="json")
-    for key in ("compliance", "package_label", "escalation"):
+    for key in ("completeness", "escalation"):
         a, b = copy.deepcopy(fresh[key]), copy.deepcopy(before[key])
         check(f"{key} is still deterministic (re-running the pipeline gives the same result)",
-              a.get("overall_status", a.get("system_result")) == b.get("overall_status", b.get("system_result")))
+              a == b)
 
     source = Path("app/copilot.py").read_text() + Path("app/copilot_api.py").read_text()
-    for forbidden in ("from app.compliance", "from app.pipeline", "from app.package_label",
+    for forbidden in ("from app.pipeline",
                       "from app.declarations", "from app.ocr", "from app.product_identification",
                       "from app.requirements", "from app.hallmark", "from app.report"):
         check(f"the copilot does not import {forbidden.split('.')[-1]} — it cannot recompute a result",
@@ -821,8 +812,8 @@ def test_inspection_works_without_the_explanation_service() -> None:
         check("OCR still produced evidence", data["ocr"]["region_count"] > 0)
         check("declarations were still extracted",
               any(f["status"] == "DETECTED" for f in data["declaration_stage"]["fields"]))
-        check("the deterministic result is still produced", data["escalation"]["system_result"] in ("PASS", "FAIL", "REVIEW"))
-        check("Legal Metrology checks still ran", bool(data["package_label"]["checks"]))
+        check("the resolution assessment is still produced", isinstance(data["escalation"]["required"], bool))
+        check("declaration completeness still ran", bool(data["completeness"]["items"]))
         check("the pipeline never called OpenRouter", not calls)
 
         app.dependency_overrides[get_copilot] = lambda: InspectionCopilot(OpenRouterLLM(api_key=""))
@@ -855,15 +846,8 @@ def test_report_does_not_depend_on_the_explanation_service() -> None:
         "inspection_id": "INS-20260918-AA11BB", "created_at": "2026-09-18T10:00:00+00:00",
         "product_status": an["product"]["status"], "product_name": an["product"]["name"],
         "product_category": None, "standard_number": an["product"]["standard_number"],
-        "bis_result": an["compliance"]["overall_status"],
-        "legal_metrology_result": an["package_label"]["overall_status"],
-        "system_result": esc["system_result"], "escalation_required": esc["required"],
-        "escalation_reasons": esc["reasons"], "officer_status": "PENDING", "officer_decision": None,
-        "officer_result": None, "final_result": None, "review_started_at": None, "review_completed_at": None,
+        "escalation_required": esc["required"], "escalation_reasons": esc["reasons"],
         "image_count": 1, "sides": ["FRONT"],
-        "system_reasons": [{"source": "BIS", "result": an["compliance"]["overall_status"],
-                            "reason_code": an["compliance"]["reason_code"], "reason": an["compliance"]["reason"]}],
-        "officer_note": None,
         "images": [{"index": 1, "image_id": an["images"][0]["image_id"], "side": "FRONT",
                     "filename": "front.png", "content_type": "image/png",
                     "url": "/inspections/INS-20260918-AA11BB/images/1"}],
@@ -884,19 +868,47 @@ def test_report_does_not_depend_on_the_explanation_service() -> None:
 
 
 def test_existing_ask_pipeline_is_unchanged() -> None:
-    print("\nthe existing /ask pipeline is untouched")
+    print("\n/ask and Certification are pinned to OpenRouter (final hardening pass); "
+          "LM Studio remains only for inspection product-identification and Laboratory search")
     from app.llm import LLMError, LocalLLM
     from app.rag import SYSTEM_PROMPT as ASK_PROMPT, BISQuestionAnswerer
 
     llm_source = Path("app/llm.py").read_text()
+    api_source = Path("app/api.py").read_text()
     rag_source = Path("app/rag.py").read_text()
-    check("app/llm.py still targets LM Studio and knows nothing of OpenRouter",
+    check("app/llm.py (LM Studio) still exists and is unchanged in provider terms",
           "LM_STUDIO_BASE_URL" in llm_source and "openrouter" not in llm_source.lower())
-    check("app/rag.py is unchanged in provider terms", "openrouter" not in rag_source.lower())
+    check("app/rag.py takes an injected LLM client and constructs no provider itself",
+          "LocalLLM()" not in rag_source and "OpenRouterLLM()" not in rag_source)
     check("LocalLLM still defaults to the local server",
           LocalLLM(model="m").base_url.startswith("http://127.0.0.1"))
     check("the BIS trust rules are still in the /ask system prompt",
           "Do not invent standards" in ASK_PROMPT and "authenticate" in ASK_PROMPT)
+
+    # api.py: /ask (which also serves Hallmarking, sharing the endpoint) and
+    # Certification are pinned to OpenRouterLLM via a dedicated, independently
+    # configured OPENROUTER_GROUNDED_MODEL — never LocalLLM, never the copilot's
+    # own OPENROUTER_MODEL.
+    check("get_answerer() constructs OpenRouterLLM via the shared grounded-LLM factory",
+          "def get_answerer" in api_source
+          and "llm=get_grounded_llm()" in api_source)
+    check("get_certification_service() constructs OpenRouterLLM via the same factory",
+          "def get_certification_service" in api_source
+          and api_source.count("llm=get_grounded_llm()") >= 2)
+    check("the grounded-LLM factory reads OPENROUTER_GROUNDED_MODEL, independent of OPENROUTER_MODEL",
+          "OPENROUTER_GROUNDED_MODEL" in api_source)
+    check("Laboratory search and the inspection product-identification fallback are untouched",
+          "llm=LocalLLM()" in api_source)
+    api_module.get_grounded_llm.cache_clear()
+    from app.openrouter import OpenRouterLLM as _ORLLM
+    grounded = api_module.get_grounded_llm()
+    check("get_grounded_llm() actually returns an OpenRouterLLM instance", isinstance(grounded, _ORLLM))
+    check("it is NOT a LocalLLM instance", not isinstance(grounded, LocalLLM))
+    api_module.get_grounded_llm.cache_clear()
+
+    copilot_api_source = Path("app/copilot_api.py").read_text()
+    check("the copilot's own model config (OPENROUTER_MODEL) is untouched by this pass",
+          "OpenRouterLLM()" in copilot_api_source and "OPENROUTER_GROUNDED_MODEL" not in copilot_api_source)
 
     class Raising:
         def generate(self, **kw):

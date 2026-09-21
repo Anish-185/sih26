@@ -200,7 +200,7 @@ def test_ask_post_maps_sources_and_flags() -> None:
 
 # ------------------------------------------- 5. /ask returns 503 on LLM outage
 
-def test_ask_post_reports_503_when_the_local_model_is_unavailable() -> None:
+def test_ask_post_reports_503_when_the_explanation_model_is_unavailable() -> None:
     from fastapi import HTTPException
 
     original = api_module.get_answerer
@@ -216,8 +216,8 @@ def test_ask_post_reports_503_when_the_local_model_is_unavailable() -> None:
         check("ask_post: LLM outage raises HTTPException", raised is not None)
         check("ask_post: the status code is 503",
               raised is not None and raised.status_code == 503)
-        check("ask_post: the detail names the local LLM",
-              raised is not None and "Local LLM unavailable" in str(raised.detail))
+        check("ask_post: the detail is a clean, provider-neutral message",
+              raised is not None and "Explanation service unavailable" in str(raised.detail))
 
         # An abstaining question must NOT reach the raising LLM -> no 503.
         abstain = ask_post(AskRequest(question="zzzz qqqq vvvv nonsense"))
@@ -250,7 +250,7 @@ def main() -> int:
     test_low_signal_query_still_abstains()
     test_nonexistent_standard_number_is_never_returned()
     test_ask_post_maps_sources_and_flags()
-    test_ask_post_reports_503_when_the_local_model_is_unavailable()
+    test_ask_post_reports_503_when_the_explanation_model_is_unavailable()
     test_system_prompt_enforces_grounding()
 
     print(f"\n{_passed} passed, {_failed} failed")

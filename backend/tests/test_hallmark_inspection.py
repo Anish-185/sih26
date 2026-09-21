@@ -3,7 +3,7 @@
 MetrIQ can OBSERVE and EXTRACT a potential HUID and ESCALATE the case; it must
 never AUTHENTICATE one. Covers extraction (HUID, purity, BIS text, conflicts,
 low confidence, multiple candidates), untrusted / malicious OCR text, the
-deterministic checks and their verified sources, escalation, the officer review,
+deterministic checks and their verified sources, the resolution assessment,
 the saved inspection detail and the PDF report.
 
 Needs PostgreSQL for the saved-inspection checks (TEST_DATABASE_URL, default the
@@ -242,27 +242,26 @@ def step_pipeline() -> None:
     an = _analysis_json(["GOLD RING", "BIS", "22K916", "HUID: AB12CD"])
     check("a hallmark inspection carries hallmark evidence and its type",
           an["inspection_type"] == "HALLMARK" and an["hallmark"]["detected"] and an["pipeline"]["hallmark"] == "REVIEW")
-    check("Legal Metrology package-label rules are not applied to a hallmark inspection",
-          an["package_label"]["scope_status"] == "NOT_APPLIED" and an["package_label"]["checks"] == [])
+    check("a hallmark inspection carries no BIS/Legal Metrology compliance verdict at all",
+          not {"compliance", "package_label"} & set(an), str(sorted(an)))
     esc = an["escalation"]
     reason = next((r for r in esc["reasons"] if r["code"] == "HALLMARK_NOT_VERIFIABLE"), None)
     check("14 unresolved hallmark evidence escalates with the exact reason",
           esc["required"] and reason and reason["source"] == "HALLMARKING"
           and "Potential HUID AB12CD detected, but authenticity cannot be established from the uploaded image"
           in reason["message"] and set(reason["source_regions"]) >= {"OCR-003", "OCR-004"}, str(reason))
-    check("the combined system result is REVIEW, never PASS", esc["system_result"] == "REVIEW")
-    check("Legal Metrology not applied does not add package-label escalation reasons",
+    check("no Legal Metrology-sourced escalation reason exists (that evidence system is gone)",
           not any(r["source"] == "LEGAL_METROLOGY" for r in esc["reasons"]))
     pkg = _analysis_json(["ELECTRIC KETTLE", "Net Quantity: 1 N", "HUID: AB12CD", "22K916"], inspection_type="PACKAGE")
-    check("hallmark evidence found in a package inspection still escalates, Legal Metrology still applies",
-          pkg["hallmark"]["detected"] and pkg["package_label"]["scope_status"] != "NOT_APPLIED"
+    check("hallmark evidence found in a package inspection still escalates",
+          pkg["hallmark"]["detected"]
           and any(r["code"] == "HALLMARK_NOT_VERIFIABLE" for r in pkg["escalation"]["reasons"]))
     plain = _analysis_json(["ELECTRIC KETTLE", "Net Quantity: 1 N"], inspection_type="PACKAGE")
     check("an ordinary package has no hallmark evidence and no hallmark reason",
           not plain["hallmark"]["detected"] and not any(r["code"] == "HALLMARK_NOT_VERIFIABLE"
                                                         for r in plain["escalation"]["reasons"]))
     empty = _analysis_json(["GOLD RING 4.2 g"])
-    check("a hallmark inspection with no hallmark evidence still goes to an officer",
+    check("a hallmark inspection with no hallmark evidence is still reported as unresolved",
           empty["escalation"]["required"] and any("no hallmark or HUID evidence" in r["message"]
                                                   for r in empty["escalation"]["reasons"]))
 
@@ -298,7 +297,7 @@ def walk(flowables, out):
 
 
 def step_saved() -> None:
-    print("\nsaved hallmark inspection, officer review, report")
+    print("\nsaved hallmark inspection and its report")
     migrate()
     LINES[W_HALLMARK] = raw("GOLD RING", "BIS", "22K916", "HUID: AB12CD", "HUID VERIFIED")
     app.dependency_overrides[get_analyzer] = lambda: STUB
@@ -306,25 +305,26 @@ def step_saved() -> None:
                         data={"side": "FRONT", "inspection_type": "HALLMARK"})
     rec = saved.json()
     iid = rec.get("inspection_id")
-    check("a hallmark inspection is saved and sent to the officer queue",
-          saved.status_code == 201 and rec["officer_status"] == "PENDING" and rec["escalation_required"]
-          and rec["system_result"] == "REVIEW", saved.text[:300])
-    check("the saved system reasons include the hallmarking result",
-          any(x["source"] == "HALLMARKING" and x["result"] == "REVIEW" for x in rec["system_reasons"]))
+    check("a hallmark inspection is saved and reported as not resolvable from the photo",
+          saved.status_code == 201 and rec["escalation_required"], saved.text[:300])
+    check("the saved record carries no compliance verdict at all",
+          not {"bis_result", "legal_metrology_result", "system_result", "system_reasons"} & set(rec), str(sorted(rec)))
     detail = client.get(f"/inspections/{iid}").json()
     h = detail["analysis"]["hallmark"]
     check("16 hallmark evidence appears in the saved inspection detail with its OCR link",
           h["huid"]["value"] == "AB12CD" and h["huid"]["candidates"][0]["source_regions"] == ["OCR-004"]
           and h["verification_status"] == "NOT_VERIFIED" and h["untrusted_claims"])
 
-    client.post(f"/inspections/{iid}/review", json={"action": "START"})
-    done = client.post(f"/inspections/{iid}/review", json={
-        "action": "COMPLETE", "decision": "MANUAL_REVIEW",
-        "note": "HUID AB12CD checked by the officer outside MetrIQ; physical article examined under loupe."}).json()
-    check("15 officer review completes and the original system result is preserved",
-          done["officer_status"] == "COMPLETED" and done["system_result"] == "REVIEW"
-          and done["analysis"]["hallmark"] == h and done["analysis"]["hallmark"]["verification_status"] == "NOT_VERIFIED")
+    done = detail
+    check("15 the stored hallmark result stays NOT_VERIFIED, and no decision can change it",
+          done["analysis"]["hallmark"] == h
+          and done["analysis"]["hallmark"]["verification_status"] == "NOT_VERIFIED"
+          and client.post(f"/inspections/{iid}/review", json={"action": "START"}).status_code in (404, 405))
+    return iid, done, h
 
+
+def step_report(iid, done, h) -> None:
+    print("\nthe hallmark inspection's report")
     with get_engine().connect() as conn:
         before = conn.execute(text("SELECT md5(to_jsonb(i)::text) FROM inspections i WHERE inspection_id = :i"),
                               {"i": iid}).scalar()
@@ -343,7 +343,8 @@ def step_saved() -> None:
     check("18 report generation is read-only and makes no model call", before == after and not posted)
 
     body = " \n".join(walk(build_story(done, {1: photo(W_HALLMARK)}, datetime.now(timezone.utc)), []))
-    section = body[body.index("Hallmarking evidence"):body.index("Compliance results")]
+    section = body[body.index("Hallmarking evidence"):
+                   body.index("What MetrIQ could establish from the evidence")]
     check("17 the report has a Hallmarking evidence section with the stored HUID, confidence and NOT VERIFIED",
           "Potential HUID detected" in section and "AB12CD" in section and "95%" in section
           and "NOT VERIFIED" in section and "cannot authenticate" in section, section[:400])
@@ -352,9 +353,9 @@ def step_saved() -> None:
     check("17 the report shows the untrusted printed claim as untrusted",
           "HUID VERIFIED" in section and "untrusted OCR evidence and verifies nothing" in section)
     check("the report says Legal Metrology was not applied to the hallmark inspection",
-          "were not applied to this jewellery hallmark photo" in body)
-    check("the report shows the officer note that documents the manual check",
-          "checked by the officer outside MetrIQ" in body)
+          "do not apply to a hallmark / jewellery inspection" in body)
+    check("the report records no human decision for the hallmark inspection",
+          "officer" not in body.lower() and "Final outcome" not in body)
     stored = set()
 
     def urls(o):
@@ -392,7 +393,7 @@ def main() -> int:
     step_verification()
     step_untrusted()
     step_pipeline()
-    step_saved()
+    step_report(*step_saved())
     step_real_sample()
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0

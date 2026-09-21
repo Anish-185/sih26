@@ -50,8 +50,9 @@ def test_every_runner_is_covered() -> None:
         "test_knowledge.py", "test_retrieval.py", "test_product.py",
         "test_why_this_result.py", "test_certification.py",
         "test_laboratory.py", "test_hallmarking.py", "test_rag.py",
-        "test_api_contract.py", "test_llm_adapter.py", "test_legal_metrology.py",
+        "test_api_contract.py", "test_llm_adapter.py",
         "test_inspection_records.py", "test_escalation.py", "test_report.py", "test_hallmark_inspection.py", "test_copilot.py",
         "test_standards_coverage.py", "test_vision_fusion.py",
+        "test_product_context.py", "test_no_review_workflow.py", "test_evidence_graph.py",
     ):
         assert name in RUNNERS, f"{name} is missing from the runner sweep"

@@ -14,7 +14,8 @@ Both endpoints take ONE package, photographed from one or more sides
 
     POST /inspection/analyze   -> InspectionAnalysisOut
          (the same evidence + product identification + verified Indian Standard
-          candidates + deterministic compliance over all images)
+          candidates + declaration completeness over all images — no automatic
+          legal/compliance verdict)
 
     GET  /inspection/coverage  -> CoverageMatrixOut
          (what MetrIQ can currently inspect: product | standard | requirement |
@@ -163,8 +164,8 @@ async def analyze(
     huid_reference: str | None = Form(None),
 ) -> InspectionAnalysisOut:
     """Smart Inspection: the same OCR step for every image, then declaration
-    extraction, product identification, verified Indian Standard candidates and
-    deterministic compliance over the combined evidence."""
+    extraction, product identification and verified Indian Standard candidates
+    over the combined evidence. No automatic legal/compliance verdict."""
     uploads = await _package(image, side, images, sides)
     return _run(partial(get_analyzer().analyze_package, inspection_type=inspection_type,
                         huid_reference=huid_reference), uploads)

@@ -4,15 +4,13 @@
       -> declaration extraction   (deterministic)
       -> product identification   (existing BIS retrieval engine + product phrase gate)
       -> standard candidates      (verified knowledge-base records only)
-      -> compliance               (BIS: verified requirements of the identified standard + deterministic rules)
-      -> package label            (Legal Metrology: packaged-commodity declarations + deterministic rules)
+      -> modelled-product confirmation (which of MetrIQ's requirement-data products this is, if any —
+                                        pure requirements-lookup, no rule)
       -> declaration completeness (what the photos show, never "legally missing")
 
-BIS compliance and the Legal Metrology package-label evaluation are separate
-evidence systems with separate results; neither is merged into the other.
-
-Each stage is isolated: a failure in one stage degrades that stage to REVIEW and
-the pipeline still returns. Nothing here fabricates a result.
+MetrIQ produces no automatic legal/compliance verdict. Each stage is isolated: a
+failure in one stage degrades that stage to REVIEW and the pipeline still
+returns. Nothing here fabricates a result.
 """
 
 from __future__ import annotations
@@ -20,14 +18,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.completeness import DeclarationCompleteness, declaration_completeness
-from app.compliance import REVIEW, ComplianceEvaluation, evaluate_compliance
 from app.declarations import DeclarationStage, extract_declarations
 from app.llm import LocalLLM
-from app.package_label import PackageLabelEvaluation, evaluate_package_label
 from app.product import ProductStandardFinder
 from app.product_identification import MATCHED, ProductIdentification, identify_product
 from app.vision import VisionObservation
-from app.requirements import RequirementSet, load_requirements
+from app.requirements import RequirementSet, confirm_product, load_requirements
 
 
 @dataclass(frozen=True)
@@ -36,20 +32,21 @@ class PipelineStages:
     declaration_extraction: str
     product_identification: str
     standard_retrieval: str
-    compliance: str = REVIEW
-    officer_review: str = "PENDING"
-    package_label: str = REVIEW
 
 
 @dataclass(frozen=True)
 class DownstreamResult:
     declaration_stage: DeclarationStage
     product: ProductIdentification
-    compliance: ComplianceEvaluation
     completeness: DeclarationCompleteness
-    package_label: PackageLabelEvaluation
     stages: PipelineStages
     notes: list[str]
+    # Which modelled product (app.requirements) this package is, under the
+    # identified standard — pure requirements-lookup, not a rule verdict.
+    product_applicability: str | None = None
+    confirmed_product_id: str | None = None
+    confirmed_product_name: str | None = None
+    confirmed_product_category: str | None = None
 
 
 def _review_declarations(note: str) -> DeclarationStage:
@@ -68,40 +65,6 @@ def _review_product(note: str) -> ProductIdentification:
     )
 
 
-def _review_package_label(note: str) -> PackageLabelEvaluation:
-    return PackageLabelEvaluation(
-        source_category="LEGAL_METROLOGY", source_authority="Legal Metrology (Department of Consumer Affairs)",
-        overall_status=REVIEW, reason_code="ENGINE_ERROR", reason=note, scope_status="NO_REQUIREMENT_DATA",
-        scope="", scope_source=None, exclusions_found=[], assumptions=[], assumption_sources=[], checks=[],
-        summary=[note],
-    )
-
-
-class _NotApplied(Exception):
-    pass
-
-
-NOT_APPLIED = "NOT_APPLIED"
-
-
-def _not_applied_package_label() -> PackageLabelEvaluation:
-    reason = ("Hallmark inspection: the Legal Metrology (Packaged Commodities) Rules apply to pre-packaged "
-              "commodities, so their package-label requirements were not applied to this jewellery hallmark photo.")
-    return PackageLabelEvaluation(
-        source_category="LEGAL_METROLOGY", source_authority="Legal Metrology (Department of Consumer Affairs)",
-        overall_status=REVIEW, reason_code="NOT_A_PACKAGE_INSPECTION", reason=reason, scope_status=NOT_APPLIED,
-        scope="", scope_source=None, exclusions_found=[], assumptions=[], assumption_sources=[], checks=[],
-        summary=[reason],
-    )
-
-
-def _review_compliance(note: str) -> ComplianceEvaluation:
-    return ComplianceEvaluation(
-        overall_status=REVIEW, coverage_status="NO_STANDARD", reason_code="ENGINE_ERROR",
-        reason=note, product_name=None, standard_number=None, knowledge_id=None, checks=[],
-    )
-
-
 def run_downstream(
     regions,
     llm: LocalLLM | None = None,
@@ -112,10 +75,11 @@ def run_downstream(
     vision_observations: list[VisionObservation] | tuple = (),
 ) -> DownstreamResult:
     """``unreadable_images`` labels photos of this package that gave no usable OCR.
-    ``inspection_type`` HALLMARK (a jewellery hallmark photo) does not apply the Legal Metrology
-    packaged-commodity rules: they are reported as not applied, never evaluated.
-    ``vision_observations`` are optional visual observations of the package; they refine product
-    identification only, and their absence changes nothing else."""
+    ``inspection_type`` is informational only here (hallmarking standards have no
+    modelled package-label products, so ``confirm_product`` naturally reports
+    PRODUCT_NOT_MODELLED for them).
+    ``vision_observations`` are optional visual observations of the package; they
+    refine product identification only, and their absence changes nothing else."""
     notes: list[str] = []
 
     # 1) declaration extraction ------------------------------------------
@@ -136,40 +100,32 @@ def run_downstream(
         product = _review_product(f"Product identification failed: {exc}")
         notes.append(str(exc))
 
-    # 3) compliance — verified requirements + deterministic rules, no model -------
     try:
         items = finder.search_engine.items if finder is not None else []
         if requirements is None:
             requirements = load_requirements(items)
-        compliance = evaluate_compliance(product, decl, requirements, items, unreadable_images)
     except Exception as exc:  # noqa: BLE001
-        compliance = _review_compliance(f"Compliance evaluation failed: {exc}")
+        items = []
+        if requirements is None:
+            requirements = RequirementSet((), ())
         notes.append(str(exc))
 
-    # 4) Legal Metrology package-label requirements — independent of the BIS
-    #    standard, applicability decided from the package evidence --------------
-    try:
-        if inspection_type == "HALLMARK":
-            raise _NotApplied
-        package_label = evaluate_package_label(
-            decl, regions, requirements if requirements is not None else RequirementSet((), ()),
-            finder.search_engine.items if finder is not None else [], unreadable_images,
-        )
-    except _NotApplied:
-        package_label = _not_applied_package_label()
-    except Exception as exc:  # noqa: BLE001
-        package_label = _review_package_label(f"Package-label evaluation failed: {exc}")
-        notes.append(str(exc))
+    # 3) which modelled product does this match, under the identified standard —
+    #    pure requirements-lookup, no rule engine ---------------------------
+    applicability = confirmed = None
+    if product.status == MATCHED:
+        try:
+            applicability, confirmed, _candidates = confirm_product(product, requirements)
+        except Exception as exc:  # noqa: BLE001
+            notes.append(f"Product confirmation failed: {exc}")
 
-    # 5) declaration completeness — detection status + whether a verified
+    # 4) declaration completeness — detection status + whether a verified
     #    requirement covers the field; never "legally missing" ---------------
     standard = product.standard_number if product.status == MATCHED else None
-    confirmed = compliance.inspection_coverage.product_id if compliance.inspection_coverage else None
     try:
         completeness = declaration_completeness(
-            decl, requirements if requirements is not None else RequirementSet((), ()),
-            standard, unreadable_images, product_id=confirmed,
-            extra_requirements=package_label.field_requirements,
+            decl, requirements, standard, unreadable_images,
+            product_id=confirmed.id if confirmed else None,
         )
     except Exception as exc:  # noqa: BLE001
         completeness = declaration_completeness(decl, RequirementSet((), ()), None, unreadable_images)
@@ -180,15 +136,15 @@ def run_downstream(
         declaration_extraction=decl.status,
         product_identification=product.status,
         standard_retrieval=MATCHED if product.status == MATCHED else "REVIEW",
-        compliance=compliance.overall_status,
-        package_label=package_label.overall_status,
     )
     return DownstreamResult(
         declaration_stage=decl,
         product=product,
-        compliance=compliance,
         completeness=completeness,
-        package_label=package_label,
         stages=stages,
         notes=notes,
+        product_applicability=applicability,
+        confirmed_product_id=confirmed.id if confirmed else None,
+        confirmed_product_name=confirmed.name if confirmed else None,
+        confirmed_product_category=confirmed.category if confirmed else None,
     )

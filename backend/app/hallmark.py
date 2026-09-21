@@ -27,7 +27,8 @@ Checks (``evaluate_hallmark``), each quoting a verified knowledge record:
 
 No check can FAIL: an unreadable or unexpected mark from a photograph is an OCR
 limitation, not a verified failure. Because authenticity is never supported,
-the hallmark result is always REVIEW, and the inspection goes to an officer.
+the hallmark result is always REVIEW, and the article is reported as needing
+external authoritative verification.
 
 Milestone 19 adds three things, none of which can produce an authentication:
 
@@ -637,14 +638,14 @@ def evaluate_hallmark(regions, knowledge_items, force: bool = False,
             rule_id="HUID_AUTHENTICITY", requirement="The HUID belongs to this article (authentic).",
             result="NOT_SUPPORTED", reason_code="EXTERNAL_VERIFICATION_REQUIRED",
             reason=("External authoritative HUID verification required. MetrIQ cannot authenticate a HUID from an "
-                    "image; an officer must verify it with an authoritative source such as the BIS Care App."),
+                    "image; it must be verified against an authoritative source such as the BIS Care App."),
             observed_value=huid.value, source=care_src,
         ),
     ]
     if detected:
         reason = ("Hallmark evidence was observed, but authenticity cannot be established from the uploaded image"
                   + (f" — potential HUID {huid.value} detected, not verified." if huid.value else ".")
-                  + " An officer must verify the article.")
+                  + " The article must be verified against an authoritative source.")
         code = "AUTHENTICATION_NOT_ESTABLISHED"
     else:
         reason = "No hallmark or HUID evidence was read in the OCR text of this hallmark inspection."
@@ -751,7 +752,7 @@ def _check_purity(purity: PurityEvidence, source: HallmarkSource | None) -> Hall
                              observed_value=observed, source_regions=regions, source=source)
     if purity.status == "DETECTED":
         reason = (f"{purity.reason} It is not in the verified permitted-grade list — possibly an OCR misread; "
-                  "an officer must check the mark.")
+                  "the mark must be checked manually.")
         code = "GRADE_NOT_IN_VERIFIED_LIST"
     else:
         code = {"CONFLICT": "PURITY_CONFLICT", "UNCERTAIN": "PURITY_UNCERTAIN"}.get(purity.status, "PURITY_NOT_DETECTED")

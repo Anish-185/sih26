@@ -82,10 +82,10 @@ def test_chana_end_to_end_deterministic() -> None:
     check("stage summary: declaration_extraction COMPLETED", st.declaration_extraction == "COMPLETED")
     check("stage summary: product_identification MATCHED", st.product_identification == "MATCHED")
     check("stage summary: standard_retrieval MATCHED", st.standard_retrieval == "MATCHED")
-    check("stage summary: compliance REVIEW (IS 18140 is standard-only)", st.compliance == "REVIEW")
-    check("compliance for chana is STANDARD_ONLY, no checks invented",
-          res.compliance.coverage_status == "STANDARD_ONLY" and res.compliance.checks == [])
-    check("stage summary: officer_review PENDING", st.officer_review == "PENDING")
+    check("IS 18140 has no modelled requirement product, no rule invented",
+          res.product_applicability == "PRODUCT_NOT_MODELLED" and res.confirmed_product_id is None)
+    check("stage summary has no compliance / human-review stage",
+          not hasattr(st, "compliance") and not hasattr(st, "officer_review"))
 
     # evidence traceability: OCR region -> declaration -> product clue -> standard
     nq = next((d for d in res.declaration_stage.declarations if d.field == "net_quantity"), None)

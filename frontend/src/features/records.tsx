@@ -1,76 +1,27 @@
 /*
-  Shared pieces for inspections and their escalation (Inspection workspace, Review
-  queue, History, inspection detail, Dashboard). Three things are always shown
-  apart: the SYSTEM RESULT, the ESCALATION (did it need an officer?) and the
-  OFFICER DECISION.
+  Shared pieces for saved inspections (Inspection workspace, History, inspection
+  detail, Dashboard). MetrIQ produces no automatic compliance verdict — what is
+  shown here is only whether the deterministic system could RESOLVE the case
+  from the photographed evidence, and why not when it couldn't. MetrIQ records
+  no human decision either.
 */
-import { Mono, Panel, PanelHeader, StatusBadge } from "@/components/ui";
+import { Mono, Panel, PanelHeader } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import type {
-  EscalationReason,
-  InspectionSummary,
-  OfficerDecision,
-  OfficerStatus,
-  SystemResult,
-} from "@/lib/api";
-
-export const OFFICER_STATUS_LABEL: Record<OfficerStatus, string> = {
-  NOT_REQUIRED: "Not required",
-  PENDING: "Pending officer",
-  IN_REVIEW: "In review",
-  COMPLETED: "Completed",
-};
-
-export const DECISION_LABEL: Record<OfficerDecision, string> = {
-  ACCEPT_SYSTEM_RESULT: "Accepted system result",
-  OVERRIDE: "Overridden",
-  MANUAL_REVIEW: "Manual verification required",
-};
+import type { EscalationReason, InspectionSummary } from "@/lib/api";
 
 const SOURCE_LABEL: Record<EscalationReason["source"], string> = {
   OCR: "OCR evidence",
   PRODUCT: "Product",
-  BIS: "BIS",
-  LEGAL_METROLOGY: "Legal Metrology",
   HALLMARKING: "Hallmarking",
   PIPELINE: "Pipeline",
 };
 
-export function OfficerStatusMark({ status }: { status: OfficerStatus }) {
+/** Did the deterministic system resolve this inspection from the photos, or not? */
+export function ResolutionMark({ required }: { required: boolean }) {
   return (
-    <Mono
-      className={cn(
-        "text-[11px] uppercase tracking-[0.08em]",
-        status === "COMPLETED" || status === "NOT_REQUIRED"
-          ? "text-ink-soft"
-          : status === "IN_REVIEW"
-            ? "text-accent"
-            : "text-review",
-      )}
-    >
-      {OFFICER_STATUS_LABEL[status]}
+    <Mono className={cn("text-[11px] uppercase tracking-[0.08em]", required ? "text-review" : "text-ink-soft")}>
+      {required ? "Not fully established" : "Resolved by system"}
     </Mono>
-  );
-}
-
-/** The final decision: the system's own when no review was needed, the officer's once completed. */
-export function FinalDecision({ record }: { record: InspectionSummary }) {
-  if (record.officer_status === "NOT_REQUIRED") {
-    return (
-      <span className="inline-flex flex-wrap items-center gap-2 text-[12px] text-ink-soft">
-        Final system result
-        <StatusBadge status={record.system_result} size="sm" />
-      </span>
-    );
-  }
-  if (!record.officer_decision || !record.final_result) return <Mono muted>—</Mono>;
-  return (
-    <span className="inline-flex flex-wrap items-center gap-2 text-[12px] text-ink-soft">
-      {DECISION_LABEL[record.officer_decision]}
-      {record.final_result !== "MANUAL_REVIEW" && record.officer_decision === "OVERRIDE" && (
-        <StatusBadge status={record.final_result} size="sm" />
-      )}
-    </span>
   );
 }
 
@@ -78,71 +29,48 @@ export function productLabel(record: InspectionSummary): string {
   return record.product_name ?? "Product not identified";
 }
 
-/** Unique reason labels, for a compact "why escalated" cell. */
+/** Unique reason labels, for a compact "what could not be established" cell. */
 export function reasonLabels(reasons: EscalationReason[]): string[] {
   return [...new Set(reasons.map((r) => r.label))];
 }
 
-/* --------------------------------------------------------- escalation --- */
+/* --------------------------------------------------------- resolution --- */
 
-type Step = { label: string; detail?: React.ReactNode; state: "done" | "current" | "todo" | "skipped" };
+type Step = { label: string; detail?: React.ReactNode; state: "done" | "current" | "todo" };
 
 /**
- * The escalation decision and its path:
- * system result → can the system resolve it? → final system result | officer queue → decision → final record.
- * `officerStatus` is undefined before the inspection is saved.
+ * The deterministic path: evidence → could every part of the evidence chain be
+ * established from the photos? → resolved, or a stated list of what MetrIQ
+ * could not establish. No verdict and no decision is produced here.
  */
-export function EscalationPanel({
+export function ResolutionPanel({
   required,
-  systemResult,
   reasons,
-  officerStatus,
   selected = [],
   onSelect,
 }: {
   required: boolean;
-  systemResult: SystemResult;
   reasons: EscalationReason[];
-  officerStatus?: OfficerStatus;
   selected?: string[];
   onSelect?: (ids: string[]) => void;
 }) {
-  const saved = officerStatus !== undefined;
-  const reviewed = officerStatus === "COMPLETED";
   const steps: Step[] = [
-    { label: "System result", detail: <StatusBadge status={systemResult} size="sm" />, state: "done" },
+    { label: "Deterministic evidence", detail: <Mono muted>OCR → declarations → identification</Mono>, state: "done" },
     {
-      label: "Can the system resolve it?",
-      detail: <span className={required ? "text-review" : "text-ink"}>{required ? "No" : "Yes"}</span>,
+      label: "Established from the photos?",
+      detail: <span className={required ? "text-review" : "text-ink"}>{required ? "Not completely" : "Yes"}</span>,
       state: "done",
     },
-    ...(required
-      ? ([
-          {
-            label: "Officer review queue",
-            state: !saved ? "todo" : officerStatus === "PENDING" ? "current" : "done",
-          },
-          {
-            label: "Officer decision",
-            state: reviewed ? "done" : officerStatus === "IN_REVIEW" ? "current" : "todo",
-          },
-          { label: "Final record", state: reviewed ? "done" : "todo" },
-        ] as Step[])
-      : ([
-          { label: "Final system result", detail: <StatusBadge status={systemResult} size="sm" />, state: "done" },
-          { label: "Officer review", detail: <Mono muted>not required</Mono>, state: "skipped" },
-        ] as Step[])),
+    required
+      ? { label: "Needs verification outside MetrIQ", state: "current" }
+      : { label: "Resolved by MetrIQ", state: "done" },
   ];
 
   return (
     <Panel flush>
       <PanelHeader
-        title="Escalation"
-        meta={
-          <Mono className={cn("text-[11px] uppercase tracking-[0.08em]", required ? "text-review" : "text-ink-soft")}>
-            {required ? "Officer review required" : "Resolved by the system"}
-          </Mono>
-        }
+        title="How MetrIQ reached this result"
+        meta={<ResolutionMark required={required} />}
       />
       <ol className="flex flex-wrap items-stretch gap-px border-b border-line bg-line">
         {steps.map((s, i) => (
@@ -151,12 +79,11 @@ export function EscalationPanel({
             className={cn(
               "flex min-w-[9rem] flex-1 flex-col gap-1 bg-raised px-4 py-3",
               s.state === "current" && "bg-accent-soft",
-              (s.state === "todo" || s.state === "skipped") && "opacity-60",
+              s.state === "todo" && "opacity-60",
             )}
           >
             <Mono muted className="text-[10px] uppercase tracking-[0.1em]">
               {String(i + 1).padStart(2, "0")}
-              {s.state === "current" ? " · now" : ""}
             </Mono>
             <span className="text-[12px] font-medium text-ink">{s.label}</span>
             {s.detail && <span className="text-[12px]">{s.detail}</span>}
@@ -166,8 +93,8 @@ export function EscalationPanel({
 
       <p className="px-5 py-3 text-[12px] leading-relaxed text-ink-soft">
         {required
-          ? "The automated checks could not confidently resolve this inspection, so it goes to an officer. The system result stays as it is; the officer records a separate, final decision."
-          : "Every check the system needed was decided on clear evidence, so the system result is final and no officer review is needed."}
+          ? "MetrIQ could not establish every part of the evidence chain from these photos. Each thing it could not establish is listed below — MetrIQ states them rather than deciding them."
+          : "Every part of the evidence chain MetrIQ needed was decided on clear evidence from the photos."}
       </p>
 
       {reasons.length > 0 && (
@@ -198,11 +125,6 @@ export function EscalationPanel({
                     </Mono>
                   </div>
                   <p className="mt-0.5 text-[12px] leading-relaxed text-ink-soft">{r.message}</p>
-                  {!required && r.code === "REQUIREMENT_NOT_CHECKABLE" && (
-                    <p className="mt-0.5 text-[11px] text-ink-faint">
-                      Listed for the record — it cannot overturn a FAIL established on clear evidence.
-                    </p>
-                  )}
                 </button>
               </li>
             );

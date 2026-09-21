@@ -2,13 +2,18 @@
 
 MetrIQ's results are produced by the deterministic pipeline. This module is the
 only place that talks to OpenRouter, and NOTHING in the inspection pipeline
-(OCR, declarations, product identification, compliance, package label,
-hallmarking, escalation, records, report) imports it. If OpenRouter is down,
-mis-configured or out of free quota, every one of those still works — only the
-optional explanation is unavailable.
+(OCR, declarations, product identification, requirement knowledge, hallmarking,
+escalation, records, report) imports it. If OpenRouter is down, mis-configured
+or out of free quota, every one of those still works — only the optional
+explanation is unavailable.
 
-    app/llm.py       LocalLLM           -> LM Studio (unchanged, used by /ask)
-    app/openrouter.py OpenRouterLLM     -> OpenRouter -> the configured model
+    app/llm.py        LocalLLM      -> LM Studio (inspection product-identification
+                                      fallback and /laboratory-search only)
+    app/openrouter.py OpenRouterLLM -> OpenRouter -> the configured model
+                                      (the copilot's OPENROUTER_MODEL, and
+                                      OPENROUTER_GROUNDED_MODEL for /ask —
+                                      which also serves Hallmarking — and
+                                      /certification-guidance)
 
 Both expose the same ``generate(system_prompt=..., user_prompt=...) -> str``
 surface, so the explanation layer stays provider-replaceable.

@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 
 from app import language as lang
 from app.llm import LocalLLM
+from app.openrouter import OpenRouterLLM
 from app.retrieval import RetrievalResult, SearchEngine
 
 
@@ -79,12 +80,17 @@ SOURCE URL: {item.source_url or "N/A"}
 
 
 class BISQuestionAnswerer:
-    """Deterministic retrieval followed by grounded local generation."""
+    """Deterministic retrieval followed by grounded generation.
+
+    ``llm`` is injected — any client exposing ``generate(system_prompt=, user_prompt=)``
+    works (``LocalLLM``/LM Studio, ``OpenRouterLLM``, or a test stub). This module
+    never decides which provider to use; the caller does (see ``app/api.py``).
+    """
 
     def __init__(
         self,
         search_engine: SearchEngine,
-        llm: LocalLLM,
+        llm: LocalLLM | OpenRouterLLM,
         retrieval_limit: int = 5,
     ) -> None:
         self.search_engine = search_engine

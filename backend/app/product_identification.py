@@ -549,7 +549,7 @@ def _decide(candidates, unverified, method, notes, fusion=None, vision_status="N
     if fusion.conflicts:
         return review(
             fusion.conflicts[0]
-            + " The package text and the visual observation must be reconciled by an officer."
+            + " The package text and the visual observation must be reconciled manually."
         )
 
     if method == "vision_assisted":
@@ -557,13 +557,13 @@ def _decide(candidates, unverified, method, notes, fusion=None, vision_status="N
         return review(
             "No product text on the label matched the knowledge base. The image appears to show "
             f"{', '.join(seen) or 'a product'}, which retrieves {top.standard_number}. A visual "
-            "observation is not verified evidence, so this needs officer confirmation against the label."
+            "observation is not verified evidence, so this needs manual confirmation against the label."
         )
 
     if method == "model_assisted":
         return review(
             "The package text did not name a product in the knowledge base. The local model "
-            f"suggested a product term that retrieves {top.standard_number}; this needs officer "
+            f"suggested a product term that retrieves {top.standard_number}; this needs manual "
             "confirmation against the label."
         )
 

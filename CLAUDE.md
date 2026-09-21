@@ -151,7 +151,7 @@ laboratories, hallmarking, consumer information, FAQs.
 | 11 | Testing |
 | 12 | Demo hardening |
 | 13 | Real IMAGE -> OCR |
-| 14 | OCR -> declarations -> product -> Indian Standard (this phase) |
+| 14 | OCR -> declarations -> product -> Indian Standard |
 
 *Phase 14 — OCR -> declaration extraction -> product classification -> verified
 Indian Standard lookup. `POST /inspection/analyze` now runs the downstream
@@ -284,7 +284,7 @@ Indian Standard candidates from `data/knowledge/` (the Phase 14 classification r
 and separate standards registry were retired; IS 18140:2023 and IS 367:1993 moved
 into the knowledge base). History / Review / Dashboard still run on clearly labelled
 placeholder data (`frontend/src/mocks.tsx`) — the legal-metrology PASS/FAIL rule
-engine and the officer report are not built yet. Run: backend on :8000, then
+engine covers only verified requirements. Run: backend on :8000, then
 `cd frontend && npm install && npm run dev` (proxies `/api` -> :8000).
 
 Phases 1–14 and inspection Milestones 1–5 (Instant OCR, declarations, product
@@ -327,8 +327,7 @@ the number is a verified KB standard, otherwise UNCERTAIN with no value; a norma
 may PASS but never FAIL (REVIEW, `EVIDENCE_NORMALIZED`). Emails with one OCR-inserted space are
 repaired only with a contact cue. The most prominent line is only the product name when it
 contains KB product vocabulary or the label says "Product name:"; a brand-like line is never the
-product name. The remaining work is verified requirement data and the officer review / report
-surface.
+product name. The remaining work is verified requirement data.
 
 Milestone 8 (verified Legal Metrology package-label requirements): the knowledge base gains a
 `legal_metrology` category (`data/knowledge/legal_metrology.json`) whose items have
@@ -356,33 +355,28 @@ deterministic rules 7. Frontend: "Package label requirements" panel (requirement
 result, evidence + quoted Legal Metrology source), authority-aware source labels. Tests:
 `test_legal_metrology.py` (129 checks).
 
-Milestone 9 (officer review + inspection history): saved inspections live in PostgreSQL
+Milestone 9 (persisted inspections + history): saved inspections live in PostgreSQL
 (`DATABASE_URL`, default `postgresql+psycopg:///metriq`) through SQLAlchemy (`app/db.py`,
 `app/records.py`) with an Alembic migration (`backend/migrations`, `alembic upgrade head`).
 Tables: `inspections` (system result: `bis_result`, `legal_metrology_result`, combined
 `system_result` — FAIL if either FAILs, PASS only if both PASS, else REVIEW — `system_reasons`,
-product fields, `sides`, full `analysis` JSONB; officer review: `officer_status`
-PENDING → IN_REVIEW → COMPLETED, `officer_decision` ACCEPT_SYSTEM_RESULT / OVERRIDE / MANUAL_REVIEW,
-`officer_result` (OVERRIDE only, must differ from the system result), `officer_note`,
-`review_started_at`, `review_completed_at`) and `inspection_images` (photo bytes per upload
-position). Check constraints tie decision/status/timestamps together; triggers reject any update
-of the system columns or stored photos. `app/records_api.py`: `POST /inspections` (multipart
+product fields, `sides`, full `analysis` JSONB) and `inspection_images` (photo bytes per upload
+position). Triggers reject any update of the system columns or stored photos, so a saved record is
+immutable. *(M22 removed the human review workflow this milestone had added: the officer status,
+decision, result, note and review timestamps. The columns migration 0001/0002 created are simply no
+longer mapped — legacy rows load and are ignored, and no migration was needed.)* `app/records_api.py`: `POST /inspections` (multipart
 photos only — the backend re-runs the analysis itself; any other form field → 422),
-`GET /inspections` (`?officer_status=`), `GET /inspections/stats`, `GET /inspections/{id}`,
-`GET /inspections/{id}/images/{index}`, `POST /inspections/{id}/review` (strict body: START, or
-COMPLETE with decision / officer_result / note; unknown field → 422, wrong state or duplicate → 409,
-unknown id → 404, malformed id → 422, database down → 503). OVERRIDE and MANUAL_REVIEW need a note.
+`GET /inspections` (`?escalated=`), `GET /inspections/stats`, `GET /inspections/{id}`,
+`GET /inspections/{id}/images/{index}` (404 unknown, 422 malformed id, 503 database down).
 Legal Metrology / BIS aggregation is unchanged: REVIEW stays REVIEW and the UI explains it.
-Frontend: Inspection gains "Save for officer review"; `/review` (ReviewQueueView: PENDING +
-IN_REVIEW), `/history` (real records), `/history/:id` (ReviewView: fixed system result panel,
-officer review panel, and the exported inspection `Workspace` over the stored photos and saved
-analysis), Dashboard counts from `/inspections/stats` with system results and officer states
-separate. `frontend/src/mocks.tsx` is gone — no placeholder data remains. Tests:
+Frontend: Inspection gains "Save inspection"; `/history` (real records), `/history/:id`
+(`RecordView`: the fixed system result panel and the exported inspection `Workspace` over the stored
+photos and saved analysis), Dashboard counts from `/inspections/stats`. `frontend/src/mocks.tsx` is gone — no placeholder data remains. Tests:
 `test_inspection_records.py` (61 checks; needs the `metriq_test` database, refuses any database not
 named `*_test`). Full suite 169 passed.
 
-Milestone 10 (final officer escalation): `app/escalation.py` `assess(analysis_json)` decides
-deterministically whether the system can resolve an inspection or it goes to an officer, from the
+Milestone 10 (resolution assessment): `app/escalation.py` `assess(analysis_json)` decides
+deterministically whether the system can resolve an inspection from the photographed evidence, from the
 finished analysis only (no model, changes no result). Reasons, each with `code` / `label` / `source`
 (OCR, PRODUCT, BIS, LEGAL_METROLOGY, PIPELINE) / `message` / `source_regions` / `checks`:
 PIPELINE_ERROR, IMAGES_UNREADABLE, IMAGE_QUALITY_LOW, PRODUCT_NOT_IDENTIFIED, MULTIPLE_CANDIDATES,
@@ -392,14 +386,13 @@ REQUIREMENT_NOT_CHECKABLE, PACKAGE_SCOPE_EXCLUSION, SYSTEM_RESULT_REVIEW. REQUIR
 not block a FAIL (it cannot overturn clear evidence); every other reason escalates. An assessment error
 escalates. `InspectionAnalysisOut.escalation` carries it (`/inspection/analyze`). Saved inspections:
 migration `0002_escalation` adds `escalation_required` + `escalation_reasons` (protected by the
-immutability trigger) and the officer status `NOT_REQUIRED` (resolved by the system — final, never
-queued, cannot be reviewed: 409; the trigger refuses moving it into the queue); unresolved inspections
-start PENDING. Existing rows are backfilled with the same `assess`. `final_result` of a NOT_REQUIRED
-inspection is its system result; stats gain `escalated` and `officer.NOT_REQUIRED`. Frontend:
-`EscalationPanel` (records.tsx) — the path system result → can the system resolve it? → final system
-result | officer queue → decision → final record, with clickable evidence-linked reasons — in the live
-workspace and the saved inspection; save button "Save final result" / "Save and send to officer
-review"; queue "Why escalated" column; History "Escalation" column; Dashboard "Resolved by system".
+immutability trigger). Existing rows are backfilled with the same `assess`; stats gain `escalated`.
+Frontend: `ResolutionPanel` (records.tsx) — deterministic rules → system result → was everything
+established from the photos? → final system result, or the list of what MetrIQ could not establish,
+with clickable evidence-linked reasons — in the live workspace and the saved inspection; History
+"Resolution" and "Not established" columns; Dashboard "Resolved by system". *(M22: the officer queue
+and decision this milestone fed were removed; the assessment itself, its reasons and its evidence
+links are unchanged.)*
 With the current verified data every real inspection escalates (no standard has every requirement
 checkable). Tests: `test_escalation.py` (27), `test_inspection_records.py` (77, incl. 0002 backfill).
 
@@ -409,20 +402,20 @@ returns the flowables, `render_report` builds the PDF with "page X / Y" chrome. 
 recomputation, no model. Fonts: Noto Sans Regular/Medium/Bold + Noto Sans Mono in `app/report_fonts/`
 (SIL OFL 1.1, `OFL.txt`) — they cover the rupee sign. Sections: header (ID, saved / generated in IST,
 status) · 02 summary (product or "Not identified", brand, manufacturer/packer/importer, category or "Not
-established", sides, SYSTEM RESULT and OFFICER FINAL DECISION boxes side by side) · 03 stored photos with
+established", sides, AUTOMATED SYSTEM RESULT and RESOLUTION boxes side by side) · 03 stored photos with
 OCR boxes drawn on an in-memory copy (only sides that exist) · 04 OCR evidence (field | value | confidence |
 side + region + raw text, region table capped at 60) · 05 declarations with stored statuses (NOT_DETECTED is
 not "legally missing") · 06 BIS standard evidence (identified / candidate, why this result, source) or
 "No verified BIS standard was identified by the automated retrieval process." · 07 Legal Metrology
 requirements (checkable vs not checkable from an image, status, source + URL per requirement) · 08
 compliance table (NOT_SUPPORTED shown as UNSUPPORTED, never PASS) · 09 automated system result with
-escalation reasons, uncertain / conflicting declarations, unsupported checks · 10 officer review (never an
-officer identity) · 11 final outcome (system result and officer decision both shown) · 12 only the sources
-stored with the evidence. All stored text is XML-escaped. Endpoint `GET /inspections/{id}/report.pdf`
+every reason a point could not be established, uncertain / conflicting declarations, unsupported checks ·
+10 only the sources stored with the evidence. *(M22 removed the human-review and final-outcome sections;
+every result in the report is the deterministic system's own.)* All stored text is XML-escaped. Endpoint `GET /inspections/{id}/report.pdf`
 (422 malformed id, 404 unknown, 503 database down; session rolled back, never committed). Frontend:
-"View report" (ReviewView header) — `LinkButton external` to the PDF URL. Tests: `test_report.py` (36:
-PASS / FAIL / REVIEW, officer states, honesty, multi-side, escaping, stored-only URLs, endpoint read-only
-with no LLM / recompute calls).
+"View report" (`RecordView` header) — `LinkButton external` to the PDF URL. Tests: `test_report.py` (35:
+PASS / FAIL / REVIEW, no human decision, honesty, multi-side, escaping, stored-only URLs, endpoint
+read-only with no LLM / recompute calls).
 
 Milestone 12 (hallmark / HUID workflow): `app/hallmark.py` `evaluate_hallmark(regions, knowledge_items,
 force)` — deterministic, never authenticates. Extracts a potential HUID (labelled six-character alphanumeric
@@ -446,7 +439,7 @@ uploaded image"), untrusted claims add a reason, a hallmarking standard still es
 Report: numbered sections, "Hallmarking evidence" (observed vs verification, checks, untrusted claims), Legal
 Metrology "not applied", BIS Hallmarking sources. Frontend: `HallmarkEvidence.tsx` panel (OBSERVED FROM THE
 IMAGE | VERIFICATION STATUS) in the workspace; Hallmarking page gains "Inspect a hallmark photo" (analyse, save
-to officer review, HUID reference field = text comparison only). Sample `synth_hallmark-closeup.png`. Tests:
+the saved records, HUID reference field = text comparison only). Sample `synth_hallmark-closeup.png`. Tests:
 `test_hallmark_inspection.py` (58).
 
 Milestone 13 (grounded copilot via OpenRouter): an OPTIONAL explanation layer over a finished
@@ -476,7 +469,7 @@ WITHHOLDS it (replacing it with MetrIQ's own sentence) when it cites an IS numbe
 not in the context, claims an authentication, or states an overall verdict other than the deterministic
 one — a check-level PASS inside a REVIEW case is not a contradiction. `system_result` in the response is
 always read from the record. `parse_response` also salvages a reply cut short by the token limit — the
-complete `answer` and evidence entries are recovered and the officer is told it was cut short, so raw
+complete `answer` and evidence entries are recovered and the user is told it was cut short, so raw
 JSON is never shown. `app/copilot_api.py`: `GET /copilot/status` (configured flag, model,
 remaining free budget, capabilities — no key) and `POST /copilot/explain` (strict body: exactly one of
 `inspection_id` or `analysis`, one of nine capabilities, optional question/rule_id; 422 on anything else,
@@ -484,11 +477,11 @@ remaining free budget, capabilities — no key) and `POST /copilot/explain` (str
 committed, nothing is recomputed, and the copilot imports no pipeline module. Frontend:
 `features/CopilotPanel.tsx` — a panel, not a chat: prompt chips, one text field, the answer with its
 evidence, limitations and the sources stored with the evidence, the deterministic result shown beside it,
-and the free budget in the footer; in the inspection workspace and on the officer review page
+and the free budget in the footer; in the inspection workspace and on the saved-record page
 (`hideCopilot` keeps it in one place there). One request per user action; nothing is ever called
 automatically. Tests: `test_copilot.py` (204 checks, every provider call stubbed — no tokens spent) plus
 copilot read-only checks in `test_inspection_records.py`. With no key configured, or with OpenRouter down,
-every result, check, source, escalation, officer decision and PDF report is unchanged.
+every result, check, source, escalation and PDF report is unchanged.
 
 
 Milestone 14 (verified BIS knowledge + product → standard coverage): the knowledge base grew from 36 to
@@ -557,7 +550,7 @@ carries `signals` (`ocr_supported` / `vision_supported` / `knowledge_supported` 
 `conflicts`) and `vision_status` (`OK` | `UNAVAILABLE` | `NOT_RUN`). Outcomes — OCR and vision agree →
 MATCHED, agreement stated in the reason, **retrieval confidence unchanged** (agreement is not verified
 evidence); they disagree → REVIEW with the conflict quoted in full, MetrIQ never chooses; no OCR product
-evidence but vision has some → REVIEW, `method: vision_assisted`, needs officer confirmation; photos of
+evidence but vision has some → REVIEW, `method: vision_assisted`, needs manual confirmation; photos of
 one package that appear to show different products → a cross-side conflict; vision unavailable or
 unconfigured → byte-for-byte the pre-Milestone-15 result. The "the label text names more than one
 product" rule now counts only OCR-supported candidates, so a vision-derived candidate can never be
@@ -593,6 +586,8 @@ sih26/
       product_context.py # M21: the canonical product context — composes existing evidence, creates none
       copilot.py       # M13 + M20: grounded context (inspection + feature) + system prompt + guard
       copilot_api.py   # M13 + M20: GET /copilot/status, POST /copilot/explain (read-only)
+      evidence_graph.py # M22: projects existing evidence onto nodes/edges — explains, never decides
+      graph_api.py     # M22: POST /evidence-graph (read-only; whitelisted client payloads)
       language.py      # Milestone 17: language detection + retrieval aliases (en / hi / te)
       rag.py           # grounded BIS question-answering pipeline (/ask)
       product.py       # Phase 5: Product -> Standard discovery + Phase 9 "Why this result?"
@@ -606,14 +601,13 @@ sih26/
       declarations.py  # deterministic declarations: DETECTED / UNCERTAIN / NOT_DETECTED, linked to OCR regions
       product_identification.py # product + standard candidates over the KB (retrieval engine + phrase gate)
       requirements.py  # verified products + requirements: load, validate (quotes in verified records),
-                       #   product-specific applicability, coverage matrix
-      compliance.py    # deterministic compliance engine: PASS / FAIL / REVIEW / NOT_SUPPORTED, no model;
-                       #   every check carries rule_condition + reason_code/category + both evidence chains
-      package_label.py # Milestone 8: Legal Metrology package-label evaluation (scope, exclusions, separate result)
+                       #   product-specific applicability, coverage matrix (knowledge only, no verdict —
+                       #   the final hardening pass removed compliance.py/package_label.py, the deterministic
+                       #   PASS/FAIL/REVIEW rule engines that used to sit on top of this data)
       completeness.py  # declaration completeness: detection status + verified-requirement coverage, never "missing"
-      pipeline.py      # OCR -> declarations -> product identification -> standard candidates -> compliance
+      pipeline.py      # OCR -> declarations -> product identification -> standard candidates -> completeness
       db.py            # Milestone 9: PostgreSQL engine/session (DATABASE_URL)
-      records.py       # Milestone 9: saved inspections + officer review models and workflow
+      records.py       # Milestone 9: saved inspections (immutable evidence; no compliance verdict is stored)
       records_api.py   # Milestone 9: /inspections save, list, stats, detail, stored photos, review
       escalation.py    # Milestone 10: deterministic resolve-or-escalate decision + evidence-linked reasons
       report.py        # Milestone 11: evidence-backed PDF report from the stored record (read-only)
@@ -626,7 +620,8 @@ sih26/
         text.py        # normalize / tokenize / parse standard numbers
         engine.py      # SearchEngine, scoring, ranking, confidence, abstention
     alembic.ini            # Alembic config (URL from DATABASE_URL)
-    migrations/            # Alembic migrations (0001_inspection_records, 0002_escalation)
+    migrations/            # Alembic migrations (0001_inspection_records, 0002_escalation,
+                           #   0003_drop_compliance_verdicts)
     scripts/
       check_knowledge.py   # CLI: validate the knowledge base
       fetch_lims_laboratories.py # M18: one-off BIS LIMS ingestion -> data/laboratories.json
@@ -647,13 +642,11 @@ sih26/
       test_instant_ocr.py  # Instant OCR: /inspection/ocr evidence, stubbed engine failures, validation
       test_declarations.py # declaration extraction on controlled OCR fixtures (+ real-label regressions)
       test_product_identification.py # product/standard candidates, REVIEW paths, model stubbed
-      test_compliance.py   # compliance rules, aggregation policy, grounding, traceability
       test_multiside.py    # multi-side packages: per-image provenance, duplicates/conflicts, failed sides
-      test_why_completeness.py # why PASS/FAIL/REVIEW + declaration completeness, never "legally missing"
+      test_why_completeness.py # declaration completeness, never "legally missing" (no compliance verdict)
       test_coverage.py     # Milestone 7: product applicability, coverage matrix, junk-name rejection, real labels
       test_hardening.py    # Milestone 7 hardening: coverage classes, domains, IS/email normalization, brand != product
-      test_legal_metrology.py # Milestone 8: Legal Metrology sources, rules, applicability, BIS separation, UI contract
-      test_inspection_records.py # Milestone 9/10: migrations, persistence, escalation states, officer review, stats (PostgreSQL)
+      test_inspection_records.py # Milestone 9/10: migrations, persistence, resolution states, stats (PostgreSQL)
       test_escalation.py   # Milestone 10: every escalation reason, resolve-or-escalate decision, determinism
       test_report.py       # Milestone 11: PDF report content, honesty, escaping, read-only endpoint (PostgreSQL)
       test_hallmark_inspection.py # Milestone 12: HUID / purity extraction, untrusted text, escalation, report
@@ -661,6 +654,10 @@ sih26/
       test_copilot.py      # Milestone 13: provider, grounding, injection defence, withheld answers, independence
       test_copilot_context.py # M20: feature contexts, evidence vocabulary, lab/hallmark/cert safety, language
       test_product_context.py # M21: cross-feature composition, applicability, provenance, trust boundary
+      test_evidence_graph.py # M22: graph projection, chain, provenance, safety, whitelist, UI shape
+      test_no_review_workflow.py # M22: the human review workflow is gone (superseded by the final
+                                 #   hardening pass, which also removed the PASS/FAIL/REVIEW it once
+                                 #   asserted survived — see "Final Hardening Pass" below)
       test_standards_coverage.py # Milestone 14: standard provenance, product→standard retrieval, no invented rules
       test_vision_fusion.py # Milestone 15: vision adapter, scrubbing, OCR/vision fusion, graceful failure
       test_pipeline.py     # OCR -> standard candidates end-to-end + stage degradation
@@ -958,7 +955,7 @@ test applies. A withheld answer is replaced by MetrIQ's own sentence — now in 
 (`lang.WITHHELD`, the third and last hard-coded translated string set).
 
 **Multilingual (M17 unchanged, extended to the copilot):** `language` on the request, `lang.resolve`
-on the officer's own question, `lang.apply` on the system prompt, and `language` + a deterministic
+on the user's own question, `lang.apply` on the system prompt, and `language` + a deterministic
 `confidence` (`GROUNDED` / `UNSTRUCTURED` / `WITHHELD` — computed by MetrIQ from what happened to the
 answer, never a self-assessment) on the response. The evidence sent is byte-for-byte identical in
 every language (tested); English appends nothing, so English behaviour is unchanged.
@@ -1040,3 +1037,219 @@ whitelist, copilot guards and language, unchanged results and coverage, old-reco
 corrected UI copy, and no unsupported claim. One invariance assertion in `test_vision_fusion.py` now pops
 the context's vision diagnostic the way it already pops `product.vision_status`, and asserts the context
 reaches the same conclusions with and without vision. Full suite 308 passed.
+
+Milestone 22 — FINAL (evidence graph + removal of the human review workflow). Two parts.
+
+**Part 0 — the officer / human review workflow is gone.** It was not part of SIH26107, so MetrIQ no
+longer has one. Removed: the officer status (`NOT_REQUIRED` / `PENDING` / `IN_REVIEW` / `COMPLETED`),
+the officer decision (`ACCEPT_SYSTEM_RESULT` / `OVERRIDE` / `MANUAL_REVIEW`), the officer result, the
+officer note, the review timestamps, `final_result`, `POST /inspections/{id}/review`, the
+`?officer_status=` filter, the review-queue page and route, the officer panel on the saved record, the
+officer report sections (10 "Officer review" and 11 "Final outcome"), the officer stats and dashboard
+block, and the `officer_review` pipeline stage. **What KEPT is the deterministic result:** PASS / FAIL /
+REVIEW are still produced by `app/compliance.py`, `app/package_label.py` and `app/hallmark.py` and
+combined by `app.escalation.system_result` — those are SYSTEM results and every one of them is intact.
+The M10 assessment stays too, reworded from "does this go to an officer" to "could the deterministic
+system establish every applicable requirement from the photos": the field names (`escalation_required`,
+`escalation_reasons`), the 14 reason codes and their evidence links are unchanged, so no API or database
+shape broke. **No migration:** `app/records.py` simply stopped mapping the officer columns, so a database
+migrated earlier keeps them, new rows take their defaults, and legacy rows load with those fields ignored
+(tested). `GET /inspections` gained `?escalated=true|false` in place of the status filter. Renames:
+`ReviewView.tsx` → `RecordView.tsx` (the saved-record page, same route `/history/:id`),
+`EscalationPanel` → `ResolutionPanel`, `OfficerStatusMark` → `ResolutionMark`. One guard was made more
+precise while validating: `_AUTHENTICATION` in `app/copilot.py` treated "the verified record /
+requirement / rule / source" as an authentication claim and withheld honest answers; a negative lookahead
+now excludes MetrIQ's own knowledge-base vocabulary, while every real claim ("the HUID is verified", "the
+item is authentic") is still withheld. Regression suite: `test_no_review_workflow.py` (23 checks — greps
+the shipped backend, frontend and docs for the removed vocabulary, walks the live OpenAPI route table, and
+re-asserts deterministic PASS / FAIL / REVIEW).
+
+**Part 1 — the evidence graph.** `app/evidence_graph.py` answers one question — *how did MetrIQ arrive at
+this result?* — by PROJECTING a finished analysis (or a finished product context) onto nodes and edges.
+**The MetrIQ evidence graph visualizes relationships already established by the deterministic evidence
+pipeline. It does not independently infer standards, compliance, authenticity, laboratory validity, or
+certification applicability.** It calls no model, runs no retrieval, evaluates no rule and reaches no
+conclusion: every label, status and quote is copied from the analysis, and an edge exists only where that
+analysis already links the two things. Nothing downstream imports it (asserted), so deleting it changes no
+result. No graph database, no Neo4j — a serializable in-memory projection.
+
+*13 node types:* `PRODUCT`, `OCR_EVIDENCE`, `DECLARATION`, `VISION_OBSERVATION`, `STANDARD`,
+`CERTIFICATION`, `REQUIREMENT`, `RULE`, `SYSTEM_RESULT`, `LABORATORY`, `HALLMARK_OBSERVATION`,
+`HUID_OBSERVATION`, `SOURCE`. Limitations are not a node type: they ride on the node they belong to and on
+the graph, so a boundary is always attached to the thing it bounds. *10 edge types:* `IDENTIFIED_FROM`,
+`SUPPORTED_BY`, `MATCHED_TO`, `EXPLAINS`, `REQUIRES`, `CHECKED_BY`, `RESULTED_IN`, `SOURCED_FROM`,
+`RELATED_TO`, `OBSERVED_IN` — each carrying a deterministic `explanation` written from the evidence
+(the `MATCHED_TO` edge quotes the existing M9 "why this result", not a new one). Every node carries
+`provenance` from the same vocabulary M21 uses (`USER_DESCRIPTION`, `OCR_TEXT`, `DECLARATION`,
+`VISION_OBSERVATION`, `DETERMINISTIC_RETRIEVAL`, `BIS_KNOWLEDGE_BASE`, `LEGAL_METROLOGY_KNOWLEDGE`,
+`DETERMINISTIC_RULE_ENGINE`, `LABORATORY_SNAPSHOT`, `HALLMARK_OBSERVATION`) and a `layer` (0 evidence →
+7 source) so a view can lay it out without knowing the types.
+
+*The inspection graph:* declaration `--OBSERVED_IN-->` OCR region · product `--IDENTIFIED_FROM-->`
+declaration / OCR region, `--SUPPORTED_BY-->` visual observation · product `--MATCHED_TO-->` standard ·
+standard `--SOURCED_FROM-->` verified record, `--REQUIRES-->` requirement, `--RELATED_TO-->` certification
+route and laboratory listing · requirement `--CHECKED_BY-->` rule · rule `--SUPPORTED_BY-->` the evidence
+it read and `--RESULTED_IN-->` the system result. The result node carries the combination policy and, when
+the case is unresolved, the reason labels — never a verdict of its own. `NOT_SUPPORTED` rules say plainly
+they are neither a pass nor a failure. *The certification graph* is the M16 journey, or an explicit
+`NOT_AVAILABLE` node with its own message when the verified records do not establish a route — never an
+inferred one. *The laboratory graph* is the M18 snapshot: validity only `VALID_AT_SNAPSHOT` /
+`EXPIRED_AT_SNAPSHOT` / `NOT_STATED`, alphabetical, no ranking, no accreditation / NABL / contacts, the
+un-ingested Group-1 / Group-2 PDFs disclosed. *The hallmarking graph* is M19's: an observation node and a
+HUID observation node whose authenticity is `NOT_ESTABLISHED`, no node type or status that could
+authenticate an item, `HUID_AUTHENTICITY` permanently `NOT_SUPPORTED`, an uncertain purity left uncertain,
+the BIS logo unconfirmable by OCR, and a printed "HUID VERIFIED" kept as untrusted OCR evidence.
+*The query path* begins `PRODUCT → NOT_IDENTIFIED` and says a typed description is not evidence about a
+physical item; it then shows the verified standard that was actually retrieved, and no OCR, declaration,
+rule or result node at all.
+
+*API:* `POST /evidence-graph` (`app/graph_api.py`), strict body with exactly one of `inspection_id`
+(server-derived from the stored analysis; read-only, the session is rolled back and never committed),
+`analysis` or `product_context`. The trust model is M21's, restated not changed: the two client-echoed
+forms reuse `InspectionAnalysisOut` / `ProductContextOut` AS the whitelist, the request carries no node,
+edge, label or status field at all, and a node smuggled inside an analysis never reaches the graph
+(tested). Anything else → 422; unknown id → 404; database down → 503. *Copilot:* capability
+`EXPLAIN_EVIDENCE_GRAPH` and an `evidence_graph` context section (compact: nodes, `a --EDGE--> b:
+explanation` lines, limitations) for both the inspection path and the `PRODUCT` feature context; the
+shared system prompt now forbids deriving a standard, requirement, authentication or result from a path
+through a graph. Every M20 guard still fires. *Report:* deliberately unchanged — the PDF already carries
+the underlying evidence sections, and the graph is a UI explainability layer.
+
+*Frontend:* `components/EvidenceGraph.tsx` (read-only: layered rows, a node click showing the node's
+evidence, provenance, source link and its relationships with their explanations, clicking an OCR node
+lights its box on the photograph, "Focus on the path" and a collapsible "what this graph does not
+establish") plus `components/EvidenceGraphSection.tsx` (loads it once; a failure removes nothing from the
+page). It appears in the inspection workspace (live and saved) and on the Standards page under the product
+context. No redesign, no new route, no new colour, no canvas — the layer rows are the small-screen
+vertical chain. `?q=` and `?standard=` deep links are untouched.
+
+Tests: `test_evidence_graph.py` (171 checks, every model call stubbed — no quota spent): generation from
+both entry points, determinism, the full chain, provenance and stored-only URLs, PASS / FAIL / REVIEW
+graphs, unsupported coverage, laboratory snapshot wording, hallmarking safety, no HUID verification node,
+uncertain purity, an absent certification route, query-path uncertainty, the client whitelist and
+malformed-payload rejection, the copilot receiving only graph evidence, deep links, analyses saved before
+this milestone, the report and the M21 context unchanged, and the UI shape. Coverage is unchanged and
+asserted: 97 verified standards, 15 requirements, 7 deterministic rules, 2 INSPECTION_SUPPORTED.
+
+Final architecture: PRODUCT → EVIDENCE → DETERMINISTIC ANALYSIS → SYSTEM RESULT → EVIDENCE GRAPH →
+OPTIONAL GROUNDED COPILOT. **M22 is the last milestone. Do not start another.**
+
+
+## Final Hardening Pass (supersedes M22's compliance-verdict architecture)
+
+M22 kept the deterministic PASS/FAIL/REVIEW compliance engine on purpose and called that
+architecture final — only the human officer-review layer on top of it was removed. A later,
+explicit instruction supersedes that decision: MetrIQ is not an automated legal-compliance judge.
+It stops at evidence and verified BIS/Legal-Metrology **knowledge**, never a pass/fail/review
+verdict. Separately, Certification and Hallmarking question-answering had to stop depending on the
+local LM Studio (Qwen3-4B) model and move onto the same OpenRouter architecture the copilot
+already used.
+
+**The compliance engine is deleted, not hidden.** `app/compliance.py` (the BIS rule engine) and
+`app/package_label.py` (its Legal Metrology sibling, which reused the BIS engine's internals
+directly) are gone from the repository, along with `test_compliance.py` and `test_legal_metrology.py`.
+`app/requirements.py` — pure knowledge: which products link to which standards, which verified
+requirements apply, the coverage matrix — is untouched; it never depended on the rule engine, and it
+is now what the evidence graph's `REQUIREMENT` nodes and the PDF report's requirement sections read
+directly, as knowledge, never as a check result. The flow is now strictly evidence-first: OCR →
+declarations → product identification → verified standard retrieval → requirement knowledge (never a
+verdict) → certification / laboratory / hallmarking knowledge → grounded explanation → evidence graph
+/ report. `app/pipeline.py` no longer has a compliance or package-label stage at all.
+
+**`app/escalation.py` is rewritten**, not trimmed. `system_result()`/`system_results()` and the
+verdict-only reasons (`SYSTEM_RESULT_REVIEW`, `REQUIREMENT_NOT_CHECKABLE`, `PACKAGE_SCOPE_EXCLUSION`)
+are gone. `assess()` now returns `{"required": bool, "reasons": [...]}` — MetrIQ's own assessment of
+whether it could establish the product/standard/evidence chain from the photographs, re-sourced from
+product identification and `app/requirements.py` directly instead of a compliance verdict. It is
+never a legal or compliance judgment; `escalation_required` means only "at least one part of the
+evidence chain could not be established from the photos."
+
+**Persistence:** `bis_result`, `legal_metrology_result`, `system_result` and `system_reasons` are no
+longer mapped or written by `app/records.py`. Unlike the officer-review columns M22 already left
+unmapped (which were nullable), these four were `NOT NULL` with `CHECK` constraints, so a genuinely
+new migration was required — not a gratuitous schema rewrite, the minimum needed to let an insert
+omit them: `migrations/versions/0003_drop_compliance_verdicts.py` drops `NOT NULL` on all four
+columns and nothing else (no column drop, no trigger change, no data rewrite; the immutability
+trigger is left exactly as it was, since it only fires on `UPDATE` and these columns are simply never
+written going forward — the same "legacy column stays physically present, unmapped" precedent M22
+established). `records_api.py`'s `statistics()` no longer computes PASS/FAIL/REVIEW counts; it
+reports `{total, escalated, resolved}`.
+
+**Evidence graph and report.** `app/evidence_graph.py`'s `NODE_TYPES` loses `RULE` and
+`SYSTEM_RESULT`; `EDGE_TYPES` loses `CHECKED_BY` and `RESULTED_IN` — that vocabulary was exactly the
+verdict-projection machinery. `STANDARD --REQUIRES--> REQUIREMENT` is unchanged (it was always
+knowledge, sourced from `app/requirements.py`, never a rule result). Hallmarking's own checks
+(`HALLMARK_HUID_OBSERVED`, `HUID_AUTHENTICITY`, etc. — never PASS/FAIL, always REVIEW, an M19
+invariant untouched by this pass) no longer get wrapped in a `RULE` node; they project directly as
+`HALLMARK_OBSERVATION`/`HUID_OBSERVATION` nodes, which already carried the right observed/
+not-verified semantics. `app/report.py` drops the `_compliance`/`_system_result` sections and the
+PASS/FAIL/REVIEW outcome box entirely; the former BIS and Legal Metrology check-table sections now
+present the identified standard's requirements as quoted, sourced **knowledge**, explicitly never a
+check table; the old system-result section is now "What MetrIQ could establish from the evidence,"
+built from `escalation.reasons` alone.
+
+**Certification and Hallmarking are pinned to OpenRouter, not LM Studio.** Hallmarking has no
+dedicated endpoint — `HallmarkingView.tsx` calls the same `POST /ask` every general BIS question
+uses — so there is no way to move only "Hallmarking's" model without moving `/ask` itself.
+`app/api.py` gains `get_grounded_llm()`, a cached `OpenRouterLLM` factory reading a new env var,
+`OPENROUTER_GROUNDED_MODEL` (default `inclusionai/ling-3.0-flash-vl:free`) — deliberately
+**independent** of the copilot's own `OPENROUTER_MODEL`, even though the two happen to share a value
+today (the copilot's `OPENROUTER_MODEL` was itself repointed at the same Ling model in M20 after
+DeepSeek started 404ing on OpenRouter — "the DeepSeek copilot" has been running Ling for a while;
+`OPENROUTER_GROUNDED_MODEL` exists so Certification/Hallmarking are pinned on their own terms, not by
+coincidence). `get_answerer()` (`/ask`) and `get_certification_service()` (`/certification-guidance`,
+`explain=true`) both construct their LLM through `get_grounded_llm()` now — never `LocalLLM`.
+`app/certification_journey.py` (the deterministic scheme/step quote-assembly) still calls no model at
+all, unaffected. **`app/llm.py`/LM Studio remains in active use in exactly two places, and only
+two:** the inspection pipeline's product-identification fallback (`inspection_api.py`,
+`LocalLLM(timeout=45)`) and Laboratory search's `explain=true` path (`app/laboratory.py`,
+`api.py::get_laboratory_service()`) — the user's instructions named only Certification and
+Hallmarking for the provider swap, so Laboratory search was deliberately left as-is. The copilot
+(`app/copilot.py`) already used `OpenRouterLLM` exclusively before this pass and is unaffected beyond
+losing the `bis_compliance`/`legal_metrology` context sections and the verdict-contradiction guard
+(replaced with an unconditional one: MetrIQ produces no compliance verdict at all now, so any
+PASS/FAIL/compliant claim in a generated answer is fabricated by definition, not just a possible
+contradiction — `FABRICATED_VERDICT`).
+
+**Frontend:** the BIS compliance table, the Legal Metrology / package-label table, the
+`DownstreamPanel` rows for those two pipeline stages, and every `system_result` badge (inspection
+workspace, saved-record page, history list, dashboard tiles, the copilot panel) are gone.
+`ResolutionPanel` (`features/records.tsx`) is rebuilt around `escalation.required`/`escalation.reasons`
+alone — what MetrIQ could or could not establish from the photographs, never a verdict badge.
+Dashboard stats read the new `{total, escalated, resolved}` shape. `RecordView.tsx`'s
+`SystemResultPanel` is gone outright (fully redundant with `ResolutionPanel` once there is no verdict
+to show separately). `EvidenceGraph.tsx` drops `RULE`/`SYSTEM_RESULT` from its node-type labels and
+layer/chain ordering.
+
+**Multilingual response language: no bug found.** `app/language.py`'s `lang.apply()` already
+appended an explicit "write the whole answer in Hindi/Telugu, in natural prose" instruction (not a
+bare "answer in Telugu"), and every generation call site (`rag.py`, `certification.py`,
+`laboratory.py`, `copilot.py`) already threaded the resolved language through it before this pass —
+confirmed by re-reading each call site, not assumed. The one real gap: `test_multilingual.py` stubbed
+the LLM to always return one fixed English string, so nothing asserted the *returned answer text* was
+actually in the requested script — only that the right instruction was sent. `test_multilingual.py`
+gains `test_the_returned_answer_is_actually_in_the_requested_language`, using a stub whose reply
+genuinely varies by language (real Hindi/Telugu Unicode text, detected via `lang.py`'s own script
+detection) for both `/ask` and `/certification-guidance`. This proves the plumbing carries a
+script-correct answer through end to end; it does **not** prove a live deployed model complies with
+the instruction — no live OpenRouter call is made anywhere in the suite, by design (matches every
+other test file's "no quota spent" convention).
+
+**Knowledge coverage is unchanged** — this was a removal and provider-routing pass, not a
+knowledge-base change: 97 verified standards, 15 requirements (7 checkable in principle — that
+classification lives in `data/inspection_requirements.json`'s `rule_type` field as knowledge; no
+engine executes it anymore), 2 formerly INSPECTION_SUPPORTED standards. `scripts/check_knowledge.py`
+still prints these numbers; read them as "what the verified data is annotated with," not as "checks
+that run."
+
+**Tests:** `test_compliance.py` and `test_legal_metrology.py` are deleted outright (not gutted —
+their entire content was verdict testing with nothing else to salvage). Every other backend test
+touched by this pass was rewritten in place for the new shapes. Full backend suite: 304 passed, 0
+failed (`cd backend && python -m pytest -q`); all 35 plain-Python runners pass under
+`test_plain_runners.py`. Frontend `tsc --noEmit` is clean and `npm run build` succeeds.
+
+Final architecture: PRODUCT → EVIDENCE → OCR / DECLARATIONS / PRODUCT IDENTIFICATION → VERIFIED
+STANDARD + REQUIREMENT KNOWLEDGE → CERTIFICATION / LABORATORY / HALLMARKING KNOWLEDGE → EVIDENCE
+GRAPH → OPTIONAL GROUNDED EXPLANATION (OpenRouter for `/ask`, Certification and the copilot; LM
+Studio only for inspection product-identification and Laboratory search) → REPORT. No step in this
+chain produces an automatic PASS/FAIL/REVIEW compliance verdict.

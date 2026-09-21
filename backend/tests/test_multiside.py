@@ -199,9 +199,9 @@ def test_partial_and_failed_sides() -> None:
           "Could not read this file as an image" in (next(i for i in res.images if i.side == "TOP").error or ""))
     check("12 no text on one side -> NO_TEXT (different from FAILED)", res.package.images_no_text == ["RIGHT (image 4)"])
     check("11 failed sides listed", res.package.images_failed == ["LEFT (image 3)", "TOP (image 5)"])
-    check("11 remaining evidence still processed", res.product.status == "MATCHED" and res.compliance.coverage.supported_checks == 1)
-    check("11 compliance says some images gave no usable evidence",
-          any("no usable OCR evidence" in n and "LEFT (image 3)" in n for n in res.compliance.notes), str(res.compliance.notes))
+    check("11 remaining evidence still processed", res.product.status == "MATCHED")
+    check("11 the analysis notes that some images gave no usable evidence",
+          any("no usable OCR evidence" in n and "LEFT (image 3)" in n for n in res.notes), str(res.notes))
     check("11 notes never claim absence", all("absent" not in n or "not" in n for n in res.notes))
 
     faint = analyzer({FRONT_W: lines("PACKAGED DRINKING WATER"), BACK_W: lines("~ ~", conf=0.2)}).ocr_package([
@@ -216,7 +216,7 @@ def test_partial_and_failed_sides() -> None:
         check("every side failing raises", True)
 
 
-# --------------------------------------------- 13-17. product, standard, compliance
+# --------------------------------------------- 13-17. product, standard, evidence
 
 def test_combined_pipeline() -> None:
     front_only = analyzer({FRONT_W: lines("ROASTED MASALA CHANA", "MRP ₹45")}).analyze_package([
@@ -237,17 +237,19 @@ def test_combined_pipeline() -> None:
 
     water = analyzer({FRONT_W: lines("AQUA PURE", "PACKAGED DRINKING WATER"), BACK_W: lines("NET QUANTITY: 1 L", "IS 14543", big_first=False)})
     res = water.analyze_package([PackageUpload(png(FRONT_W), side="FRONT"), PackageUpload(png(BACK_W), side="BACK")])
-    chk = next(c for c in res.compliance.checks if c.rule_id == "packaged-water-label-shows-is-number")
+    decl = next(d for d in res.declaration_stage.fields if d.field == "standard_number")
     back_id = res.images[1].image_id
-    check("15 compliance uses evidence from the back while the product came from the front",
-          res.product.status == "MATCHED" and chk.result == "PASS", f"{res.product.status} {chk.result} {chk.reason}")
-    e = chk.evidence[0]
-    check("16 check evidence preserves the back image id", e.image_id == back_id and e.source_images == [back_id])
-    check("16 check evidence preserves the side", e.source_sides == ["BACK"])
-    check("17 check evidence preserves the OCR region", e.source_regions == ["I2-OCR-002"])
+    check("15 the IS-number declaration uses evidence from the back while the product came from the front",
+          res.product.status == "MATCHED" and decl.status == "DETECTED" and decl.value == "IS 14543",
+          f"{res.product.status} {decl.status} {decl.value}")
+    check("16 declaration evidence preserves the back image id", decl.image_id == back_id and decl.source_images == [back_id])
+    check("16 declaration evidence preserves the side", decl.source_sides == ["BACK"])
+    check("17 declaration evidence preserves the OCR region", decl.source_regions == ["I2-OCR-002"])
     region = next(r for r in res.ocr.regions if r.id == "I2-OCR-002")
     check("17 that region exists on that image with that text", region.image_id == back_id and region.text == "IS 14543")
-    check("compliance overall stays REVIEW (unsupported areas), never PASS by retrieval", res.compliance.overall_status == "REVIEW")
+    check("MetrIQ still identifies the standard from the combined evidence, no verdict is produced",
+          res.product.standard_number == "IS 14543:2016"
+          and not hasattr(res, "compliance") and not hasattr(res, "package_label"))
 
 
 # ------------------------------------------------------- 18. no fabrication

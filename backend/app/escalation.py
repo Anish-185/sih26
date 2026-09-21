@@ -1,17 +1,14 @@
-"""Escalation: can the automated system resolve this inspection, or does it go to an officer?
+"""Resolution: could MetrIQ establish this inspection's evidence chain from the photographed evidence?
 
-    SYSTEM RESULT (PASS / FAIL / REVIEW)
-      -> can the system confidently resolve this case?
-           yes -> final system result, no officer review   (officer_status NOT_REQUIRED)
-           no  -> officer review queue                      (officer_status PENDING)
-
-``assess(analysis)`` reads a saved ``InspectionAnalysisOut`` as plain JSON (so the
-database migration can reuse it for inspections saved before escalation existed)
-and returns every reason the case cannot be resolved automatically. Deterministic;
-no model is involved, and nothing here changes a result.
+MetrIQ produces no automatic PASS / FAIL / REVIEW compliance verdict.
+``assess(analysis)`` reads a saved ``InspectionAnalysisOut`` as plain JSON and
+reports, deterministically, every reason the product / standard / evidence
+chain could not be fully established from the photos — never a legal or
+compliance judgment. Deterministic; no model is involved, and nothing here
+changes any other result.
 
 Reasons (``REASONS``), each with the evidence system it comes from and the OCR
-regions / checks behind it:
+regions behind it:
 
   PIPELINE_ERROR              a pipeline stage failed and degraded to REVIEW
   IMAGES_UNREADABLE           a photo failed, or gave no (reliable) text
@@ -22,17 +19,10 @@ regions / checks behind it:
   NO_VERIFIED_STANDARD        no verified BIS standard could be applied
   HALLMARK_NOT_VERIFIABLE     hallmark / HUID evidence (or claims printed about it) — MetrIQ never authenticates
   CONFLICTING_DECLARATIONS    photos or lines disagree on a declared value
-  OCR_UNCERTAIN               a check could not rely on the OCR reading
-  MISSING_EVIDENCE            a check found no evidence for a declaration
-  REQUIREMENT_NOT_CHECKABLE   the standard / requirement areas cannot be checked from an image
-  PACKAGE_SCOPE_EXCLUSION     the label indicates the Legal Metrology rules may not apply
-  SYSTEM_RESULT_REVIEW        the BIS or Legal Metrology result is REVIEW
+  OCR_UNCERTAIN               a declaration MetrIQ has requirement data for could not be read reliably
+  MISSING_EVIDENCE            a declaration MetrIQ has requirement data for was not found in the OCR text
 
-Only ``REQUIREMENT_NOT_CHECKABLE`` depends on the result: requirement areas that
-cannot be checked could still overturn a PASS, but not a FAIL that clear evidence
-already established. Every other reason always escalates. A FAIL is resolved
-automatically only when nothing else is unresolved; a PASS only when every
-applicable requirement was checked.
+``escalation_required`` is true whenever any reason is present.
 """
 
 from __future__ import annotations
@@ -51,28 +41,17 @@ REASONS: dict[str, str] = {
     "CONFLICTING_DECLARATIONS": "Conflicting declarations",
     "OCR_UNCERTAIN": "Uncertain OCR evidence",
     "MISSING_EVIDENCE": "Evidence not found",
-    "REQUIREMENT_NOT_CHECKABLE": "Requirements not checkable from an image",
-    "PACKAGE_SCOPE_EXCLUSION": "Legal Metrology scope exclusion",
-    "SYSTEM_RESULT_REVIEW": "System result is REVIEW",
 }
 
 _RE_HALLMARK = re.compile(r"\bHUID\b|hall\s*mark", re.IGNORECASE)
-
-# check reason_category -> escalation reason
-_CATEGORY_REASON = {
-    "EVIDENCE_NOT_DETECTED": "MISSING_EVIDENCE",
-    "EVIDENCE_NOT_DETERMINABLE": "MISSING_EVIDENCE",
-    "CONFLICTING_EVIDENCE": "CONFLICTING_DECLARATIONS",
-    "INSUFFICIENT_EVIDENCE": "OCR_UNCERTAIN",
-}
-_SOURCE_NAME = {"BIS": "BIS", "LEGAL_METROLOGY": "Legal Metrology", "HALLMARKING": "Hallmarking"}
+_RE_FAILURE_NOTE = re.compile(r"(failed|error)\s*:", re.IGNORECASE)
 
 
 def _reason(code: str, source: str, message: str, regions=(), checks=()) -> dict:
     return {
         "code": code,
         "label": REASONS[code],
-        "source": source,  # OCR | PRODUCT | BIS | LEGAL_METROLOGY | HALLMARKING | PIPELINE
+        "source": source,  # OCR | PRODUCT | HALLMARKING | PIPELINE
         "message": message,
         "source_regions": sorted(set(regions)),
         "checks": list(dict.fromkeys(checks)),
@@ -82,28 +61,6 @@ def _reason(code: str, source: str, message: str, regions=(), checks=()) -> dict
 def _hallmark_included(analysis: dict) -> bool:
     h = analysis.get("hallmark")
     return bool(h) and (h.get("detected") or analysis.get("inspection_type") == "HALLMARK")
-
-
-def _package_label_applied(analysis: dict) -> bool:
-    return analysis["package_label"].get("scope_status") != "NOT_APPLIED"
-
-
-def system_results(analysis: dict) -> list[tuple[str, str]]:
-    """(evidence system, result) for every evidence system that applies to this inspection."""
-    out = [("BIS", analysis["compliance"]["overall_status"])]
-    if _package_label_applied(analysis):
-        out.append(("LEGAL_METROLOGY", analysis["package_label"]["overall_status"]))
-    if _hallmark_included(analysis):
-        out.append(("HALLMARKING", analysis["hallmark"]["overall_status"]))
-    return out
-
-
-def system_result(analysis: dict) -> str:
-    """FAIL if any applicable evidence system FAILs; PASS only if all PASS; otherwise REVIEW."""
-    results = [r for _, r in system_results(analysis)]
-    if "FAIL" in results:
-        return "FAIL"
-    return "PASS" if all(r == "PASS" for r in results) else "REVIEW"
 
 
 def _hallmark_reasons(analysis: dict, h: dict) -> list[dict]:
@@ -138,24 +95,20 @@ def _hallmark_reasons(analysis: dict, h: dict) -> list[dict]:
 
 
 def assess(analysis: dict) -> dict:
-    """``{"required": bool, "system_result": ..., "reasons": [...]}`` for one saved analysis."""
-    result = system_result(analysis)
+    """``{"required": bool, "reasons": [...]}`` for one saved analysis."""
     reasons: list[dict] = []
-    compliance = analysis["compliance"]
-    package_label = analysis["package_label"]
-    product = analysis["product"]
+    product = analysis.get("product") or {}
     package = analysis.get("package") or {}
-    systems = (("BIS", compliance),) + ((("LEGAL_METROLOGY", package_label),) if _package_label_applied(analysis) else ())
 
-    # ---- pipeline ----------------------------------------------------------
-    for source, ev in systems:
-        if ev.get("reason_code") == "ENGINE_ERROR":
-            reasons.append(_reason("PIPELINE_ERROR", source, ev.get("reason") or "A pipeline stage failed."))
+    # ---- pipeline ------------------------------------------------------
+    for note in analysis.get("notes") or []:
+        if _RE_FAILURE_NOTE.search(note):
+            reasons.append(_reason("PIPELINE_ERROR", "PIPELINE", note))
 
-    # ---- photos / OCR ------------------------------------------------------
+    # ---- photos / OCR ----------------------------------------------------
     unreadable = [*package.get("images_failed", []), *package.get("images_no_text", []),
                   *package.get("images_no_reliable_text", [])]
-    if unreadable or analysis["declaration_stage"]["status"] == "NO_RELIABLE_TEXT":
+    if unreadable or (analysis.get("declaration_stage") or {}).get("status") == "NO_RELIABLE_TEXT":
         what = ", ".join(unreadable) if unreadable else "the uploaded photos"
         reasons.append(_reason("IMAGES_UNREADABLE", "OCR",
                                f"No usable OCR evidence from {what}; declarations there cannot be determined."))
@@ -167,46 +120,46 @@ def assess(analysis: dict) -> dict:
 
     # ---- product / standard ------------------------------------------------
     candidates = list(dict.fromkeys(c["standard_number"] for c in analysis.get("standards", [])))
-    applicability = (compliance.get("coverage") or {}).get("product_applicability")
-    if product["status"] != "MATCHED":
+    applicability = product.get("product_applicability")
+    if product.get("status") != "MATCHED":
         if len(candidates) > 1:
             reasons.append(_reason("MULTIPLE_CANDIDATES", "PRODUCT",
-                                   f"{product['reason']} Candidates: {', '.join(candidates)}."))
+                                   f"{product.get('reason', '')} Candidates: {', '.join(candidates)}."))
         elif candidates:
             reasons.append(_reason("PRODUCT_NOT_CONFIRMED", "PRODUCT",
-                                   f"{product['reason']} Candidate: {candidates[0]}."))
+                                   f"{product.get('reason', '')} Candidate: {candidates[0]}."))
         else:
-            reasons.append(_reason("PRODUCT_NOT_IDENTIFIED", "PRODUCT", product["reason"]))
+            reasons.append(_reason("PRODUCT_NOT_IDENTIFIED", "PRODUCT", product.get("reason", "")))
+        reasons.append(_reason("NO_VERIFIED_STANDARD", "PRODUCT",
+                               "No verified BIS standard could be applied, so no verified requirement evidence "
+                               "was connected to this package."))
     elif applicability == "PRODUCT_AMBIGUOUS":
-        reasons.append(_reason("MULTIPLE_CANDIDATES", "PRODUCT", compliance.get("reason") or
-                               "The package text names more than one modelled product."))
-    if compliance.get("coverage_status") == "NO_STANDARD" and compliance.get("reason_code") != "ENGINE_ERROR":
-        reasons.append(_reason("NO_VERIFIED_STANDARD", "BIS",
-                               "No verified BIS standard could be applied, so no BIS requirement was checked."))
+        reasons.append(_reason("MULTIPLE_CANDIDATES", "PRODUCT",
+                               "The package text names more than one product MetrIQ has modelled requirement "
+                               f"data for under {product.get('standard_number')}."))
+    elif applicability == "PRODUCT_NOT_CONFIRMED":
+        reasons.append(_reason("PRODUCT_NOT_CONFIRMED", "PRODUCT",
+                               f"MetrIQ has product-specific requirement data under {product.get('standard_number')}, "
+                               "but the package text did not confirm which modelled product this is."))
 
+    # ---- hallmark ------------------------------------------------------------
     hallmark = analysis.get("hallmark")
     if hallmark is not None:
         reasons.extend(_hallmark_reasons(analysis, hallmark))
-        if compliance.get("reason_code") == "DOMAIN_NOT_PACKAGE_LABEL" and not any(
-                r["code"] == "HALLMARK_NOT_VERIFIABLE" for r in reasons):
-            reasons.append(_reason(
-                "HALLMARK_NOT_VERIFIABLE", "BIS",
-                f"{compliance.get('standard_number') or 'The identified standard'} is a jewellery hallmarking "
-                "standard. MetrIQ never authenticates a hallmark or verifies a HUID; an officer must verify the "
-                "article."))
     else:  # analyses saved before structured hallmark evidence existed
         ocr_text = (analysis.get("ocr") or {}).get("text") or ""
         hallmark_regions = [r["id"] for r in (analysis.get("ocr") or {}).get("regions", []) if _RE_HALLMARK.search(r["text"])]
-        if compliance.get("reason_code") == "DOMAIN_NOT_PACKAGE_LABEL" or _RE_HALLMARK.search(ocr_text):
+        if _RE_HALLMARK.search(ocr_text):
             reasons.append(_reason(
-                "HALLMARK_NOT_VERIFIABLE", "BIS",
+                "HALLMARK_NOT_VERIFIABLE", "OCR",
                 "Hallmark / HUID information appears in this inspection. MetrIQ never authenticates a hallmark or "
-                "verifies a HUID; an officer must verify it (for example through the official BIS CARE app).",
+                "verifies a HUID; it must be verified against an authoritative source (for example the "
+                "official BIS Care App).",
                 regions=hallmark_regions,
             ))
 
-    # ---- declarations ------------------------------------------------------
-    conflicts = [d for d in analysis["declaration_stage"].get("fields", []) if d.get("consistency") == "CONFLICT"]
+    # ---- declarations --------------------------------------------------------
+    conflicts = [d for d in (analysis.get("declaration_stage") or {}).get("fields", []) if d.get("consistency") == "CONFLICT"]
     for d in conflicts:
         sides = sorted({s for o in d.get("observations", []) for s in o.get("source_sides", [])})
         where = f" across {', '.join(sides)}" if sides else ""
@@ -215,55 +168,19 @@ def assess(analysis: dict) -> dict:
                                f"{d['label']}: different values were read{where}. {d.get('reason', '')}".strip(),
                                regions=regions))
 
-    # ---- checks ------------------------------------------------------------
-    grouped: dict[tuple[str, str], list[dict]] = {}
-    for source, ev in systems:
-        for c in ev.get("checks", []):
-            code = None
-            if c["result"] == "REVIEW":
-                code = _CATEGORY_REASON.get(c["reason_category"], "OCR_UNCERTAIN")
-            elif c["result"] == "NOT_SUPPORTED":
-                code = "REQUIREMENT_NOT_CHECKABLE"
-            if code:
-                grouped.setdefault((code, source), []).append(c)
-    for (code, source), checks in grouped.items():
-        if code == "CONFLICTING_DECLARATIONS" and conflicts:
-            continue  # already reported per declaration
-        names = "; ".join(f"{c['reference'] or c['rule_id']}: {c['reason']}" if code != "REQUIREMENT_NOT_CHECKABLE"
-                          else (c["reference"] or c["requirement"]) for c in checks)
-        prefix = {
-            "MISSING_EVIDENCE": "No evidence was read for",
-            "OCR_UNCERTAIN": "The OCR evidence could not decide",
-            "CONFLICTING_DECLARATIONS": "Conflicting evidence for",
-            "REQUIREMENT_NOT_CHECKABLE": "Cannot be checked from a photo:",
-        }[code]
-        count = f"{len(checks)} {_SOURCE_NAME[source]} {'check' if len(checks) == 1 else 'checks'}"
-        message = (f"{prefix} {names}" if code == "REQUIREMENT_NOT_CHECKABLE"
-                   else f"{prefix} {count} — {names}")
-        reasons.append(_reason(code, source, message,
-                               regions=[r for c in checks for e in c.get("evidence", []) for r in e["source_regions"]],
-                               checks=[c["rule_id"] for c in checks]))
-    if compliance.get("coverage_status") in ("STANDARD_ONLY", "UNSUPPORTED") and \
-            compliance.get("reason_code") != "DOMAIN_NOT_PACKAGE_LABEL":
-        reasons.append(_reason("REQUIREMENT_NOT_CHECKABLE", "BIS",
-                               f"{compliance.get('standard_number') or 'The identified standard'} has no requirement "
-                               f"MetrIQ can check from a package image ({compliance['coverage_status']})."))
-
-    if package_label.get("scope_status") == "OUT_OF_SCOPE":
-        reasons.append(_reason(
-            "PACKAGE_SCOPE_EXCLUSION", "LEGAL_METROLOGY", package_label.get("reason") or "",
-            regions=[r for f in package_label.get("exclusions_found", []) for r in f.get("source_regions", [])],
-        ))
-
-    for source, ev in systems:
-        if ev["overall_status"] == "REVIEW" and ev.get("reason_code") != "ENGINE_ERROR":
-            reasons.append(_reason("SYSTEM_RESULT_REVIEW", source,
-                                   f"{_SOURCE_NAME[source]} result is REVIEW: {ev.get('reason', '')}"))
-
-    if _hallmark_included(analysis) and hallmark["overall_status"] == "REVIEW":
-        reasons.append(_reason("SYSTEM_RESULT_REVIEW", "HALLMARKING", f"Hallmarking result is REVIEW: {hallmark['reason']}"))
+    # ---- declarations a verified requirement uses, but OCR could not settle ----
+    completeness = analysis.get("completeness") or {}
+    for item in completeness.get("items", []):
+        if item.get("requirement_coverage") != "VERIFIED_REQUIREMENT" or item.get("conflict"):
+            continue  # conflicts are already reported per declaration above
+        if item.get("status") == "UNCERTAIN":
+            reasons.append(_reason("OCR_UNCERTAIN", "OCR", f"{item['label']}: {item.get('statement', '')}",
+                                   regions=item.get("source_regions", [])))
+        elif item.get("status") == "NOT_DETECTED":
+            reasons.append(_reason("MISSING_EVIDENCE", "OCR",
+                                   f"{item['label']}: a verified requirement uses this field, but no OCR evidence "
+                                   "was found for it in the uploaded photos."))
 
     order = list(REASONS)
     reasons.sort(key=lambda r: (order.index(r["code"]), r["source"]))
-    blocking = [r for r in reasons if not (r["code"] == "REQUIREMENT_NOT_CHECKABLE" and result == "FAIL")]
-    return {"required": bool(blocking), "system_result": result, "reasons": reasons}
+    return {"required": bool(reasons), "reasons": reasons}

@@ -1,10 +1,12 @@
 """Checks for Milestone 11 — evidence-backed inspection reports (PDF).
 
 The report is an audit trail of a persisted inspection: it must show exactly what
-is stored — system result, escalation, officer review, evidence, sources — never
-merge the system result with the officer's decision, never invent anything, and
-never change the record. Content is checked on the report's flowables
-(``app.report.build_story``); rendering is checked on real PDF bytes.
+is stored — the identified standard, verified requirement knowledge, what could
+not be established, evidence, sources — never invent anything, and never change
+the record. There is no human decision in it, and MetrIQ produces no automatic
+PASS/FAIL/REVIEW compliance verdict, so the report contains none. Content is
+checked on the report's flowables (``app.report.build_story``); rendering is
+checked on real PDF bytes.
 
 Needs PostgreSQL for the endpoint checks (TEST_DATABASE_URL, default the local
 ``metriq_test`` database, migrated to head here). No LM Studio / OpenRouter.
@@ -19,7 +21,6 @@ Exit 0 = all checks passed, 1 = something failed.
 
 from __future__ import annotations
 
-import copy
 import io
 import json
 import os
@@ -44,9 +45,7 @@ from sqlalchemy import create_engine, text  # noqa: E402
 from sqlalchemy.engine import make_url  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
-import app.compliance as compliance_module  # noqa: E402
 import app.escalation as escalation_module  # noqa: E402
-import app.package_label as package_label_module  # noqa: E402
 import app.pipeline as pipeline_module  # noqa: E402
 import app.records as records_module  # noqa: E402
 import httpx  # noqa: E402
@@ -104,13 +103,24 @@ class Engine:
         return list(self.by_width[arr.shape[1]]), 0.01
 
 
+# One INSPECTION_SUPPORTED standard (IS 14543:2016 — packaged water) so requirement
+# knowledge, sources and a fully-established case are all exercisable; a kettle
+# label (STANDARD_ONLY — plenty of standard-level detail, but no modelled
+# requirement data) for the general identification/injection/escaping checks;
+# and a blank label for the "nothing established" path.
+WATER = ["PACKAGED DRINKING WATER", "Product name: Packaged Drinking Water", "IS 14543:2016",
+         "MRP ₹20.00 (Inclusive of all taxes)", "Net Quantity: 1 L", "Packed on: 03/2026",
+         "Manufactured by: Blue Spring Beverages Pvt Ltd",
+         "Address: Plot 9, Hosur Industrial Area, Krishnagiri 635109, Tamil Nadu",
+         "Consumer care: 1800-200-4455", "Email: care@bluespring.example"]
 KETTLE = ["ELECTRIC KETTLE", "Product name: Electric Kettle", "MRP ₹899.00 (Inclusive of all taxes)",
           "Net Quantity: 1 N", "Mfg. Date: 02/2026", "Manufactured by: Thermopot Appliances Pvt Ltd",
           "Address: Plot 12, Baddi Industrial Area, Solan 173205, Himachal Pradesh",
           "Consumer care: 1800-300-7788", "Email: care@thermopot.example"]
 INJECTION = "<b>Brand</b><font size=40 color=red>X</font> & <para>"
-W_KETTLE, W_FRONT, W_BACK, W_NOTHING = 961, 962, 963, 964
+W_WATER, W_KETTLE, W_FRONT, W_BACK, W_NOTHING = 960, 961, 962, 963, 964
 STUB = InspectionAnalyzer(ocr_engine=Engine({
+    W_WATER: raw(*WATER),
     W_KETTLE: raw(*KETTLE),
     W_FRONT: raw("ELECTRIC KETTLE", "Product name: Electric Kettle", INJECTION),
     W_BACK: raw("MRP ₹899.00 (Inclusive of all taxes)", "Net Quantity: 1 N"),
@@ -123,53 +133,23 @@ def analysis(*sides) -> dict:
     return out.model_dump(mode="json")
 
 
-def record(an: dict, officer_status="PENDING", decision=None, officer_result=None, note=None) -> dict:
-    """A stored-record JSON (InspectionRecordOut shape) for an analysis, as the API would return it."""
+def record(an: dict) -> dict:
+    """A stored-record JSON (InspectionRecordOut shape) for an analysis, as the API would return it —
+    mirrors app.records.create_inspection exactly (no compliance verdict is stored)."""
     esc = assess(an)
-    bis, lm = an["compliance"]["overall_status"], an["package_label"]["overall_status"]
-    final = None
-    if officer_status == "NOT_REQUIRED":
-        final = esc["system_result"]
-    elif officer_status == "COMPLETED":
-        final = {"ACCEPT_SYSTEM_RESULT": esc["system_result"], "OVERRIDE": officer_result}.get(decision, "MANUAL_REVIEW")
     matched = an["product"]["status"] == "MATCHED"
     return {
         "inspection_id": "INS-20260917-ABC123", "created_at": "2026-09-17T10:00:00+00:00",
         "product_status": an["product"]["status"], "product_name": an["product"]["name"] if matched else None,
-        "product_category": (an["compliance"].get("coverage") or {}).get("product_category"),
+        "product_category": an["product"].get("modelled_product_category"),
         "standard_number": an["product"]["standard_number"] if matched else None,
-        "bis_result": bis, "legal_metrology_result": lm, "system_result": esc["system_result"],
         "escalation_required": esc["required"], "escalation_reasons": esc["reasons"],
-        "officer_status": officer_status, "officer_decision": decision, "officer_result": officer_result,
-        "final_result": final,
-        "review_started_at": "2026-09-17T10:05:00+00:00" if officer_status in ("IN_REVIEW", "COMPLETED") else None,
-        "review_completed_at": "2026-09-17T10:09:00+00:00" if officer_status == "COMPLETED" else None,
         "image_count": len(an["images"]), "sides": [i["side"] for i in an["images"]],
-        "system_reasons": [
-            {"source": "BIS", "result": bis, "reason_code": an["compliance"]["reason_code"], "reason": an["compliance"]["reason"]},
-            {"source": "LEGAL_METROLOGY", "result": lm, "reason_code": an["package_label"]["reason_code"],
-             "reason": an["package_label"]["reason"]},
-        ],
-        "officer_note": note,
         "images": [{"index": i["index"], "image_id": i["image_id"], "side": i["side"], "filename": i["filename"],
                     "content_type": "image/png", "url": f"/inspections/INS-20260917-ABC123/images/{i['index']}"}
                    for i in an["images"]],
         "analysis": an,
     }
-
-
-def resolved(an: dict, bis="PASS", lm="PASS") -> dict:
-    """Results set to a resolved state — the verified data has no fully checkable standard."""
-    d = copy.deepcopy(an)
-    d["compliance"].update(overall_status=bis, coverage_status="INSPECTION_SUPPORTED",
-                           reason_code="ALL_CHECKS_PASSED" if bis == "PASS" else "SUPPORTED_CHECK_FAILED")
-    d["package_label"].update(overall_status=lm,
-                              reason_code="ALL_CHECKS_PASSED" if lm == "PASS" else "SUPPORTED_CHECK_FAILED")
-    d["package_label"]["checks"] = [c for c in d["package_label"]["checks"] if c["result"] != "NOT_SUPPORTED"]
-    if lm == "FAIL":
-        d["package_label"]["checks"][0].update(result="FAIL", reason_code="VALUE_FORMAT_INVALID",
-                                                reason="Stated as a dozen (Rule 13(4)).")
-    return d
 
 
 def walk(flowables):
@@ -213,84 +193,96 @@ def section(body: str, start: str, end: str | None) -> str:
 # ------------------------------------------------------------------ content
 
 
-def step_results() -> None:
-    print("\nPASS / FAIL / REVIEW")
-    base = analysis((W_KETTLE, "FRONT"))
-    for label, an in (("PASS", resolved(base)), ("FAIL", resolved(base, lm="FAIL")), ("REVIEW", base)):
-        rec = record(an, officer_status="NOT_REQUIRED" if label != "REVIEW" else "PENDING")
-        pdf = render_report(rec, {1: photo(W_KETTLE)}, NOW)
-        body, _, _ = story(rec, {1: photo(W_KETTLE)})
-        system = section(body, "AUTOMATED SYSTEM RESULT", "OFFICER FINAL DECISION")
-        check(f"{label} report renders a PDF", pdf.startswith(b"%PDF") and pdf.rstrip().endswith(b"%%EOF")
+def step_no_compliance_verdict() -> None:
+    print("\nno automatic PASS/FAIL/REVIEW compliance verdict")
+    water = analysis((W_WATER, "FRONT"))
+    check("a clean, fully-readable label is established by the deterministic system alone",
+          assess(water)["required"] is False, json.dumps(assess(water)["reasons"])[:200])
+    established = record(water)
+    nothing = record(analysis((W_NOTHING, "FRONT")))
+    for label, rec in (("established", established), ("not established", nothing)):
+        pdf = render_report(rec, {1: photo(W_WATER)}, NOW)
+        check(f"{label}: report renders a PDF", pdf.startswith(b"%PDF") and pdf.rstrip().endswith(b"%%EOF")
               and len(pdf) > 5000)
-        check(f"{label} report shows the stored system result", rec["system_result"] == label and label in system,
-              system[:120])
-    fail_rec = record(resolved(base, lm="FAIL"), officer_status="NOT_REQUIRED")
-    body, _, _ = story(fail_rec)
-    check("FAIL report shows the failing rule and its reason",
-          "FAIL" in section(body, "Compliance results", "Automated system result")
-          and "Stated as a dozen (Rule 13(4))." in body)
+    check("no report field is named bis_result, legal_metrology_result, system_result or system_reasons",
+          not ({"bis_result", "legal_metrology_result", "system_result", "system_reasons"} & set(established)))
+    body, _, _ = story(established)
+    check("the header states plainly there is no compliance verdict",
+          "contains no automatic PASS/FAIL/REVIEW compliance verdict" in body)
+    without_disclaimer = body.replace("contains no automatic PASS/FAIL/REVIEW compliance verdict", "")
+    check("outside that one disclaimer sentence, the report never prints PASS, FAIL or REVIEW as a verdict",
+          not re.search(r"\bPASS\b|\bFAIL\b|\bREVIEW\b", without_disclaimer))
+    check("the identified standard is shown instead of a verdict badge",
+          "BIS STANDARD IDENTIFIED" in body and "IS 14543:2016" in section(body, "BIS STANDARD IDENTIFIED", "RESOLUTION"))
+    nothing_body, _, _ = story(nothing)
+    check("an unidentified product shows 'Not identified', not an invented standard",
+          "Not identified" in section(nothing_body, "BIS STANDARD IDENTIFIED", "RESOLUTION"))
 
 
-def step_officer() -> None:
-    print("\nsystem result vs officer decision")
-    an = analysis((W_KETTLE, "FRONT"))
-    rec = record(an, "COMPLETED", "OVERRIDE", "PASS", "Verified against physical package.")
+def step_requirement_knowledge() -> None:
+    print("\nrequirements are shown as verified knowledge, never a check outcome")
+    water = analysis((W_WATER, "FRONT"))
+    body, _, _ = story(record(water))
+    bis = section(body, "BIS standard evidence", "Certification guidance")
+    check("the BIS section lists the requirements the standard specifies",
+          "Requirements this standard specifies" in bis and "verified knowledge, not a pass/fail check" in bis)
+    check("a requirement quotes verified text, with its own source",
+          "BIS Certification Mark" in bis or "IS number" in bis, bis[:300])
+    lm = section(body, "Legal Metrology evidence", "What MetrIQ could establish")
+    check("the Legal Metrology section is requirement knowledge, not a check table",
+          "package-label requirements" in lm.lower() and "not bis requirements" in lm.lower()
+          and not re.search(r"\bPASS\b|\bFAIL\b", lm))
+    resolution = section(body, "What MetrIQ could establish", "Evidence and sources")
+    check("requirements with no verified deterministic rule are named in the resolution, never silently dropped",
+          "REQUIREMENTS WITH NO VERIFIED DETERMINISTIC RULE" in resolution and "Rule 6" in resolution)
+    check("there is no 'Compliance results' section and no 'Automated system result' section at all",
+          "Compliance results" not in body and "Automated system result" not in body)
+
+
+def step_no_human_decision() -> None:
+    print("\nthe report records the deterministic system's own evidence only — no human decision")
+    water = analysis((W_WATER, "FRONT"))
+    rec = record(water)
     body, _, _ = story(rec)
-    final = section(body, "Final outcome", "Evidence and sources")
-    check("7 officer-reviewed report shows the officer decision and result",
-          "Override" in final and "OFFICER RESULT" in final and "PASS" in final)
-    check("8 system result and officer decision appear as separate fields",
-          "SYSTEM RESULT" in final and "REVIEW" in final.split("OFFICER FINAL DECISION")[0]
-          and "OFFICER FINAL DECISION" in final)
-    check("9 officer note appears", body.count("Verified against physical package.") >= 2)
-    check("the report never shows an officer name or identity",
-          "no officer identity is recorded" in body and not re.search(r"(officer|reviewed) by\b", body, re.I))
+    check("the report carries no human-review workflow at all",
+          not re.search(r"officer (review|decision|result|note|status|final)|reviewed by|sign-?off"
+                        r"|override|accept system result|manual review", body, re.I), body[:200])
+    check("the report has no final-decision section beyond MetrIQ's own evidence",
+          "Final outcome" not in body and "Final result" not in body)
+    check("a fully-established inspection states the system established it itself",
+          "Established by the deterministic system" in body and "nothing further is outstanding" in body)
 
-    accepted = record(an, "COMPLETED", "ACCEPT_SYSTEM_RESULT")
-    body, _, _ = story(accepted)
-    final = section(body, "Final outcome", "Evidence and sources")
-    check("accepted: both the REVIEW system result and 'Accept system result' are shown",
-          "Accept system result" in final and "REVIEW" in final and "No note recorded" in final)
-
-    pending = record(an, "PENDING")
-    body, _, _ = story(pending)
-    officer = section(body, "Officer review", "Final outcome")
-    check("10 pending review: shown as pending, no decision, no approval implied",
-          "Pending officer review" in officer and "No officer has approved" in officer
-          and "Override" not in body and "Accept system result" not in body
-          and "Not final until the officer review is completed" in body)
-    resolved_rec = record(resolved(an), "NOT_REQUIRED")
-    body, _, _ = story(resolved_rec)
-    check("10 not escalated: the report says officer review was not required",
-          "Officer review was not required" in body and "The system result is final." in body)
+    nothing = record(analysis((W_NOTHING, "FRONT")))
+    body, _, _ = story(nothing)
+    check("an unestablished inspection says what could not be established, and decides nothing",
+          "Not fully established from the photos alone" in body
+          and "verification outside MetrIQ is needed" in body)
 
 
 def step_honesty() -> None:
     print("\nmissing data is reported honestly")
     an = analysis((W_NOTHING, "FRONT"))
     body, _, _ = story(record(an))
-    check("11 product not identified is stated, not invented",
+    check("product not identified is stated, not invented",
           "Not identified" in body and "product identification needs review" in body)
-    check("12 no verified BIS standard is stated explicitly",
+    check("no verified BIS standard is stated explicitly",
           "No verified BIS standard was identified by the automated retrieval process." in body
           and "No verified standard identified" in body)
     check("category not established is stated", "Not established" in body)
 
     kettle = analysis((W_KETTLE, "FRONT"))
     body, _, _ = story(record(kettle))
-    comp = section(body, "Compliance results", "Automated system result")
-    lm_checks = [c for c in kettle["package_label"]["checks"] if c["result"] == "NOT_SUPPORTED"]
-    check("13 unsupported Legal Metrology checks stay UNSUPPORTED, never PASS",
-          lm_checks and comp.count("UNSUPPORTED") >= len(lm_checks)
-          and "Not checkable from an image" in body and kettle["package_label"]["overall_status"] == "REVIEW"
-          and "never counted as PASS" in comp)
+    check("a standard with no modelled requirement data says so plainly",
+          "MetrIQ holds no verified requirement text for this standard." in body)
+    resolution = section(body, "What MetrIQ could establish", "Evidence and sources")
+    check("Legal Metrology package-label requirements with no deterministic rule are named for a package "
+          "with no modelled requirement data",
+          "REQUIREMENTS WITH NO VERIFIED DETERMINISTIC RULE" in resolution and "Rule 6" in resolution)
     decl = section(body, "Declarations", "BIS standard evidence")
     statuses = {f["status"] for f in kettle["declaration_stage"]["fields"]}
-    check("15 declarations keep their stored statuses (DETECTED / UNCERTAIN / NOT_DETECTED)",
+    check("declarations keep their stored statuses (DETECTED / UNCERTAIN / NOT_DETECTED)",
           all(s in decl for s in statuses) and "NOT_DETECTED" in statuses
           and "not a finding that the declaration is legally missing" in decl, str(statuses))
-    check("15 an UNSUPPORTED result keeps its label in the report", "UNSUPPORTED" in comp)
 
 
 def step_images_and_escaping() -> None:
@@ -300,10 +292,10 @@ def step_images_and_escaping() -> None:
     images = {1: photo(W_FRONT), 2: photo(W_BACK)}
     body, texts, imgs = story(rec, images)
     photos = section(body, "Package photos", "OCR evidence")
-    check("14 every stored side is included with its label, and no other side",
+    check("every stored side is included with its label, and no other side",
           len(imgs) == 2 and "FRONT · image 1" in photos and "BACK · image 2" in photos
           and not any(s in photos for s in ("LEFT", "RIGHT", "TOP", "BOTTOM")), photos[:200])
-    check("14 OCR evidence names the side each region came from", "FRONT image: I1-OCR" in body
+    check("OCR evidence names the side each region came from", "FRONT image: I1-OCR" in body
           and "BACK image: I2-OCR" in body)
     check("a stored photo that cannot be decoded is reported, not invented",
           "could not be decoded" in plain(walk(build_story(rec, {1: b"not an image", 2: photo(W_BACK)}, NOW))[0]))
@@ -316,7 +308,7 @@ def step_images_and_escaping() -> None:
 
 def step_sources() -> None:
     print("\nsources")
-    an = analysis((W_KETTLE, "FRONT"))
+    an = analysis((W_WATER, "FRONT"))
     rec = record(an)
     body, _, _ = story(rec)
     stored = set()
@@ -332,10 +324,14 @@ def step_sources() -> None:
                 urls(v)
 
     urls(rec)
+    # Requirement sources are read live from MetrIQ's own verified knowledge base
+    # (they are knowledge, not a stored check result) — still traceable, just not
+    # duplicated into the stored analysis JSON.
+    stored |= {item.source_url for item in get_product_finder().search_engine.items if item.source_url}
     shown = set(re.findall(r"https?://[^\s<]+", body))
-    check("19 every URL in the report comes from the stored evidence",
+    check("every URL in the report comes from the stored evidence or MetrIQ's verified knowledge base",
           shown and shown <= stored, str(shown - stored))
-    check("19 the Legal Metrology sources are listed", any("consumeraffairs.gov.in" in u for u in shown))
+    check("the Legal Metrology sources are listed", any("consumeraffairs.gov.in" in u for u in shown))
 
 
 # ------------------------------------------------------------------ endpoint
@@ -368,9 +364,6 @@ def step_endpoint() -> None:
     files = [("images", ("front.png", photo(W_FRONT), "image/png")), ("images", ("back.png", photo(W_BACK), "image/png"))]
     saved = client.post("/inspections", files=files, data={"sides": ["FRONT", "BACK"]})
     iid = saved.json()["inspection_id"]
-    client.post(f"/inspections/{iid}/review", json={"action": "START"})
-    client.post(f"/inspections/{iid}/review", json={"action": "COMPLETE", "decision": "MANUAL_REVIEW",
-                                                    "note": "Physical package check required."})
     before = snapshot(iid)
 
     calls = []
@@ -382,8 +375,7 @@ def step_endpoint() -> None:
         return fn
 
     patches = [(httpx, "post"), (escalation_module, "assess"), (records_module, "assess_escalation"),
-               (records_module, "create_inspection"), (compliance_module, "evaluate_compliance"),
-               (package_label_module, "evaluate_package_label"), (pipeline_module, "run_downstream")]
+               (records_module, "create_inspection"), (pipeline_module, "run_downstream")]
     originals = [(m, n, getattr(m, n)) for m, n in patches]
     for m, n in patches:
         setattr(m, n, forbidden(f"{m.__name__}.{n}"))
@@ -394,19 +386,19 @@ def step_endpoint() -> None:
     finally:
         for m, n, fn in originals:
             setattr(m, n, fn)
-    check("1 endpoint returns application/pdf", r.status_code == 200 and r.headers["content-type"] == "application/pdf",
+    check("endpoint returns application/pdf", r.status_code == 200 and r.headers["content-type"] == "application/pdf",
           f"{r.status_code} {r.headers.get('content-type')} {r.text[:200] if r.status_code != 200 else ''}")
-    check("2 a saved inspection produces a PDF report", r.content.startswith(b"%PDF") and len(r.content) > 5000
+    check("a saved inspection produces a PDF report", r.content.startswith(b"%PDF") and len(r.content) > 5000
           and f"metriq-report-{iid}.pdf" in r.headers.get("content-disposition", ""))
-    check("17 report generation made no LLM / HTTP call", "httpx.post" not in calls)
-    check("18 report generation recomputed no compliance, package label, pipeline or escalation",
+    check("report generation made no LLM / HTTP call", "httpx.post" not in calls)
+    check("report generation recomputed no escalation or pipeline result",
           not calls and not analyze_calls, str(calls))
-    check("16 report generation left the database record and stored photos unchanged", snapshot(iid) == before)
-    check("18 compliance results in the record are unchanged",
-          client.get(f"/inspections/{iid}").json()["system_result"] == saved.json()["system_result"])
+    check("report generation left the database record and stored photos unchanged", snapshot(iid) == before)
+    check("the saved inspection's escalation is unchanged by generating a report",
+          client.get(f"/inspections/{iid}").json()["escalation_required"] == saved.json()["escalation_required"])
 
-    check("3 unknown inspection -> 404", client.get("/inspections/INS-20000101-FFFFFF/report.pdf").status_code == 404)
-    check("3 malformed inspection id -> 422", client.get("/inspections/bad-id/report.pdf").status_code == 422)
+    check("unknown inspection -> 404", client.get("/inspections/INS-20000101-FFFFFF/report.pdf").status_code == 404)
+    check("malformed inspection id -> 422", client.get("/inspections/bad-id/report.pdf").status_code == 422)
     broken = sessionmaker(bind=create_engine("postgresql+psycopg://metriq@127.0.0.1:1/none",
                                              connect_args={"connect_timeout": 2}))
 
@@ -423,8 +415,9 @@ def step_endpoint() -> None:
 
 
 def main() -> int:
-    step_results()
-    step_officer()
+    step_no_compliance_verdict()
+    step_requirement_knowledge()
+    step_no_human_decision()
     step_honesty()
     step_images_and_escaping()
     step_sources()

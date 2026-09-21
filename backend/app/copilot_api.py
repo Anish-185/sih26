@@ -10,7 +10,8 @@
 Read-only by construction:
   * the database session is rolled back and never committed;
   * nothing is recomputed — the analysis is read as it was stored;
-  * the system result in the response is the record's, never the model's.
+  * MetrIQ produces no compliance verdict, so there is none for the model to
+    change.
 
 A failure here is never a compliance failure: the endpoint returns 429 (free-tier
 limit) or 503 (not configured / provider down) with a short message, and every
@@ -34,16 +35,16 @@ from app.db import get_session
 from app.inspection import InspectionAnalysisOut
 from app.openrouter import CopilotUnavailable, OpenRouterLLM
 from app.product_context import ProductContextOut
-from app.records import INSPECTION_ID_PATTERN, final_result, get_inspection
+from app.records import INSPECTION_ID_PATTERN, get_inspection
 
 router = APIRouter(prefix="/copilot", tags=["copilot"])
 
 CapabilityLiteral = Literal[
-    "EXPLAIN_INSPECTION", "SUMMARIZE", "EXPLAIN_ESCALATION", "EXPLAIN_CHECKS",
+    "EXPLAIN_INSPECTION", "SUMMARIZE", "EXPLAIN_ESCALATION",
     "EXPLAIN_EVIDENCE", "EXPLAIN_UNCERTAINTY", "EXPLAIN_HALLMARK",
     "EXPLAIN_CERTIFICATION", "EXPLAIN_RESULT", "WHAT_IS_MISSING",
     "EXPLAIN_STANDARD", "EXPLAIN_LABORATORY", "EXPLAIN_PRODUCT_CONTEXT",
-    "MANUAL_VERIFICATION", "QUESTION",
+    "EXPLAIN_EVIDENCE_GRAPH", "MANUAL_VERIFICATION", "QUESTION",
 ]
 
 LanguageLiteral = Literal["auto", "en", "hi", "te"]
@@ -247,11 +248,7 @@ class CopilotResponseOut(BaseModel):
                     "Never a self-assessment by the model.",
     )
     inspection_id: str | None
-    system_result: str | None = Field(
-        description="The deterministic result, read from the record. The explanation cannot change it."
-    )
     escalation_required: bool | None
-    officer_status: str | None = None
     answer: str
     evidence: list[EvidenceItemOut]
     limitations: list[str]
@@ -320,13 +317,7 @@ def explain(
                 raise HTTPException(status_code=404, detail=f"Inspection {body.inspection_id} was not found.")
             record = {
                 "inspection_id": row.inspection_id,
-                "system_result": row.system_result,
                 "escalation_required": row.escalation_required,
-                "officer_status": row.officer_status,
-                "officer_decision": row.officer_decision,
-                "officer_result": row.officer_result,
-                "officer_note": row.officer_note,
-                "final_result": final_result(row),
             }
             analysis = dict(row.analysis)
         except SQLAlchemyError as exc:
@@ -362,9 +353,7 @@ def explain(
         language=result.language,
         confidence=result.confidence,
         inspection_id=analysis.get("inspection_id"),
-        system_result=result.system_result,
         escalation_required=result.escalation_required,
-        officer_status=(record or {}).get("officer_status"),
         answer=result.answer.answer,
         evidence=[EvidenceItemOut(**e) for e in result.answer.evidence],
         limitations=result.answer.limitations,
@@ -420,9 +409,7 @@ def _explain_feature(body: CopilotRequest, copilot: InspectionCopilot) -> Copilo
         language=result.language,
         confidence=result.confidence,
         inspection_id=None,
-        system_result=None,
         escalation_required=None,
-        officer_status=None,
         answer=result.answer.answer,
         evidence=[EvidenceItemOut(**e) for e in result.answer.evidence],
         limitations=result.answer.limitations,

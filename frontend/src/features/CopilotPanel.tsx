@@ -3,11 +3,10 @@
 
   It is deliberately secondary to the evidence: a panel, not a chat window. It
   reads the record and explains it; it cannot retrieve a standard, evaluate a
-  requirement, change PASS / FAIL / REVIEW, edit a declaration or submit an
-  officer decision. The deterministic result is shown next to every answer and
-  comes from the record, never from the model.
+  requirement, state a compliance verdict (MetrIQ produces none), edit a
+  declaration or submit a deterministic result.
 
-  Nothing here runs on its own — a request is only sent when the officer presses
+  Nothing here runs on its own — a request is only sent when the user presses
   a button, because the explanation service runs on a small free daily quota.
 */
 import { type FormEvent, useState } from "react";
@@ -21,11 +20,11 @@ import {
   type CopilotInput,
   type InspectionAnalysis,
   type LanguageChoice,
-  type SystemResult,
 } from "@/lib/api";
 import { useAsyncTask, useOnMount } from "@/lib/hooks";
-import { Button, Mono, Panel, PanelHeader, Spinner, StatusBadge, TextInput } from "@/components/ui";
+import { Button, Mono, Panel, PanelHeader, Spinner, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { ResolutionMark } from "./records";
 
 /** The questions offered up front. Everything else goes through the free-text field. */
 type Prompt = { code: CopilotCapability; label: string };
@@ -34,10 +33,10 @@ const PACKAGE_PROMPTS: Prompt[] = [
   { code: "EXPLAIN_INSPECTION", label: "Explain this inspection" },
   { code: "EXPLAIN_RESULT", label: "Why this result?" },
   { code: "WHAT_IS_MISSING", label: "What information is missing?" },
-  { code: "EXPLAIN_ESCALATION", label: "Why does an officer need to review this?" },
-  { code: "EXPLAIN_CHECKS", label: "Which requirements were checked?" },
+  { code: "EXPLAIN_ESCALATION", label: "Why could MetrIQ not resolve this automatically?" },
   { code: "EXPLAIN_UNCERTAINTY", label: "Which declarations are uncertain?" },
   { code: "EXPLAIN_EVIDENCE", label: "What evidence supports this result?" },
+  { code: "EXPLAIN_EVIDENCE_GRAPH", label: "Explain this evidence graph" },
   { code: "MANUAL_VERIFICATION", label: "What should I verify manually?" },
   { code: "SUMMARIZE", label: "Summarise in simple language" },
 ];
@@ -57,6 +56,7 @@ const FEATURE_PROMPTS: Record<CopilotFeatureContext["feature"], Prompt[]> = {
   // Milestone 21 — the context already spans features, so the questions do too.
   PRODUCT: [
     { code: "EXPLAIN_PRODUCT_CONTEXT", label: "Summarise everything MetrIQ found" },
+    { code: "EXPLAIN_EVIDENCE_GRAPH", label: "Explain this evidence graph" },
     { code: "EXPLAIN_STANDARD", label: "Why was this standard selected?" },
     { code: "EXPLAIN_CERTIFICATION", label: "Explain the certification route" },
     { code: "EXPLAIN_LABORATORY", label: "Are there laboratory records for this standard?" },
@@ -97,14 +97,14 @@ const WITHHELD_LABEL: Record<string, string> = {
   FABRICATED_HUID: "contained a HUID that is not in this record",
   FABRICATED_SOURCE: "cited a source that is not in this record",
   AUTHENTICATION_CLAIM: "claimed an authentication MetrIQ cannot establish",
-  CONTRADICTS_SYSTEM_RESULT: "stated a result other than the deterministic one",
+  FABRICATED_VERDICT: "stated a compliance verdict, which MetrIQ does not produce",
   LABORATORY_STATUS_CLAIM: "claimed a laboratory status a dated snapshot cannot establish",
   LABORATORY_RANKING_CLAIM: "ranked or recommended a laboratory, which MetrIQ does not do",
   FABRICATED_AMOUNT: "stated a fee or amount that is not in the evidence",
 };
 
 /**
- * `inspectionId` explains a saved record (the officer path), `analysis` the
+ * `inspectionId` explains a saved record, `analysis` the
  * inspection currently on screen, and `context` a feature page's own
  * deterministic result (Milestone 20). Exactly one of them is given.
  */
@@ -112,14 +112,12 @@ export function CopilotPanel({
   inspectionId,
   analysis,
   context,
-  systemResult,
   hasHallmark,
   language,
 }: {
   inspectionId?: string;
   analysis?: InspectionAnalysis;
   context?: CopilotFeatureContext;
-  systemResult?: SystemResult;
   hasHallmark?: boolean;
   language?: LanguageChoice;
 }) {
@@ -195,12 +193,7 @@ export function CopilotPanel({
           ) : (
             <>
               Explains the evidence on this page in plain language. It reads the record only — it does
-              not retrieve standards, run checks, or change the system result
-              {systemResult && (
-                <>
-                  , which stays <StatusBadge status={systemResult} size="sm" />
-                </>
-              )}{" "}
+              not retrieve standards, run checks, or state a compliance verdict. MetrIQ produces none,
               whatever the explanation says.
             </>
           )}
@@ -281,11 +274,8 @@ function Answer({ answer, asked }: { answer: CopilotAnswer; asked: string }) {
         <Mono muted className="text-[10px] uppercase tracking-[0.16em]">
           {answer.withheld ? "Explanation withheld" : "Grounded in MetrIQ evidence"}
         </Mono>
-        {answer.system_result ? (
-          <span className="inline-flex items-center gap-2 text-[11px] text-ink-faint">
-            System result
-            <StatusBadge status={answer.system_result} size="sm" />
-          </span>
+        {answer.escalation_required !== null ? (
+          <ResolutionMark required={answer.escalation_required} />
         ) : (
           <Mono muted className="text-[10px] uppercase tracking-[0.16em]">
             {answer.context_type} evidence

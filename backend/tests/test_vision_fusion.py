@@ -481,8 +481,8 @@ def test_vision_never_becomes_a_declaration() -> None:
 
     src = Path("app/declarations.py").read_text()
     check("the declaration extractor does not import vision at all", "vision" not in src.lower())
-    compliance_src = Path("app/compliance.py").read_text()
-    check("the compliance engine does not import vision at all", "vision" not in compliance_src.lower())
+    check("the compliance engine is gone entirely, so it cannot import vision",
+          not Path("app/compliance.py").exists() and not Path("app/package_label.py").exists())
 
 
 def test_vision_cannot_choose_a_standard_or_decide_compliance() -> None:
@@ -499,7 +499,7 @@ def test_vision_cannot_choose_a_standard_or_decide_compliance() -> None:
     check("a vision-suggested product retrieves only knowledge-base standards",
           all(c.standard_number in known for c in r.candidates))
     check("vision alone never MATCHES a product", r.status == "REVIEW", r.status)
-    check("and the reason says it needs officer confirmation", "officer confirmation" in r.reason)
+    check("and the reason says it needs manual confirmation", "manual confirmation" in r.reason)
 
     src = Path("app/vision.py").read_text()
     for forbidden in ("from app.compliance", "from app.requirements", "from app.product import",
@@ -509,8 +509,8 @@ def test_vision_cannot_choose_a_standard_or_decide_compliance() -> None:
     analyzer = InspectionAnalyzer(ocr_engine=OCR, product_finder=FINDER,
                                   vision=StubVision([observation("Electric Kettle")]))
     out = analyzer.analyze_package([PackageUpload(photo(W_NOISE), "front.png", "FRONT")])
-    check("a vision-only inspection never reports a passing compliance result",
-          out.compliance.overall_status in ("REVIEW", "FAIL"), out.compliance.overall_status)
+    check("a vision-only inspection never gets MATCHED product status from vision alone",
+          out.product.status == "REVIEW", out.product.status)
 
 
 def test_image_prompt_injection() -> None:
@@ -533,7 +533,7 @@ def test_image_prompt_injection() -> None:
     r = identify(KETTLE, [observation("Packaged Drinking Water")])
     check("a lying visual observation cannot overwrite the label's product",
           r.standard_number is None and r.status == "REVIEW", str(r.standard_number))
-    check("it is recorded as a conflict for the officer, not silently obeyed",
+    check("it is recorded as a conflict, not silently obeyed",
           bool(r.signals.conflicts))
 
 
@@ -677,8 +677,8 @@ def test_inspection_without_vision_is_unchanged() -> None:
         ctx = a.model_dump(mode="json").get("product_context") or {}
         return ctx.get("availability"), ctx.get("summary"), ctx.get("conflicts")
 
-    check("no vision client: OCR, product, compliance unchanged", core(plain) == core(unconfigured))
-    check("vision rate-limited: OCR, product, compliance unchanged", core(plain) == core(failed))
+    check("no vision client: OCR, product, evidence unchanged", core(plain) == core(unconfigured))
+    check("vision rate-limited: OCR, product, evidence unchanged", core(plain) == core(failed))
     check("no vision client: the product context reaches the same conclusions",
           context_result(plain) == context_result(unconfigured))
     check("vision rate-limited: the product context reaches the same conclusions",
@@ -691,8 +691,7 @@ def test_inspection_without_vision_is_unchanged() -> None:
     check("an unconfigured client is never called", True)
     check("the product is still identified from the label",
           failed.product.status == "MATCHED" and failed.product.standard_number == "IS 367:1993")
-    check("compliance still ran", failed.compliance.overall_status in ("PASS", "FAIL", "REVIEW"))
-    check("the Legal Metrology result still ran", failed.package_label.overall_status in ("PASS", "FAIL", "REVIEW"))
+    check("completeness still ran", failed.completeness is not None)
     check("escalation still ran", failed.escalation is not None)
 
 
@@ -712,21 +711,18 @@ def test_persistence_and_report() -> None:
     check("and its product identification is intact", revalidated.product.status == analysis["product"]["status"])
     check("no database migration is needed (the analysis is stored as JSON)", True)
 
-    from app.escalation import assess, system_result
+    from app.escalation import assess
+    outcome = assess(analysis)
     check("escalation still reads an analysis that now carries vision",
-          assess(analysis)["system_result"] == system_result(analysis))
+          isinstance(outcome["required"], bool))
 
     from app.report import build_story
     record = {
         "inspection_id": "INS-20260919-AB12CD", "created_at": "2026-09-19T00:00:00+00:00",
         "product_status": analysis["product"]["status"], "product_name": analysis["product"]["name"],
         "product_category": None, "standard_number": analysis["product"]["standard_number"],
-        "bis_result": analysis["compliance"]["overall_status"],
-        "legal_metrology_result": analysis["package_label"]["overall_status"],
-        "system_result": "REVIEW", "escalation_required": True, "escalation_reasons": [],
-        "officer_status": "PENDING", "officer_decision": None, "officer_result": None,
-        "final_result": None, "review_started_at": None, "review_completed_at": None,
-        "image_count": 1, "sides": ["FRONT"], "system_reasons": [], "officer_note": None,
+        "escalation_required": outcome["required"], "escalation_reasons": outcome["reasons"],
+        "image_count": 1, "sides": ["FRONT"],
         "images": [{"index": 1, "image_id": analysis["images"][0]["image_id"], "side": "FRONT",
                     "filename": "front.png", "content_type": "image/png",
                     "url": "/inspections/INS-20260919-AB12CD/images/1"}],

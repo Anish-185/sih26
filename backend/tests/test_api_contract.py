@@ -229,8 +229,8 @@ def test_ask_returns_503_on_model_outage() -> None:
     try:
         r = CLIENT.post("/ask", json={"question": "What is HUID?"})
         check("/ask during outage: 503", r.status_code == 503)
-        check("/ask during outage: detail names the local LLM",
-              "Local LLM unavailable" in r.json().get("detail", ""))
+        check("/ask during outage: detail is a clean, provider-neutral message",
+              "Explanation service unavailable" in r.json().get("detail", ""))
         # an abstaining question never reaches the model -> still 200
         r2 = CLIENT.post("/ask", json={"question": "zzzz qqqq vvvv nonsense"})
         check("/ask abstention survives an outage: 200, not grounded",

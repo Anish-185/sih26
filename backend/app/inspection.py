@@ -14,9 +14,9 @@ and local OCR, then runs the downstream pipeline
 identification and ranked standard candidates from the verified BIS knowledge
 base through the existing retrieval engine (``app.product_identification``).
 
-Compliance (``app.compliance``) applies only verified requirements with
-deterministic rules; officer review is still a later phase (``PENDING``).
-Nothing here is fabricated: a stage that cannot produce a reliable result reports
+MetrIQ produces no automatic legal/compliance verdict: it reports what it
+observed and identified, and what verified knowledge connects to it. Nothing
+here is fabricated: a stage that cannot produce a reliable result reports
 ``REVIEW``.
 """
 
@@ -233,7 +233,7 @@ class InstantOcrOut(BaseModel):
 
     status: str = Field(
         description='"COMPLETED" (text found) | "NO_TEXT" (nothing legible — '
-        "needs a better photo or officer review)"
+        "needs a better photo or manual verification)"
     )
     inspection_id: str
     created_at: str
@@ -333,6 +333,14 @@ class ProductIdentificationOut(BaseModel):
         default_factory=list,
         description="IS numbers printed on the label with no verified knowledge-base record.",
     )
+    product_applicability: str | None = Field(
+        default=None,
+        description="Which of MetrIQ's modelled requirement-data products (app.requirements) this package is, "
+        "under the identified standard: PRODUCT_CONFIRMED | PRODUCT_NOT_MODELLED | PRODUCT_NOT_CONFIRMED | "
+        "PRODUCT_AMBIGUOUS | null (no standard matched). A pure requirements-lookup, never a rule verdict.",
+    )
+    modelled_product_id: str | None = None
+    modelled_product_category: str | None = None
     notes: list[str] = Field(default_factory=list)
 
 
@@ -357,136 +365,6 @@ class StandardCandidateOut(BaseModel):
     reference: str | None = None
     verification_status: str
     last_verified: str | None = None
-
-
-class CheckEvidenceOut(BaseModel):
-    """Package evidence behind a check: declaration -> OCR regions -> image."""
-
-    declaration_field: str
-    declaration_status: str
-    value: str | None = None
-    raw_text: str
-    source_regions: list[str]
-    image_id: str | None = None
-    ocr_confidence: float | None = None
-    bbox: list[int] | None = None
-    source_images: list[str] = Field(default_factory=list)
-    source_sides: list[str] = Field(default_factory=list)
-
-
-class RequirementSourceOut(BaseModel):
-    """Knowledge evidence behind a requirement: the verified record (BIS or Legal Metrology) it quotes."""
-
-    knowledge_id: str
-    title: str
-    quote: str = Field(description="Word-for-word sentence from the verified record.")
-    source_url: str | None = None
-    document_name: str | None = None
-    reference: str | None = None
-    verification_status: str
-    last_verified: str | None = None
-    source_authority: str = Field(default="BIS", description='"BIS" | "LEGAL_METROLOGY"')
-    source_organization: str | None = None
-
-
-class ComplianceCheckOut(BaseModel):
-    rule_id: str
-    requirement: str
-    rule_type: str
-    standard_number: str | None = Field(
-        default=None, description="The BIS standard checked; null for Legal Metrology package-label requirements."
-    )
-    result: str = Field(description='"PASS" | "FAIL" | "REVIEW" | "NOT_SUPPORTED" | "NOT_APPLICABLE"')
-    reason_code: str = Field(description="Machine-readable reason, e.g. EVIDENCE_NOT_DETECTED.")
-    reason: str = Field(description="Deterministic, factual explanation produced by the rule.")
-    reason_category: str = Field(
-        description='"REQUIREMENT_SATISFIED" | "REQUIREMENT_NOT_SATISFIED" | "EVIDENCE_NOT_DETECTED" | '
-        '"EVIDENCE_NOT_DETERMINABLE" | "CONFLICTING_EVIDENCE" | "INSUFFICIENT_EVIDENCE" | "NOT_SUPPORTED"'
-    )
-    rule_condition: str = Field(description="The exact deterministic condition the rule applies.")
-    observed_value: str | None = None
-    expected_condition: str
-    evidence_status: str = Field(
-        description='"SUFFICIENT" | "INSUFFICIENT" | "NOT_DETECTED" | "NOT_APPLICABLE"'
-    )
-    evidence: list[CheckEvidenceOut]
-    source: RequirementSourceOut | None = None
-    source_category: str = Field(default="BIS", description='Authority of the requirement: "BIS" | "LEGAL_METROLOGY"')
-    domain: str = "PACKAGE_LABEL"
-    reference: str = Field(default="", description='Rule / clause of the source, e.g. "Rule 6(1)(e)".')
-    applicability: str = ""
-    supporting_sources: list[RequirementSourceOut] = Field(
-        default_factory=list, description="Further verified quotes behind the requirement (amendments, related rules)."
-    )
-
-
-class ExclusionFindingOut(BaseModel):
-    """An applicability exclusion whose evidence was read on the package."""
-
-    id: str
-    description: str
-    observed: str
-    source_regions: list[str]
-    sources: list[RequirementSourceOut]
-    evidence: list[CheckEvidenceOut] = Field(default_factory=list)
-
-
-class PackageLabelOut(BaseModel):
-    """Legal Metrology package-label requirements — a separate evidence system from BIS compliance.
-    Its result is never merged with the BIS result. Never decided by a model."""
-
-    source_category: str = Field(default="LEGAL_METROLOGY")
-    source_authority: str = "Legal Metrology (Department of Consumer Affairs)"
-    overall_status: str = Field(description='"PASS" | "FAIL" | "REVIEW"')
-    reason_code: str
-    reason: str
-    scope_status: str = Field(description='"IN_SCOPE" | "OUT_OF_SCOPE" | "NO_REQUIREMENT_DATA"')
-    scope: str = ""
-    scope_source: RequirementSourceOut | None = None
-    exclusions_found: list[ExclusionFindingOut] = Field(default_factory=list)
-    assumptions: list[str] = Field(
-        default_factory=list, description="Applicability conditions a package label cannot show."
-    )
-    assumption_sources: list[RequirementSourceOut] = Field(default_factory=list)
-    checks: list[ComplianceCheckOut] = Field(default_factory=list)
-    supported_checks: int = 0
-    passed: int = 0
-    failed: int = 0
-    review: int = 0
-    not_supported: int = 0
-    not_applicable: int = 0
-    policy: str = ""
-    summary: list[str] = Field(default_factory=list)
-    notes: list[str] = Field(default_factory=list)
-    unreadable_images: list[str] = Field(default_factory=list)
-
-
-class ComplianceCoverageOut(BaseModel):
-    supported_checks: int
-    passed: int
-    failed: int
-    review: int
-    not_supported: int
-    # Product-specific coverage: product -> standard -> requirements -> rules.
-    product_applicability: str = Field(
-        default="NO_STANDARD",
-        description='"PRODUCT_CONFIRMED" | "PRODUCT_NOT_MODELLED" | "PRODUCT_NOT_CONFIRMED" | '
-        '"PRODUCT_AMBIGUOUS" | "NO_STANDARD"',
-    )
-    product_id: str | None = None
-    product_name: str | None = Field(default=None, description="Modelled inspection product, when confirmed.")
-    product_category: str | None = None
-    applicability_source: RequirementSourceOut | None = Field(
-        default=None, description="Verified record that links the confirmed product to the standard."
-    )
-    verified_requirements: int = 0
-    deterministic_rules: int = 0
-    unsupported_requirements: int = 0
-    not_applied_requirements: list[str] = Field(
-        default_factory=list,
-        description="Product-limited requirements under this standard that were not applied (product not confirmed).",
-    )
-    explanation: str = Field(default="", description="Deterministic: what MetrIQ can and cannot inspect here.")
 
 
 class CoverageRowOut(BaseModel):
@@ -576,26 +454,6 @@ class CoverageMatrixOut(BaseModel):
     errors: list[str] = Field(default_factory=list, description="Requirement data rejected by the loader.")
 
 
-class ComplianceOut(BaseModel):
-    """Deterministic compliance evaluation. Never decided by a model."""
-
-    overall_status: str = Field(description='"PASS" | "FAIL" | "REVIEW"')
-    coverage_status: str = Field(
-        description='"INSPECTION_SUPPORTED" | "STANDARD_ONLY" | "UNSUPPORTED" | "NO_STANDARD"'
-    )
-    reason_code: str
-    reason: str
-    product_name: str | None = None
-    standard_number: str | None = None
-    knowledge_id: str | None = None
-    coverage: ComplianceCoverageOut
-    checks: list[ComplianceCheckOut]
-    policy: str
-    notes: list[str] = Field(default_factory=list)
-    summary: list[str] = Field(default_factory=list, description="Deterministic overall explanation, one fact per line.")
-    unreadable_images: list[str] = Field(default_factory=list)
-
-
 class CompletenessItemOut(BaseModel):
     field: str
     label: str
@@ -632,9 +490,6 @@ class PipelineStagesOut(BaseModel):
     declaration_extraction: str
     product_identification: str
     standard_retrieval: str
-    compliance: str = "REVIEW"
-    officer_review: str = "PENDING"
-    package_label: str = "REVIEW"
     hallmark: str = Field(default="NOT_DETECTED", description='"REVIEW" when hallmark evidence is evaluated')
 
 
@@ -644,17 +499,18 @@ INSPECTION_TYPES = ("PACKAGE", "HALLMARK")
 class EscalationReasonOut(BaseModel):
     code: str = Field(description="app.escalation.REASONS key, e.g. PRODUCT_NOT_IDENTIFIED.")
     label: str
-    source: str = Field(description='"OCR" | "PRODUCT" | "BIS" | "LEGAL_METROLOGY" | "PIPELINE"')
+    source: str = Field(description='"OCR" | "PRODUCT" | "HALLMARKING" | "PIPELINE"')
     message: str
     source_regions: list[str] = Field(default_factory=list)
-    checks: list[str] = Field(default_factory=list, description="rule_id of the checks behind this reason.")
+    checks: list[str] = Field(default_factory=list)
 
 
 class EscalationOut(BaseModel):
-    """Can the automated system confidently resolve this inspection? Deterministic; changes no result."""
+    """Could MetrIQ establish this inspection's evidence chain from the photos? Deterministic;
+    never a legal or compliance judgment, and it changes no other result."""
 
-    required: bool = Field(description="True -> officer review queue; False -> the system result is final.")
-    system_result: str = Field(description='Combined result: "PASS" | "FAIL" | "REVIEW".')
+    required: bool = Field(description="True -> MetrIQ could not establish every part of the evidence chain "
+                           "from the photos; False -> nothing further is outstanding.")
     reasons: list[EscalationReasonOut] = Field(default_factory=list)
 
 
@@ -694,8 +550,6 @@ class InspectionAnalysisOut(BaseModel):
         description="Ranked verified knowledge-base standards supported by the package evidence."
     )
     retrieval_note: str = RETRIEVAL_NOTE
-    compliance: ComplianceOut = Field(description="BIS compliance for the identified standard.")
-    package_label: PackageLabelOut = Field(description="Legal Metrology package-label requirements (separate from BIS).")
     completeness: CompletenessOut
     pipeline: PipelineStagesOut
     notes: list[str] = Field(default_factory=list)
@@ -708,7 +562,7 @@ class InspectionAnalysisOut(BaseModel):
         default=None, description="Hallmark / HUID evidence observed in the photos — never an authentication."
     )
     escalation: EscalationOut | None = Field(
-        default=None, description="Whether this inspection needs officer review, and why (null only for records "
+        default=None, description="Whether the system could resolve this inspection, and why not (null only for records "
         "saved before escalation existed)."
     )
     certification: CertificationJourneyOut | None = Field(
@@ -869,7 +723,7 @@ class InspectionAnalyzer:
     def analyze_package(self, uploads: list[PackageUpload], inspection_type: str = "PACKAGE",
                         huid_reference: str | None = None) -> InspectionAnalysisOut:
         """Smart Inspection of one package: Instant OCR of every image, then the
-        downstream pipeline (declarations -> product -> standards -> compliance)
+        downstream pipeline (declarations -> product -> standards -> completeness)
         over the combined evidence."""
         evidence = self.ocr_package(uploads)
         regions = evidence.ocr.regions
@@ -892,27 +746,22 @@ class InspectionAnalyzer:
             downstream = run_downstream(regions, self._llm, self._product_finder, unreadable_images=unreadable,
                                         inspection_type=inspection_type,
                                         vision_observations=vision_observations)
-            declaration_stage, product, standards, compliance, package_label, completeness, pipeline = (
+            declaration_stage, product, standards, completeness, pipeline = (
                 _declaration_stage_out(downstream.declaration_stage),
                 _product_out(downstream.product),
                 [_candidate_out(c) for c in downstream.product.candidates],
-                _compliance_out(downstream.compliance),
-                _package_label_out(downstream.package_label),
                 CompletenessOut(
                     **{k: v for k, v in downstream.completeness.__dict__.items() if k != "items"},
                     items=[CompletenessItemOut(**i.__dict__) for i in downstream.completeness.items],
                 ),
                 _pipeline_out(downstream.stages),
             )
+            product.product_applicability = downstream.product_applicability
+            product.modelled_product_id = downstream.confirmed_product_id
+            product.modelled_product_category = downstream.confirmed_product_category
             notes.extend(downstream.notes)
         except Exception as exc:  # noqa: BLE001
-            declaration_stage, product, standards, compliance, pipeline = _all_review(
-                f"Downstream pipeline error: {exc}"
-            )
-            package_label = PackageLabelOut(
-                overall_status="REVIEW", reason_code="ENGINE_ERROR", reason=f"Downstream pipeline error: {exc}",
-                scope_status="NO_REQUIREMENT_DATA",
-            )
+            declaration_stage, product, standards, pipeline = _all_review(f"Downstream pipeline error: {exc}")
             completeness = CompletenessOut(
                 items=[], detected=0, uncertain=0, not_detected=0, conflicts=0,
                 with_verified_requirement=0, note=f"Downstream pipeline error: {exc}",
@@ -920,8 +769,7 @@ class InspectionAnalyzer:
             notes.append(f"Downstream pipeline error: {exc}")
 
         # ---- relevant testing laboratories (Milestone 18) ----
-        # Informational only. Isolated like every other optional stage, and it
-        # is deliberately computed AFTER compliance so it cannot influence it.
+        # Informational only. Isolated like every other optional stage.
         laboratories = self._laboratories(product.standard_number)
 
         # ---- certification guidance (Milestone 16) ----
@@ -930,14 +778,12 @@ class InspectionAnalyzer:
         # no result.
         certification = self._certification(product.standard_number)
 
-        # The compliance result must say when some photos gave no usable evidence.
+        # The evidence must say when some photos gave no usable OCR.
         if unreadable:
-            gap_note = (
-                "Some images gave no usable OCR evidence (" + "; ".join(gaps) + "). Checks use the "
+            notes.append(
+                "Some images gave no usable OCR evidence (" + "; ".join(gaps) + "). Declarations use the "
                 "remaining images only; unread evidence is never treated as a finding about the package."
             )
-            compliance.notes.append(gap_note)
-            package_label.notes.append(gap_note)
 
         analysis = InspectionAnalysisOut(
             vision=[_vision_out(o) for o in vision_observations],
@@ -951,8 +797,6 @@ class InspectionAnalyzer:
             declaration_stage=declaration_stage,
             product=product,
             standards=standards,
-            compliance=compliance,
-            package_label=package_label,
             completeness=completeness,
             pipeline=pipeline,
             notes=notes,
@@ -988,9 +832,9 @@ class InspectionAnalyzer:
         try:
             analysis.escalation = EscalationOut(**assess_escalation(analysis.model_dump(mode="json")))
         except Exception as exc:  # noqa: BLE001 — an assessment bug must escalate, never resolve silently
-            analysis.escalation = EscalationOut(required=True, system_result="REVIEW", reasons=[EscalationReasonOut(
+            analysis.escalation = EscalationOut(required=True, reasons=[EscalationReasonOut(
                 code="PIPELINE_ERROR", label="Pipeline error", source="PIPELINE",
-                message=f"The escalation assessment failed ({exc.__class__.__name__}); officer review is required.",
+                message=f"The resolution assessment failed ({exc.__class__.__name__}); manual verification is required.",
             )])
         return analysis
 
@@ -1023,9 +867,8 @@ class InspectionAnalyzer:
     def _laboratories(self, standard_number: str | None) -> list[InspectionLabOut]:
         """Laboratories BIS LIMS lists for the identified standard.
 
-        Purely informational: it is read-only, it is computed after the
-        compliance engine has finished, no compliance code reads it, and a
-        failure here returns an empty list rather than affecting any result.
+        Purely informational: it is read-only, and a failure here returns an
+        empty list rather than affecting any other result.
         """
         if not standard_number:
             return []
@@ -1371,90 +1214,12 @@ def _candidate_out(candidate) -> StandardCandidateOut:
     )
 
 
-def _coverage_out(ev) -> ComplianceCoverageOut:
-    counts = dict(supported_checks=ev.supported_checks, passed=ev.passed, failed=ev.failed,
-                  review=ev.review, not_supported=ev.not_supported)
-    ic = getattr(ev, "inspection_coverage", None)
-    if ic is None:
-        return ComplianceCoverageOut(**counts)
-    return ComplianceCoverageOut(
-        **counts,
-        product_applicability=ic.product_applicability, product_id=ic.product_id,
-        product_name=ic.product_name, product_category=ic.product_category,
-        applicability_source=RequirementSourceOut(**ic.applicability_source.__dict__) if ic.applicability_source else None,
-        verified_requirements=ic.verified_requirements, deterministic_rules=ic.deterministic_rules,
-        unsupported_requirements=ic.unsupported_requirements,
-        not_applied_requirements=list(ic.not_applied_requirements), explanation=ic.explanation,
-    )
-
-
-def _compliance_out(ev) -> ComplianceOut:
-    return ComplianceOut(
-        overall_status=ev.overall_status,
-        coverage_status=ev.coverage_status,
-        reason_code=ev.reason_code,
-        reason=ev.reason,
-        product_name=ev.product_name,
-        standard_number=ev.standard_number,
-        knowledge_id=ev.knowledge_id,
-        coverage=_coverage_out(ev),
-        checks=[_check_out(c) for c in ev.checks],
-        policy=ev.policy,
-        notes=list(ev.notes),
-        summary=list(ev.summary),
-        unreadable_images=list(ev.unreadable_images),
-    )
-
-
-def _source_out(source) -> RequirementSourceOut | None:
-    return RequirementSourceOut(**source.__dict__) if source else None
-
-
-def _check_out(c) -> ComplianceCheckOut:
-    return ComplianceCheckOut(
-        rule_id=c.rule_id, requirement=c.requirement, rule_type=c.rule_type,
-        standard_number=c.standard_number, result=c.result, reason_code=c.reason_code,
-        reason=c.reason, reason_category=c.reason_category, rule_condition=c.rule_condition,
-        observed_value=c.observed_value,
-        expected_condition=c.expected_condition, evidence_status=c.evidence_status,
-        evidence=[CheckEvidenceOut(**e.__dict__) for e in c.evidence],
-        source=_source_out(c.source),
-        source_category=c.source_category, domain=c.domain, reference=c.reference,
-        applicability=c.applicability,
-        supporting_sources=[_source_out(s) for s in c.supporting_sources],
-    )
-
-
-def _package_label_out(ev) -> PackageLabelOut:
-    return PackageLabelOut(
-        source_category=ev.source_category, source_authority=ev.source_authority,
-        overall_status=ev.overall_status, reason_code=ev.reason_code, reason=ev.reason,
-        scope_status=ev.scope_status, scope=ev.scope, scope_source=_source_out(ev.scope_source),
-        exclusions_found=[
-            ExclusionFindingOut(
-                id=f.id, description=f.description, observed=f.observed, source_regions=list(f.source_regions),
-                sources=[_source_out(s) for s in f.sources],
-                evidence=[CheckEvidenceOut(**e.__dict__) for e in f.evidence],
-            )
-            for f in ev.exclusions_found
-        ],
-        assumptions=list(ev.assumptions), assumption_sources=[_source_out(s) for s in ev.assumption_sources],
-        checks=[_check_out(c) for c in ev.checks],
-        supported_checks=ev.supported_checks, passed=ev.passed, failed=ev.failed, review=ev.review,
-        not_supported=ev.not_supported, not_applicable=ev.not_applicable, policy=ev.policy,
-        summary=list(ev.summary), notes=list(ev.notes), unreadable_images=list(ev.unreadable_images),
-    )
-
-
 def _pipeline_out(stages) -> PipelineStagesOut:
     return PipelineStagesOut(
         ocr=stages.ocr,
         declaration_extraction=stages.declaration_extraction,
         product_identification=stages.product_identification,
         standard_retrieval=stages.standard_retrieval,
-        compliance=stages.compliance,
-        officer_review=stages.officer_review,
-        package_label=stages.package_label,
     )
 
 
@@ -1471,12 +1236,6 @@ def _all_review(note: str):
             status="REVIEW", confidence="none", method="deterministic", reason=note,
         ),
         [],
-        ComplianceOut(
-            overall_status="REVIEW", coverage_status="NO_STANDARD", reason_code="ENGINE_ERROR",
-            reason=note, coverage=ComplianceCoverageOut(
-                supported_checks=0, passed=0, failed=0, review=0, not_supported=0),
-            checks=[], policy="",
-        ),
         PipelineStagesOut(
             ocr="COMPLETED",
             declaration_extraction="REVIEW",

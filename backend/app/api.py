@@ -11,6 +11,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from typing import Annotated
 
@@ -28,6 +29,7 @@ from app.certification_journey import (
 from app.laboratory import LaboratorySearchService
 from app.llm import LLMError, LocalLLM
 from app.lab_registry import LabRegistry, load_laboratories
+from app.openrouter import DEFAULT_MODEL, OpenRouterLLM
 from app.product import ProductStandardFinder
 from app.product_context import ProductContextOut, build_from_query, context_out
 from app.rag import BISQuestionAnswerer
@@ -46,10 +48,20 @@ def get_engine() -> SearchEngine:
 
 
 @lru_cache(maxsize=1)
+def get_grounded_llm() -> OpenRouterLLM:
+    """The OpenRouter model for /ask (including Hallmarking, which has no
+    dedicated endpoint) and Certification explanations. Pinned to its own
+    OPENROUTER_GROUNDED_MODEL — independent of the copilot's OPENROUTER_MODEL
+    (app/copilot_api.py::get_copilot()), even though they may share a value
+    today. One shared instance/quota for both features."""
+    return OpenRouterLLM(model=os.environ.get("OPENROUTER_GROUNDED_MODEL") or DEFAULT_MODEL)
+
+
+@lru_cache(maxsize=1)
 def get_answerer() -> BISQuestionAnswerer:
     return BISQuestionAnswerer(
         search_engine=get_engine(),
-        llm=LocalLLM(),
+        llm=get_grounded_llm(),
     )
 
 
@@ -65,7 +77,7 @@ def get_certification_service() -> CertificationGuidanceService:
     return CertificationGuidanceService(
         search_engine=get_engine(),
         product_finder=get_product_finder(),
-        llm=LocalLLM(),
+        llm=get_grounded_llm(),
     )
 
 
@@ -556,7 +568,7 @@ def ask_post(
     except LLMError as exc:
         raise HTTPException(
             status_code=503,
-            detail=f"Local LLM unavailable: {exc}",
+            detail=f"Explanation service unavailable: {exc}",
         ) from exc
 
     return AskResponse(
@@ -710,7 +722,7 @@ def certification_guidance_post(
     except LLMError as exc:
         raise HTTPException(
             status_code=503,
-            detail=f"Local LLM unavailable: {exc}",
+            detail=f"Explanation service unavailable: {exc}",
         ) from exc
 
     return CertificationGuidanceResponse(

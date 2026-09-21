@@ -80,7 +80,7 @@ def declaration_completeness(
     product_id: str | None = None,
     extra_requirements: dict[str, list[str]] | None = None,
 ) -> DeclarationCompleteness:
-    """``product_id`` is the product confirmed by the compliance engine; only
+    """``product_id`` is the product confirmed by ``requirements.confirm_product``; only
     requirements that apply to it (or to every product under the standard) count.
     ``extra_requirements`` maps field -> ids of applied Legal Metrology requirements."""
     unreadable = list(unreadable_images)

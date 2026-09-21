@@ -1,8 +1,13 @@
-"""Checks for Milestone 10 — escalation: can the system resolve an inspection, or does an officer?
+"""Checks for Milestone 10 — resolution: could MetrIQ establish this inspection's
+evidence chain from the photos?
 
-Covers every escalation reason on real pipeline output (controlled OCR text, real
-declaration extraction, product identification, BIS compliance and Legal
-Metrology checks), the resolve / escalate decision, determinism, and the
+MetrIQ produces no automatic PASS / FAIL / REVIEW compliance verdict.
+``app.escalation.assess()`` reports, deterministically, every reason the
+product / standard / declaration evidence chain could not be fully established
+— OCR quality, product identification, declaration completeness against
+verified requirement data, and hallmark evidence. Covers every reason on real
+pipeline output (controlled OCR text, real declaration extraction, product
+identification, declaration completeness), determinism, and the
 /inspection/analyze contract. No database, no LM Studio.
 
 Plain Python, no test framework (matches the other runners). Run:
@@ -37,7 +42,7 @@ from app.ocr import RawRegion  # noqa: E402
 PASS = 0
 FAIL = 0
 SAMPLES = Path(__file__).resolve().parents[2] / "samples" / "ocr-labels"
-SOURCES = {"OCR", "PRODUCT", "BIS", "LEGAL_METROLOGY", "PIPELINE"}
+SOURCES = {"OCR", "PRODUCT", "HALLMARKING", "PIPELINE"}
 
 
 def check(name: str, condition: bool, detail: str = "") -> None:
@@ -103,53 +108,39 @@ KETTLE = ["ELECTRIC KETTLE", "Product name: Electric Kettle", "MRP ₹899.00 (In
           "Address: Plot 12, Baddi Industrial Area, Solan 173205, Himachal Pradesh",
           "Consumer care: 1800-300-7788", "Email: care@thermopot.example"]
 
-
-def resolved(data: dict, bis="PASS", lm="PASS", keep_unsupported=False) -> dict:
-    """A copy of a real analysis whose BIS and Legal Metrology results are set to a resolved state.
-    MetrIQ's verified data has no standard whose every requirement is checkable, so a fully
-    resolved inspection can only be shown by setting the results directly."""
-    d = copy.deepcopy(data)
-    d["compliance"].update(overall_status=bis, coverage_status="INSPECTION_SUPPORTED", reason_code="ALL_CHECKS_PASSED")
-    d["package_label"]["overall_status"] = lm
-    d["package_label"]["reason_code"] = "SUPPORTED_CHECK_FAILED" if lm == "FAIL" else "ALL_CHECKS_PASSED"
-    if not keep_unsupported:
-        d["package_label"]["checks"] = [c for c in d["package_label"]["checks"] if c["result"] != "NOT_SUPPORTED"]
-    return d
+WATER = ["AQUA PURE", "PACKAGED DRINKING WATER", "NET QUANTITY: 1 L"]
 
 
 # ------------------------------------------------------------------ tests
 
 
-def test_resolve_or_escalate() -> None:
-    print("\ncan the system resolve the case?")
+def test_resolve_or_establish() -> None:
+    print("\ncould MetrIQ establish the evidence chain?")
+    # IS 367:1993 (kettle) has no modelled requirement product in MetrIQ's verified
+    # data, so there is no verified-requirement gap to report: nothing is outstanding.
     _, kettle = analyse((931, "FRONT", raw(*KETTLE)))
     result = assess(kettle)
-    check("real kettle label -> escalated (BIS standard-only, Legal Metrology areas not checkable)",
-          result["required"] and result["system_result"] == "REVIEW"
-          and {"REQUIREMENT_NOT_CHECKABLE", "SYSTEM_RESULT_REVIEW"} <= set(codes(result)), str(codes(result)))
+    check("real kettle label -> nothing outstanding (its standard has no modelled requirement data)",
+          result == {"required": False, "reasons": []}, str(result))
+
+    # IS 14543:2016 (packaged water) DOES have a modelled product and a verified,
+    # checkable requirement (the printed IS number) — not printing it is a real gap.
+    _, water_no_number = analyse((934, "FRONT", raw(*WATER)))
+    r = assess(water_no_number)
+    check("water without its printed IS number -> escalated, MISSING_EVIDENCE",
+          r["required"] and codes(r) == ["MISSING_EVIDENCE"], str(r))
     check("every reason has a code, label, known source and message",
-          all(r["code"] in REASONS and r["label"] == REASONS[r["code"]] and r["source"] in SOURCES and r["message"]
-              for r in result["reasons"]))
+          all(x["code"] in REASONS and x["label"] == REASONS[x["code"]] and x["source"] in SOURCES and x["message"]
+              for x in r["reasons"]))
 
-    ok = assess(resolved(kettle))
-    check("PASS with every applicable requirement checked -> not escalated, no reasons",
-          ok == {"required": False, "system_result": "PASS", "reasons": []}, str(ok))
-    unsupported = assess(resolved(kettle, keep_unsupported=True))
-    check("PASS with requirement areas that cannot be checked -> escalated (they could overturn a PASS)",
-          unsupported["required"] and codes(unsupported) == ["REQUIREMENT_NOT_CHECKABLE"])
+    _, water_with_number = analyse((935, "FRONT", raw(*WATER, "IS 14543")))
+    check("water WITH its printed IS number -> nothing outstanding",
+          assess(water_with_number) == {"required": False, "reasons": []})
 
-    _, dozen = analyse((932, "FRONT", raw(*KETTLE[:3], "Net Quantity: 1 dozen", *KETTLE[4:])))
-    fail = assess(resolved(dozen, bis="PASS", lm="FAIL", keep_unsupported=True))
-    check("FAIL on clear evidence with only uncheckable areas left -> resolved, the reason is still listed",
-          not fail["required"] and fail["system_result"] == "FAIL" and codes(fail) == ["REQUIREMENT_NOT_CHECKABLE"],
-          str(fail))
-    fail_bis_review = assess(resolved(dozen, bis="REVIEW", lm="FAIL", keep_unsupported=True))
-    check("FAIL while BIS is still REVIEW -> escalated", fail_bis_review["required"]
-          and "SYSTEM_RESULT_REVIEW" in codes(fail_bis_review))
-
-    before = copy.deepcopy(kettle)
-    check("deterministic: the same analysis always gives the same assessment", assess(kettle) == assess(kettle))
-    check("assessment never changes the analysis or its results", kettle == before)
+    before = copy.deepcopy(water_no_number)
+    check("deterministic: the same analysis always gives the same assessment",
+          assess(water_no_number) == assess(water_no_number))
+    check("assessment never changes the analysis it read", water_no_number == before)
 
 
 def test_reasons() -> None:
@@ -159,69 +150,74 @@ def test_reasons() -> None:
     check("1 product cannot be identified -> PRODUCT_NOT_IDENTIFIED", by_code(r, "PRODUCT_NOT_IDENTIFIED")
           and by_code(r, "PRODUCT_NOT_IDENTIFIED")[0]["source"] == "PRODUCT")
     check("2 no verified BIS standard -> NO_VERIFIED_STANDARD", bool(by_code(r, "NO_VERIFIED_STANDARD")))
-    check("5 required evidence missing -> MISSING_EVIDENCE names the checks",
-          by_code(r, "MISSING_EVIDENCE") and "lm-retail-sale-price-declared" in by_code(r, "MISSING_EVIDENCE")[0]["checks"])
 
     _, d = analyse((942, "FRONT", raw("COMBO PACK", "Product name: Electric Kettle", "Packaged Drinking Water")))
     r = assess(d)
-    check("7 several plausible products / standards -> MULTIPLE_CANDIDATES lists them",
+    check("3 several plausible products / standards -> MULTIPLE_CANDIDATES lists them",
           by_code(r, "MULTIPLE_CANDIDATES") and "IS 14543:2016" in by_code(r, "MULTIPLE_CANDIDATES")[0]["message"]
           and "IS 367:1993" in by_code(r, "MULTIPLE_CANDIDATES")[0]["message"], str(codes(r)))
 
     _, d = analyse((943, "FRONT", raw("AQUA", "IS 14543")))
-    check("a single weakly supported candidate -> PRODUCT_NOT_CONFIRMED", bool(by_code(assess(d), "PRODUCT_NOT_CONFIRMED")))
+    check("4 a single weakly supported candidate -> PRODUCT_NOT_CONFIRMED", bool(by_code(assess(d), "PRODUCT_NOT_CONFIRMED")))
 
-    _, d = analyse((944, "FRONT", raw(*KETTLE[:2], "MRP ₹899.00 (Inclusive of all taxes)", conf=0.7)))
+    _, d = analyse((944, "FRONT", raw(*WATER, "IS 14543", conf=0.5)))
     r = assess(d)
-    check("3 OCR too uncertain -> OCR_UNCERTAIN with the checks and their OCR regions",
-          by_code(r, "OCR_UNCERTAIN") and "lm-retail-sale-price-declared" in by_code(r, "OCR_UNCERTAIN")[0]["checks"]
-          and by_code(r, "OCR_UNCERTAIN")[0]["source_regions"], str(codes(r)))
+    check("5 OCR too uncertain on a verified-requirement field -> OCR_UNCERTAIN with its region",
+          by_code(r, "OCR_UNCERTAIN") and by_code(r, "OCR_UNCERTAIN")[0]["source_regions"], str(codes(r)))
 
-    _, d = analyse((945, "FRONT", raw("ELECTRIC KETTLE", "MRP ₹899.00 (Inclusive of all taxes)")),
+    _, d = analyse((945, "FRONT", raw("PACKAGED DRINKING WATER", "MRP ₹899.00 (Inclusive of all taxes)")),
                    (946, "BACK", raw("MRP ₹999.00 (Inclusive of all taxes)")),
                    (947, "LEFT", RuntimeError("camera file unreadable")))
     r = assess(d)
     conflict = by_code(r, "CONFLICTING_DECLARATIONS")
-    check("4/9 conflicting declarations across sides -> CONFLICTING_DECLARATIONS with sides and both regions",
+    check("6 conflicting declarations across sides -> CONFLICTING_DECLARATIONS with sides and both regions",
           conflict and "FRONT" in conflict[0]["message"] and "BACK" in conflict[0]["message"]
           and {"I1-OCR-002", "I2-OCR-001"} <= set(conflict[0]["source_regions"]), str(conflict))
-    check("a photo that could not be read -> IMAGES_UNREADABLE", by_code(r, "IMAGES_UNREADABLE")
+    check("7 a photo that could not be read -> IMAGES_UNREADABLE", by_code(r, "IMAGES_UNREADABLE")
           and "LEFT" in by_code(r, "IMAGES_UNREADABLE")[0]["message"])
 
-    _, d = analyse((948, "FRONT", raw(*KETTLE)), textured=False)
-    check("a low-quality photo -> IMAGE_QUALITY_LOW", bool(by_code(assess(d), "IMAGE_QUALITY_LOW")))
-
-    _, d = analyse((949, "FRONT", raw(*KETTLE)))
-    r = assess(d)
-    check("6 unsupported requirement areas -> REQUIREMENT_NOT_CHECKABLE for BIS and Legal Metrology",
-          {x["source"] for x in by_code(r, "REQUIREMENT_NOT_CHECKABLE")} == {"BIS", "LEGAL_METROLOGY"})
-    check("8 compliance result REVIEW -> SYSTEM_RESULT_REVIEW per evidence system",
-          {x["source"] for x in by_code(r, "SYSTEM_RESULT_REVIEW")} == {"BIS", "LEGAL_METROLOGY"})
+    _, d = analyse((948, "FRONT", raw(*WATER, "IS 14543")), textured=False)
+    check("8 a low-quality photo -> IMAGE_QUALITY_LOW", bool(by_code(assess(d), "IMAGE_QUALITY_LOW")))
 
     _, d = analyse((950, "FRONT", raw("GOLD RING", "22K916 HUID: AB12CD", "Hallmarked jewellery")))
     hallmark = by_code(assess(d), "HALLMARK_NOT_VERIFIABLE")
-    check("10 hallmark / HUID text -> HALLMARK_NOT_VERIFIABLE with its OCR regions, never verified",
+    check("9 hallmark / HUID text -> HALLMARK_NOT_VERIFIABLE with its OCR regions, never verified",
           hallmark and {"OCR-002", "OCR-003"} <= set(hallmark[0]["source_regions"])
           and "authenticity cannot be established" in hallmark[0]["message"], str(hallmark))
-    crafted = copy.deepcopy(d)
-    crafted["ocr"]["text"], crafted["ocr"]["regions"] = "", []
-    crafted["hallmark"]["detected"], crafted["hallmark"]["untrusted_claims"] = False, []
-    crafted["compliance"]["reason_code"] = "DOMAIN_NOT_PACKAGE_LABEL"
-    check("10 a jewellery hallmarking standard in package inspection -> HALLMARK_NOT_VERIFIABLE",
-          bool(by_code(assess(crafted), "HALLMARK_NOT_VERIFIABLE")))
-
-    _, d = analyse((951, "FRONT", raw("CEMENT", "Net Quantity: 30 kg")))
-    scope = by_code(assess(d), "PACKAGE_SCOPE_EXCLUSION")
-    check("11 Legal Metrology scope exclusion evidenced -> PACKAGE_SCOPE_EXCLUSION with its region",
-          scope and scope[0]["source_regions"] == ["OCR-002"], str(scope))
-
-    crafted = copy.deepcopy(d)
-    crafted["package_label"]["reason_code"] = "ENGINE_ERROR"
-    check("11 a failed pipeline stage -> PIPELINE_ERROR", bool(by_code(assess(crafted), "PIPELINE_ERROR")))
 
     order = list(REASONS)
     r = assess(d)
     check("reasons come in a fixed order", [order.index(c) for c in codes(r)] == sorted(order.index(c) for c in codes(r)))
+
+
+def test_pipeline_error() -> None:
+    print("\npipeline errors always escalate")
+
+    class BrokenFinder:
+        def __init__(self):
+            self.search_engine = self
+
+        @property
+        def items(self):
+            raise RuntimeError("knowledge base unavailable")
+
+        def find(self, *a, **k):
+            raise RuntimeError("knowledge base unavailable")
+
+    analyzer = InspectionAnalyzer(ocr_engine=Engine({960: raw("CEMENT", "Net Quantity: 30 kg")}),
+                                  product_finder=BrokenFinder())
+    out = analyzer.analyze_package([PackageUpload(photo(960), "f.png", "FRONT")])
+    d = out.model_dump(mode="json")
+    r = assess(d)
+    check("a broken knowledge base still degrades to REVIEW and escalates",
+          r["required"] and "PRODUCT_NOT_IDENTIFIED" in codes(r), str(r))
+
+    # A raised exception in escalation itself is handled by the caller (app.inspection),
+    # not by assess() — asserted in test_inspection_records.py / analyze_package directly.
+    crafted = copy.deepcopy(d)
+    crafted["notes"] = ["Downstream pipeline error: simulated failure"]
+    check("a note recording a pipeline failure -> PIPELINE_ERROR",
+          bool(by_code(assess(crafted), "PIPELINE_ERROR")))
 
 
 def test_analyze_contract() -> None:
@@ -232,18 +228,19 @@ def test_analyze_contract() -> None:
         body = client.post("/inspection/analyze", files={"image": (path.name, fh, "image/png")}).json()
     esc = body.get("escalation") or {}
     check("the analysis response carries the escalation assessment",
-          esc.get("required") is True and esc.get("system_result") == "REVIEW" and esc.get("reasons"), str(esc)[:200])
+          "required" in esc and "reasons" in esc, str(esc)[:200])
     body_copy = copy.deepcopy(body)
     body_copy.pop("escalation")
     check("the response's escalation equals a fresh assessment of the same analysis",
           assess(body_copy) == esc)
-    check("escalation does not change the system results",
-          body["compliance"]["overall_status"] == "REVIEW" and body["package_label"]["overall_status"] == "REVIEW")
+    check("the response carries no compliance verdict",
+          "compliance" not in body and "package_label" not in body, str(list(body)))
 
 
 def main() -> int:
-    test_resolve_or_escalate()
+    test_resolve_or_establish()
     test_reasons()
+    test_pipeline_error()
     test_analyze_contract()
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0

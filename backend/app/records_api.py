@@ -1,21 +1,17 @@
-"""HTTP layer for persisted inspections and the officer review.
+"""HTTP layer for persisted inspections.
 
     POST /inspections                       multipart, same package form as /inspection/analyze
                                             (image | images + sides). The backend runs the analysis
                                             itself and saves it — a client never sends a result.
-    GET  /inspections                       newest first; ?officer_status=PENDING&officer_status=IN_REVIEW
-                                            (officer_status NOT_REQUIRED = resolved by the system, never queued)
-    GET  /inspections/stats                 counts from the database (system results and officer
-                                            review states counted separately)
-    GET  /inspections/{inspection_id}       the full record: system result + analysis + officer review
+    GET  /inspections                       newest first; ?escalated=true|false filters on whether the
+                                            deterministic system could resolve the inspection itself
+    GET  /inspections/stats                 counts from the database
+    GET  /inspections/{inspection_id}       the full record: system result + evidence + analysis
     GET  /inspections/{inspection_id}/images/{index}   a stored package photo (1-based upload order)
     GET  /inspections/{inspection_id}/report.pdf       evidence-backed PDF report of the saved record (read-only)
-    POST /inspections/{inspection_id}/review           JSON: {"action": "START"} or
-                                            {"action": "COMPLETE", "decision": ..., "officer_result": ..., "note": ...}
 
-The review body is strict (unknown fields are rejected), so a request that tries
-to send ``system_result`` or any other system field gets 422. The database
-refuses changes to the system columns as well.
+A saved record is read-only: there is no endpoint that changes a stored result,
+and the database refuses changes to the system columns as well.
 """
 
 from __future__ import annotations
@@ -25,7 +21,7 @@ from functools import partial
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, Request, Response, UploadFile
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -35,13 +31,8 @@ from app.inspection import EscalationReasonOut, InspectionAnalysisOut, Inspectio
 from app.inspection_api import _package, _run, get_analyzer
 from app.records import (
     INSPECTION_ID_PATTERN,
-    NOTE_MAX,
     InspectionRecord,
-    ReviewAction,
-    ReviewError,
-    apply_review,
     create_inspection,
-    final_result,
     get_image,
     get_inspection,
     list_inspections,
@@ -50,20 +41,11 @@ from app.records import (
 
 router = APIRouter(prefix="/inspections", tags=["inspections"])
 
-ResultLiteral = Literal["PASS", "FAIL", "REVIEW"]
-OfficerStatusLiteral = Literal["NOT_REQUIRED", "PENDING", "IN_REVIEW", "COMPLETED"]
 _PACKAGE_FIELDS = {"image", "side", "images", "sides", "inspection_type", "huid_reference"}
 _DB_UNAVAILABLE = "The inspection database is unavailable. Check that PostgreSQL is running and migrated."
 
 
 # ------------------------------------------------------------------ models
-
-
-class SystemReasonOut(BaseModel):
-    source: Literal["BIS", "LEGAL_METROLOGY", "HALLMARKING"]
-    result: ResultLiteral
-    reason_code: str
-    reason: str
 
 
 class StoredImageOut(BaseModel):
@@ -82,31 +64,16 @@ class InspectionSummaryOut(BaseModel):
     product_name: str | None
     product_category: str | None
     standard_number: str | None
-    bis_result: ResultLiteral
-    legal_metrology_result: ResultLiteral
-    system_result: ResultLiteral = Field(description="Deterministic result when saved. Never changed by a review.")
-    escalation_required: bool = Field(description="False: the system resolved the case and its result is final.")
-    escalation_reasons: list[EscalationReasonOut] = Field(description="Why the system could not resolve it.")
-    officer_status: OfficerStatusLiteral = Field(
-        description="NOT_REQUIRED (resolved by the system) | PENDING (in the officer queue) | IN_REVIEW | COMPLETED"
-    )
-    officer_decision: Literal["ACCEPT_SYSTEM_RESULT", "OVERRIDE", "MANUAL_REVIEW"] | None
-    officer_result: ResultLiteral | None = Field(description="Set only by an OVERRIDE.")
-    final_result: Literal["PASS", "FAIL", "REVIEW", "MANUAL_REVIEW"] | None = Field(
-        description="The system result when no review was required; otherwise what the completed officer "
-        "review concluded, null until it is completed."
-    )
-    review_started_at: datetime | None
-    review_completed_at: datetime | None
+    escalation_required: bool = Field(description="False: the deterministic system established the evidence "
+                                      "chain from the photographed evidence; nothing further is outstanding.")
+    escalation_reasons: list[EscalationReasonOut] = Field(description="Why the system could not establish it.")
     image_count: int
     sides: list[str]
 
 
 class InspectionRecordOut(InspectionSummaryOut):
-    system_reasons: list[SystemReasonOut]
-    officer_note: str | None
     images: list[StoredImageOut]
-    analysis: InspectionAnalysisOut = Field(description="The saved deterministic analysis: evidence, checks, sources.")
+    analysis: InspectionAnalysisOut = Field(description="The saved deterministic analysis: evidence, sources.")
 
 
 class InspectionListOut(BaseModel):
@@ -114,44 +81,11 @@ class InspectionListOut(BaseModel):
     total: int
 
 
-class CountsOut(BaseModel):
-    PASS: int
-    FAIL: int
-    REVIEW: int
-
-
-class OfficerCountsOut(BaseModel):
-    NOT_REQUIRED: int
-    PENDING: int
-    IN_REVIEW: int
-    COMPLETED: int
-
-
-class DecisionCountsOut(BaseModel):
-    ACCEPT_SYSTEM_RESULT: int
-    OVERRIDE: int
-    MANUAL_REVIEW: int
-
-
 class InspectionStatsOut(BaseModel):
     total: int
-    system: CountsOut
-    bis: CountsOut
-    legal_metrology: CountsOut
-    escalated: int = Field(description="Inspections the system could not resolve (sent to the officer queue).")
-    officer: OfficerCountsOut
-    decisions: DecisionCountsOut
-
-
-class ReviewIn(BaseModel):
-    """An officer review action. Strict: any other field (e.g. system_result) is rejected."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    action: Literal["START", "COMPLETE"]
-    decision: Literal["ACCEPT_SYSTEM_RESULT", "OVERRIDE", "MANUAL_REVIEW"] | None = None
-    officer_result: ResultLiteral | None = None
-    note: str | None = Field(default=None, max_length=NOTE_MAX)
+    escalated: int = Field(description="Inspections the deterministic system could not establish the evidence "
+                           "chain for from the photographed evidence alone.")
+    resolved: int = Field(description="Inspections the deterministic system fully established from the photos.")
 
 
 # ------------------------------------------------------------------ helpers
@@ -161,18 +95,14 @@ def _summary_fields(r: InspectionRecord) -> dict:
     return dict(
         inspection_id=r.inspection_id, created_at=r.created_at, product_status=r.product_status,
         product_name=r.product_name, product_category=r.product_category, standard_number=r.standard_number,
-        bis_result=r.bis_result, legal_metrology_result=r.legal_metrology_result, system_result=r.system_result,
         escalation_required=r.escalation_required, escalation_reasons=r.escalation_reasons,
-        officer_status=r.officer_status, officer_decision=r.officer_decision, officer_result=r.officer_result,
-        final_result=final_result(r), review_started_at=r.review_started_at,
-        review_completed_at=r.review_completed_at, image_count=len(r.sides), sides=list(r.sides),
+        image_count=len(r.sides), sides=list(r.sides),
     )
 
 
 def _record_out(r: InspectionRecord) -> InspectionRecordOut:
     return InspectionRecordOut(
         **_summary_fields(r),
-        system_reasons=r.system_reasons, officer_note=r.officer_note,
         images=[StoredImageOut(index=i.position, image_id=i.image_id, side=i.side, filename=i.filename,
                                content_type=i.content_type,
                                url=f"/inspections/{r.inspection_id}/images/{i.position}") for i in r.images],
@@ -206,7 +136,7 @@ async def create(
     analyzer: InspectionAnalyzer = Depends(get_analyzer),
     session: Session = Depends(get_session),
 ) -> InspectionRecordOut:
-    """Analyse the package photos on the server and save the inspection with officer status PENDING."""
+    """Analyse the package photos on the server and save the inspection and its evidence."""
     extra = sorted(set((await request.form()).keys()) - _PACKAGE_FIELDS)
     if extra:
         raise HTTPException(
@@ -233,13 +163,13 @@ async def create(
 
 @router.get("", response_model=InspectionListOut)
 def index(
-    officer_status: list[OfficerStatusLiteral] = Query(default=[]),
+    escalated: bool | None = Query(default=None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
 ) -> InspectionListOut:
     try:
-        rows, total = list_inspections(session, tuple(officer_status), limit, offset)
+        rows, total = list_inspections(session, escalated, limit, offset)
         return InspectionListOut(items=[InspectionSummaryOut(**_summary_fields(r)) for r in rows], total=total)
     except SQLAlchemyError as exc:
         raise _db_error(session, exc) from exc
@@ -299,17 +229,4 @@ def report(inspection_id: str, session: Session = Depends(get_session)) -> Respo
         "Content-Disposition": f'inline; filename="metriq-report-{inspection_id}.pdf"',
         "Cache-Control": "no-store",
     })
-
-
-@router.post("/{inspection_id}/review", response_model=InspectionRecordOut)
-def review(inspection_id: str, body: ReviewIn, session: Session = Depends(get_session)) -> InspectionRecordOut:
-    """Record an officer review action. The system result is never changed."""
-    _checked_id(inspection_id)
-    try:
-        record = apply_review(session, inspection_id, ReviewAction(body.action, body.decision, body.officer_result, body.note))
-        return _record_out(record)
-    except ReviewError as exc:
-        raise HTTPException(status_code=exc.status, detail=exc.message) from exc
-    except SQLAlchemyError as exc:
-        raise _db_error(session, exc) from exc
 

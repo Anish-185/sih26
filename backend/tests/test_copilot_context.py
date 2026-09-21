@@ -62,7 +62,6 @@ from test_copilot import (  # noqa: E402
     WATER_ANALYSIS,
     StubProvider,
     reply,
-    with_result,
 )
 
 PASS = 0
@@ -215,16 +214,16 @@ def run_inspection(analysis, capability, text=None, language=lang.AUTO, question
 
 
 def test_grounded_answer_from_inspection_context() -> None:
-    print("\nA. an inspection explains itself, and the result stays the record's")
+    print("\nA. an inspection explains itself, and escalation stays the record's own evidence")
     result, provider = run_inspection(WATER_ANALYSIS, "EXPLAIN_INSPECTION")
     check("exactly one provider call for one user action", len(provider.calls) == 1)
-    check("the system result is read from the record",
-          result.system_result == WATER_ANALYSIS["escalation"]["system_result"])
+    check("escalation is read from the record, never a verdict",
+          result.escalation_required == WATER_ANALYSIS["escalation"]["required"])
     check("the context type is INSPECTION", result.context_type == "INSPECTION")
     check("MetrIQ's own confidence is deterministic", result.confidence == "GROUNDED")
 
     prompt = provider.calls[0]["user"]
-    check("the prompt carries the deterministic result", '"result"' in prompt)
+    check("the prompt carries MetrIQ's own escalation evidence", '"resolvable_by_system"' in prompt)
     check("the prompt stays small enough for the free tier", len(prompt) < 40_000,
           f"{len(prompt)} chars")
 
@@ -251,8 +250,8 @@ def test_laboratory_evidence_reaches_the_inspection_context() -> None:
     check("no laboratory record is reported as NOT_AVAILABLE_IN_KNOWLEDGE_BASE, not as 'none exist'",
           "NOT_AVAILABLE_IN_KNOWLEDGE_BASE" in (ctx_none["testing_laboratories"].get("no_match") or ""))
 
-    check("compliance never sees the laboratory section",
-          "testing_laboratories" not in build_context(WATER_ANALYSIS, "EXPLAIN_CHECKS"))
+    check("a narrowly-scoped capability never sees the laboratory section",
+          "testing_laboratories" not in build_context(WATER_ANALYSIS, "EXPLAIN_UNCERTAINTY"))
 
 
 # ------------------------------------------------- B  standard context
@@ -311,7 +310,7 @@ def test_grounded_answer_from_laboratory_context() -> None:
     ctx = build_feature_context("LABORATORY", LAB_PAYLOAD)
     search = ctx["laboratory_search"]
     check("the snapshot limitation is MetrIQ's own wording", search["limitation"] == SNAPSHOT_NOTE)
-    check("the officer is told to confirm before arranging testing",
+    check("the user is told to confirm before arranging testing",
           search["before_arranging_testing"] == CURRENTNESS_NOTE)
     check("the standard the listing is against is carried",
           search["standard_the_laboratories_are_listed_against"] == "IS 14543:2016")
@@ -358,29 +357,29 @@ def test_grounded_answer_from_hallmark_context() -> None:
 
 
 def test_why_this_result() -> None:
-    print("\nF. 'why this result?' explains the deterministic result, never re-decides it")
+    print("\nF. 'why this result?' explains the evidence MetrIQ has, and MetrIQ produces no verdict")
     check("the capability exists", "EXPLAIN_RESULT" in CAPABILITIES)
     instruction = CAPABILITIES["EXPLAIN_RESULT"]["instruction"]
-    for word in ("FAIL", "PASS", "REVIEW"):
-        check(f"the instruction covers the {word} case", word in instruction)
-    check("it forbids restating the result as a legal conclusion",
-          "legally compliant" in instruction)
+    check("it forbids stating or implying a compliance verdict",
+          "MetrIQ produces no automatic compliance verdict" in instruction)
+    check("it forbids saying the item passed or failed",
+          "never say it" in instruction and "passed or failed" in instruction)
 
-    review = with_result(WATER_ANALYSIS, bis="REVIEW", lm="REVIEW")
-    result, provider = run_inspection(review, "EXPLAIN_RESULT")
-    check("the REVIEW result reaches the model as the record states it",
-          '"REVIEW"' in provider.calls[0]["user"])
-    check("the response still reports the deterministic result",
-          result.system_result == review["escalation"]["system_result"])
+    result, provider = run_inspection(WATER_ANALYSIS, "EXPLAIN_RESULT")
+    check("the evidence reaches the model as the record states it",
+          '"product"' in provider.calls[0]["user"])
+    check("the response still reports MetrIQ's own escalation state",
+          result.escalation_required == WATER_ANALYSIS["escalation"]["required"])
 
-    # The model claiming a different verdict changes nothing and is withheld.
-    contradiction, _ = run_inspection(review, "EXPLAIN_RESULT",
+    # The model claiming a compliance verdict changes nothing and is withheld —
+    # MetrIQ produces none, so any such claim is fabricated regardless of the case.
+    contradiction, _ = run_inspection(WATER_ANALYSIS, "EXPLAIN_RESULT",
                                       text=reply("The overall system result is PASS."))
-    check("a contradicting verdict is withheld",
+    check("a generated verdict is withheld",
           contradiction.answer.withheld and
-          contradiction.answer.withheld_reason == "CONTRADICTS_SYSTEM_RESULT")
-    check("and the deterministic result is unchanged",
-          contradiction.system_result == review["escalation"]["system_result"])
+          contradiction.answer.withheld_reason == "FABRICATED_VERDICT")
+    check("and MetrIQ's own escalation state is unchanged",
+          contradiction.escalation_required == WATER_ANALYSIS["escalation"]["required"])
     check("MetrIQ's confidence records the rejection", contradiction.confidence == "WITHHELD")
 
 
@@ -388,15 +387,17 @@ def test_why_this_result() -> None:
 
 
 def test_what_is_missing_keeps_the_four_states_apart() -> None:
-    print("\nG-K. 'what is missing?' keeps NOT_DETECTED / UNCERTAIN / UNSUPPORTED / NOT_AVAILABLE apart")
+    print("\nG-K. 'what is missing?' keeps NOT_DETECTED / UNCERTAIN / VERIFIED_REQUIREMENT / "
+          "NOT_AVAILABLE apart")
     check("the capability exists", "WHAT_IS_MISSING" in CAPABILITIES)
     ctx = build_context(WATER_ANALYSIS, "WHAT_IS_MISSING")
     vocab = ctx["evidence_vocabulary"]
-    for term in ("NOT_DETECTED", "UNCERTAIN", "UNSUPPORTED", "NOT_AVAILABLE_IN_KNOWLEDGE_BASE"):
+    for term in ("NOT_DETECTED", "UNCERTAIN", "VERIFIED_REQUIREMENT", "NOT_ESTABLISHED",
+                 "NOT_AVAILABLE_IN_KNOWLEDGE_BASE"):
         check(f"{term} is defined in the context sent to the model", term in vocab)
-    check("the four definitions are all different",
-          len({vocab[t] for t in ("NOT_DETECTED", "UNCERTAIN", "UNSUPPORTED",
-                                  "NOT_AVAILABLE_IN_KNOWLEDGE_BASE")}) == 4)
+    check("the five definitions are all different",
+          len({vocab[t] for t in ("NOT_DETECTED", "UNCERTAIN", "VERIFIED_REQUIREMENT",
+                                  "NOT_ESTABLISHED", "NOT_AVAILABLE_IN_KNOWLEDGE_BASE")}) == 5)
     check("the context says they must not be merged", "Never merge them" in vocab["_note"])
 
     # H. NOT_DETECTED keeps its meaning wherever it appears.
@@ -417,13 +418,15 @@ def test_what_is_missing_keeps_the_four_states_apart() -> None:
           dec["status"] == "UNCERTAIN" and dec["value"] is None)
     check("and states why it is uncertain", "could not be read" in dec["reason"])
 
-    # J. UNSUPPORTED is not a pass and not a failure.
-    check("UNSUPPORTED is defined as 'not checked', never pass or failure",
-          "not a pass" in vocab["UNSUPPORTED"] and "no verified deterministic rule" in vocab["UNSUPPORTED"])
-    checks = (ctx.get("bis_compliance") or {}).get("checks", [])
-    unsupported = [c for c in checks if c.get("result") == "NOT_SUPPORTED"]
-    check("an unsupported check keeps its own result value, never PASS",
-          all(c["result"] == "NOT_SUPPORTED" for c in unsupported))
+    # J. VERIFIED_REQUIREMENT / NOT_ESTABLISHED are links to verified requirement
+    # data, never a pass or a failure — MetrIQ produces no such verdict.
+    check("VERIFIED_REQUIREMENT is defined as a link, never a pass",
+          "Not a pass or a failure" in vocab["VERIFIED_REQUIREMENT"])
+    check("NOT_ESTABLISHED is defined as MetrIQ's own coverage gap, not a legal statement",
+          "does not cover it" in vocab["NOT_ESTABLISHED"])
+    coverages = {i.get("requirement_coverage") for i in ctx["declaration_completeness"]["items"]}
+    check("declaration completeness items only ever use the two coverage states",
+          coverages <= {"VERIFIED_REQUIREMENT", "NOT_ESTABLISHED"})
 
     # K. NOT_AVAILABLE_IN_KNOWLEDGE_BASE is about MetrIQ's coverage.
     check("NOT_AVAILABLE is defined as MetrIQ's coverage, not reality",
@@ -551,7 +554,7 @@ def test_answer_language_changes_but_evidence_does_not() -> None:
     detected, provider = run("STANDARD", STANDARD_PAYLOAD, "QUESTION",
                              question="इस मानक के लिए प्रमाणन क्या है?")
     check("an unrequested language is detected from the question", detected.language == "hi")
-    check("the officer's own question is sent unmodified",
+    check("the user's own question is sent unmodified",
           "इस मानक के लिए प्रमाणन क्या है?" in provider.calls[0]["user"])
 
     withheld, _ = run("LABORATORY", LAB_PAYLOAD, "EXPLAIN_LABORATORY", language="te",
@@ -625,7 +628,7 @@ def test_malformed_model_output() -> None:
                    text="IS 14543:2016 was retrieved for this product.")
     check("unstructured prose is accepted but flagged",
           not prose.answer.structured and prose.confidence == "UNSTRUCTURED")
-    check("and the officer is told the evidence was not structured",
+    check("and the user is told the evidence was not structured",
           any("structured" in x for x in prose.answer.limitations))
 
     truncated, _ = run("STANDARD", STANDARD_PAYLOAD, "EXPLAIN_STANDARD",
@@ -634,7 +637,7 @@ def test_malformed_model_output() -> None:
     check("a reply cut short is salvaged, never shown as raw JSON",
           truncated.answer.answer == "IS 14543:2016 was retrieved." and
           "{" not in truncated.answer.answer)
-    check("and the officer is told it was cut short",
+    check("and the user is told it was cut short",
           any("cut short" in x for x in truncated.answer.limitations))
 
     raised = None
@@ -673,7 +676,8 @@ def test_api_contract() -> None:
     body = res.json()
     check("evidence_scope says the evidence was a feature context",
           body["evidence_scope"] == "FEATURE_CONTEXT" and body["context_type"] == "LABORATORY")
-    check("there is no system result to report", body["system_result"] is None)
+    check("there is no escalation state to report for a feature context",
+          body["escalation_required"] is None)
     check("the language is reported and is never 'auto'", body["language"] == "hi")
     check("MetrIQ's deterministic confidence is reported",
           body["confidence"] in ("GROUNDED", "UNSTRUCTURED", "WITHHELD"))
@@ -712,8 +716,8 @@ def test_api_contract() -> None:
     res = client.post("/copilot/explain", json={
         "capability": "EXPLAIN_INSPECTION", "analysis": WATER_ANALYSIS})
     check("the pre-existing inspection request shape still works", res.status_code == 200, res.text[:200])
-    check("and its system result is still the record's",
-          res.json()["system_result"] == WATER_ANALYSIS["escalation"]["system_result"])
+    check("and its escalation state is still the record's",
+          res.json()["escalation_required"] == WATER_ANALYSIS["escalation"]["required"])
 
     app.dependency_overrides.clear()
     get_copilot.cache_clear()

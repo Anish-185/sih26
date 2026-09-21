@@ -18,7 +18,6 @@ const NAV = [
   { to: "/certification", label: "Certification" },
   { to: "/laboratories", label: "Laboratories" },
   { to: "/hallmarking", label: "Hallmarking" },
-  { to: "/review", label: "Review" },
   { to: "/history", label: "History" },
 ];
 
@@ -240,7 +239,7 @@ export function SystemLayerFooter() {
               ["01", "Extraction", "OCR & declared-value capture"],
               ["02", "Standards", "Deterministic BIS retrieval"],
               ["03", "Rules", "Legal-metrology rule checks"],
-              ["04", "Review", "Officer verification & sign-off"],
+              ["04", "Evidence", "Evidence graph & report"],
             ].map(([n, t, d]) => (
               <div key={n} className="bg-accent p-5">
                 <Mono className="!text-white/50 text-[11px]">{n}</Mono>

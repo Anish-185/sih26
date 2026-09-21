@@ -7,7 +7,9 @@ This module does NOT decide what the law requires. It:
   2. retrieves certification-related BIS evidence with the Phase 3 SearchEngine
      (deterministic),
   3. checks whether that evidence is strong enough to say anything useful,
-  4. only then asks the local LLM to explain ONLY that evidence,
+  4. only then asks the grounded explanation model (OpenRouter, pinned to
+     OPENROUTER_GROUNDED_MODEL — see app/api.py::get_grounded_llm) to explain
+     ONLY that evidence,
   5. returns a structured answer together with its BIS sources.
 
 If the knowledge base does not hold enough certification evidence, the service

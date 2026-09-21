@@ -28,18 +28,22 @@ npm run preview        # serve dist/ on :4173
 
 | Screen | Endpoint | Live? |
 |---|---|---|
-| Inspection · OCR + declarations + product + standard | `POST /inspection/analyze` | ✅ real (Phase 14) |
+| Inspection · OCR + declarations + product + standard + compliance | `POST /inspection/analyze` | ✅ real |
+| Inspection · evidence graph | `POST /evidence-graph` | ✅ real |
+| History · saved inspections + PDF report | `/inspections*` | ✅ real (PostgreSQL) |
 | Standards | `POST /product-standard` | ✅ real |
 | Certification | `POST /certification-guidance` | ✅ real (local LLM) |
 | Laboratories | `POST /laboratory-search` | ✅ real (`explain=false` by default) |
 | Hallmarking / HUID | `POST /ask` | ✅ real (local LLM) |
 | Header status dot | `GET /health` | ✅ real |
-| Inspection · legal-metrology PASS/FAIL | — | ⏳ next phase (shown as `NEXT`) |
-| History / Review | — | ⚠️ mock (`src/mocks.tsx`) |
+| Inspection · Legal Metrology PASS/FAIL | `POST /inspection/analyze` | ✅ real (verified requirements only) |
+| Copilot (optional explanations) | `POST /copilot/explain` | ✅ real (OpenRouter, server-side key) |
 
-The legal-metrology rule engine and the officer report are not built yet, so
-History / Review run on clearly-labelled placeholder data (`MockDataBanner`). No
-fabricated compliance outcomes are presented as real.
+Nothing in the UI runs on placeholder data. The deterministic rules cover only the
+requirements MetrIQ has verified, so many inspections end in `REVIEW` — that is
+reported honestly, with every reason listed. There is no human review workflow:
+MetrIQ shows the system result, the evidence graph behind it, and what it could
+not establish.
 
 ## Structure
 
@@ -58,7 +62,10 @@ src/
     GroundedAnswer.tsx  shared answer/evidence/sources renderer
   features/
     DashboardView, StandardsView, CertificationView, LaboratoriesView,
-    HallmarkingView, HistoryView, ReviewView, NotFoundView
+    HallmarkingView, HistoryView, RecordView, CopilotPanel, NotFoundView
     inspection/InspectionView, inspection/ImageInspector
-  mocks.tsx             isolated placeholder data + MockDataBanner
+  components/
+    EvidenceGraph.tsx        read-only evidence graph (layers, node detail, relationships)
+    EvidenceGraphSection.tsx loads the graph for what is on screen
+    ProductIntelligence.tsx  the canonical product context, compactly
 ```

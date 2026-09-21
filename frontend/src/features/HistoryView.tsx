@@ -1,11 +1,11 @@
 import { Link } from "react-router-dom";
 import { ArrowUpRight } from "lucide-react";
-import { Callout, EmptyState, InlineLoading, LinkButton, Mono, PageHeader, StatusBadge } from "@/components/ui";
+import { Callout, EmptyState, InlineLoading, LinkButton, Mono, PageHeader } from "@/components/ui";
 import { HeaderMotif } from "@/components/decor";
 import { ApiError, api } from "@/lib/api";
 import { useOnMount } from "@/lib/hooks";
 import { formatDate } from "@/lib/format";
-import { FinalDecision, OfficerStatusMark, productLabel } from "./records";
+import { ResolutionMark, productLabel, reasonLabels } from "./records";
 
 // Stable reference: useOnMount re-runs when its task changes.
 const loadHistory = () => api.listInspections();
@@ -21,7 +21,7 @@ export function HistoryView() {
         <PageHeader
           eyebrow="History"
           title="Inspection history"
-          lead="Every saved inspection: the result MetrIQ's deterministic checks produced, whether it needed an officer, and the officer's decision — kept separately."
+          lead="Every saved inspection: the product and standard MetrIQ identified, and whether the deterministic system could establish the evidence chain from the photos. A saved record never changes."
         />
       </div>
 
@@ -36,7 +36,7 @@ export function HistoryView() {
       {data && rows.length === 0 && (
         <EmptyState
           title="No inspections recorded yet."
-          description="Run an inspection and save it for officer review — it will appear here."
+          description="Run an inspection and save it — it will appear here."
           action={
             <LinkButton to="/inspection" size="sm">
               Start an inspection
@@ -50,7 +50,7 @@ export function HistoryView() {
           <table className="w-full min-w-[860px] border-collapse text-left">
             <thead>
               <tr className="border-b border-line bg-surface">
-                {["Inspection", "Date", "Product", "BIS standard", "System result", "Escalation", "Final decision"].map(
+                {["Inspection", "Date", "Product", "BIS standard", "Resolution", "Not established"].map(
                   (h) => (
                     <th key={h} className="kicker px-4 py-3 font-normal first:pl-5 last:pr-5">
                       {h}
@@ -84,13 +84,10 @@ export function HistoryView() {
                     </Mono>
                   </td>
                   <td className="px-4 py-3.5">
-                    <StatusBadge status={ins.system_result} size="sm" />
+                    <ResolutionMark required={ins.escalation_required} />
                   </td>
-                  <td className="px-4 py-3.5">
-                    <OfficerStatusMark status={ins.officer_status} />
-                  </td>
-                  <td className="px-4 py-3.5 pr-5">
-                    <FinalDecision record={ins} />
+                  <td className="max-w-[16rem] px-4 py-3.5 pr-5 text-[12px] leading-snug text-ink-soft">
+                    {reasonLabels(ins.escalation_reasons).join(" · ") || "—"}
                   </td>
                 </tr>
               ))}

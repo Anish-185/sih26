@@ -381,17 +381,12 @@ def test_domains_stay_separate() -> None:
                        files={"image": ("h.png", image, "image/png")},
                        data={"inspection_type": "HALLMARK"}).json()
 
-    check("Legal Metrology is not applied to jewellery",
-          body["package_label"]["scope_status"] == "NOT_APPLIED",
-          body["package_label"]["scope_status"])
-    check("with the reason that it is not a package inspection",
-          body["package_label"]["reason_code"] == "NOT_A_PACKAGE_INSPECTION")
-    check("a hallmark inspection never reports a package PASS",
-          body["package_label"]["overall_status"] != "PASS")
-    check("the hallmark result never becomes the compliance result",
-          body["compliance"]["overall_status"] in {"REVIEW", "NOT_SUPPORTED", "FAIL", "PASS"})
+    check("a hallmark inspection carries no package-label / compliance verdict at all",
+          not {"compliance", "package_label"} & set(body), str(sorted(body)))
+    check("the hallmark result is its own evidence system, never REVIEW-free authentication",
+          body["hallmark"]["overall_status"] == "REVIEW")
 
-    # The hallmark module must not reach into the package-label engine.
+    # The hallmark module must not reach into the (removed) package-label engine.
     source = (Path(__file__).resolve().parents[1] / "app" / "hallmark.py").read_text()
     for forbidden in ("package_label", "app.compliance", "declarations"):
         check(f"hallmark.py does not import {forbidden!r}", f"import {forbidden}" not in source)

@@ -7,7 +7,7 @@ import { ImageInspector } from "./ImageInspector";
 /** Region id -> the side of the photo it was read from, for evidence labels. */
 export const RegionSides = createContext<Map<string, string>>(new Map());
 
-/** "BACK · I2-OCR-004 + BACK · I2-OCR-005" — side shown only when the officer set one. */
+/** "BACK · I2-OCR-004 + BACK · I2-OCR-005" — side shown only when the user set one. */
 export function useWhere() {
   const sides = useContext(RegionSides);
   return (ids: string[]) =>

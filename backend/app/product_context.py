@@ -8,7 +8,7 @@ independently verify external facts.**
     deterministic identification -------+
     BIS retrieval ---------------------+--> CANONICAL PRODUCT CONTEXT --> views
     certification journey -------------+                                 --> copilot
-    compliance rule engine ------------+
+    declaration completeness ----------+
     BIS LIMS laboratory snapshot ------+
     hallmark observations -------------+
 
@@ -289,60 +289,48 @@ def _certification_section(journey: dict | None, standard_number: str | None) ->
 
 
 def _inspection_section(analysis: dict | None, *, jewellery: bool) -> Section:
-    """The compliance engine's OWN output, linked. Nothing is recomputed."""
+    """What the deterministic evidence pipeline established, linked. Nothing is
+    recomputed and no legal/compliance verdict is produced here."""
     if analysis is None:
         return Section(INSPECTION, NOT_AVAILABLE,
                        "No package inspection has been run for this product.",
                        provenance=(DETERMINISTIC_RULE_ENGINE,))
 
-    compliance = analysis.get("compliance") or {}
-    label = analysis.get("package_label") or {}
     escalation = analysis.get("escalation") or {}
-    coverage = compliance.get("coverage") or {}
-    checks = compliance.get("checks") or []
-    lm_checks = label.get("checks") or []
+    product = analysis.get("product") or {}
+    completeness = analysis.get("completeness") or {}
 
-    if jewellery and label.get("scope_status") == "NOT_APPLIED":
-        headline = ("Package-label inspection does not apply to this item; "
-                    "Legal Metrology rules were not applied.")
+    if jewellery:
+        headline = ("Package-label declaration checks do not apply to this item; "
+                    "it is evaluated as a hallmark photograph instead.")
         status = NOT_APPLICABLE
     else:
+        established = not escalation.get("required")
         status = AVAILABLE
         headline = (
-            f"The deterministic rule engine concluded {escalation.get('system_result') or 'REVIEW'} "
-            f"(BIS {compliance.get('overall_status')}, Legal Metrology {label.get('overall_status')})."
+            "MetrIQ established the product, standard and declaration evidence for this package from the photos."
+            if established else
+            f"MetrIQ could not establish {len(escalation.get('reasons') or [])} part(s) of the evidence chain "
+            "from the photos; see the open items below."
         )
 
-    def counted(items, result):
-        return [c.get("rule_id") for c in items if c.get("result") == result]
-
     detail = {
-        "system_result": escalation.get("system_result"),
-        "bis_result": compliance.get("overall_status"),
-        "legal_metrology_result": label.get("overall_status"),
-        "legal_metrology_scope": label.get("scope_status"),
-        "coverage_status": compliance.get("coverage_status"),
-        "product_applicability": coverage.get("product_applicability"),
-        "failed_checks": counted(checks, "FAIL") + counted(lm_checks, "FAIL"),
-        "review_checks": counted(checks, "REVIEW") + counted(lm_checks, "REVIEW"),
-        "passed_checks": counted(checks, "PASS") + counted(lm_checks, "PASS"),
-        "checks_with_no_verified_rule": counted(checks, "NOT_SUPPORTED") + counted(lm_checks, "NOT_SUPPORTED"),
-        "officer_review_required": escalation.get("required"),
-        "reason": compliance.get("reason"),
+        "product_applicability": product.get("product_applicability"),
+        "evidence_fully_established": not escalation.get("required"),
+        "open_items": [r.get("code") for r in (escalation.get("reasons") or [])],
     }
-    completeness = analysis.get("completeness") or {}
     if completeness:
         detail["declarations"] = {
             "detected": completeness.get("detected"),
             "uncertain": completeness.get("uncertain"),
             "not_detected": completeness.get("not_detected"),
             "conflicts": completeness.get("conflicts"),
+            "with_verified_requirement": completeness.get("with_verified_requirement"),
         }
     limitations = [
         "'Not detected' means the photographs did not show it. It is never reported as legally missing.",
+        "MetrIQ reports observed evidence and verified knowledge; it does not produce a legal or compliance verdict.",
     ]
-    if coverage.get("explanation"):
-        limitations.append(coverage["explanation"])
     return Section(INSPECTION, status, headline, detail=detail,
                    provenance=(DETERMINISTIC_RULE_ENGINE, OCR_TEXT, DECLARATION),
                    limitations=tuple(limitations))

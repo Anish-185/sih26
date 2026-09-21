@@ -461,7 +461,7 @@ def test_multilingual_still_works() -> None:
 
 
 def test_compliance_is_unaffected() -> None:
-    print("\n[11] laboratory discovery never touches a compliance result")
+    print("\n[11] laboratory discovery never touches the deterministic evidence pipeline")
 
     from app.inspection import InspectionAnalyzer, PackageUpload
 
@@ -476,19 +476,16 @@ def test_compliance_is_unaffected() -> None:
 
     check("the inspection surfaces laboratories", len(a.laboratories) > 0, str(len(a.laboratories)))
     check("an empty registry surfaces none", b.laboratories == [])
-    check("BIS compliance is identical either way",
-          a.compliance.overall_status == b.compliance.overall_status)
-    check("its reason is identical", a.compliance.reason == b.compliance.reason)
-    check("Legal Metrology is identical either way",
-          a.package_label.overall_status == b.package_label.overall_status)
     check("the escalation decision is identical",
           a.escalation.required == b.escalation.required
-          and a.escalation.system_result == b.escalation.system_result)
+          and a.escalation.reasons == b.escalation.reasons)
     check("the product identification is identical",
           a.product.standard_number == b.product.standard_number)
+    check("no compliance verdict exists for laboratories to affect",
+          not hasattr(a, "compliance") and not hasattr(a, "package_label"))
 
-    # The compliance engine must not even be able to see laboratories.
-    for module in ("compliance", "package_label", "escalation", "completeness", "declarations"):
+    # Evidence-only modules must not even be able to see laboratories.
+    for module in ("escalation", "completeness", "declarations"):
         source = (Path(__file__).resolve().parents[1] / "app" / f"{module}.py").read_text()
         check(f"app/{module}.py does not import the laboratory registry",
               "lab_registry" not in source)

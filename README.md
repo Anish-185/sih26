@@ -9,9 +9,9 @@
 ![Python 3.14](https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.11x-009688?logo=fastapi&logoColor=white)
 ![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
-![Local-first](https://img.shields.io/badge/LLM-local%20only%20(LM%20Studio)-111)
-![No cloud APIs](https://img.shields.io/badge/cloud%20APIs-none-4c1)
-![tests](https://img.shields.io/badge/tests-110%20passing-4c1)
+![OCR local](https://img.shields.io/badge/OCR-local%20only%20(ONNX)-111)
+![Grounded explanations](https://img.shields.io/badge/explanations-OpenRouter%20%2B%20LM%20Studio-4c1)
+![tests](https://img.shields.io/badge/tests-304%20passing-4c1)
 
 ![MetrIQ home](docs/images/hero.png)
 
@@ -23,9 +23,20 @@
 
 > **Retrieved BIS information is the source of truth — not the language model.**
 
+```
+PRODUCT → EVIDENCE → OCR / DECLARATIONS / PRODUCT IDENTIFICATION
+        → VERIFIED STANDARD + REQUIREMENT KNOWLEDGE → EVIDENCE GRAPH
+        → OPTIONAL GROUNDED EXPLANATION
+```
+
+Every result is produced by deterministic code. The evidence graph *shows* how it
+was produced; the grounded explanations *explain* it in words. Neither can change
+it, and MetrIQ produces no automatic legal or compliance verdict of its own —
+where the evidence does not settle a point, it says so and shows what it holds.
+
 MetrIQ never invents an Indian Standard number, a clause, a fee, a test, or a
-compliance outcome. When the evidence is not strong enough, it says **`REVIEW`**
-and shows nothing rather than guess. Every screen and every endpoint follows this.
+compliance outcome. When the evidence is not strong enough, it abstains and shows
+nothing rather than guess. Every screen and every endpoint follows this.
 
 ---
 
@@ -46,8 +57,8 @@ flowchart LR
     OCR --> DECL[Declaration extraction<br/>deterministic regex + keywords]
     DECL --> CLS[Product identification<br/>BIS knowledge base + retrieval engine]
     CLS --> STD[Standard candidates<br/>verified records + Why this result]
-    STD --> LM[Compliance check<br/>verified requirements · PASS / FAIL / REVIEW]
-    LM --> RPT[Officer review & report]
+    STD --> LM[Requirement knowledge<br/>verified BIS / Legal Metrology text, never a check]
+    LM --> RPT[Evidence graph & report]
 
     style RPT stroke-dasharray: 4 4
 ```
@@ -58,94 +69,85 @@ BOTTOM / UNKNOWN). Each photo is OCR'd separately and every value keeps the phot
 OCR region it came from; a photo that cannot be read is reported as failed, and sides
 that were not photographed are reported as not uploaded — never as missing.
 `POST /inspection/ocr` returns the OCR regions and declarations only.
-Every compliance check explains itself deterministically — the exact rule condition, the
-observed value, a reason code, the package evidence (photo → OCR region) and the verified
-BIS requirement it comes from — and `completeness` lists each declaration as detected,
-uncertain or not detected in the uploaded photos (never "legally missing").
-`POST /inspection/analyze` (multipart, field `image`) runs everything through the
-compliance check. A standard match is retrieval evidence, not a compliance or
-certification decision. Compliance applies only requirements quoted from verified
-knowledge records (`data/inspection_requirements.json`) with deterministic rules; when
-requirements or package evidence are missing the result is `REVIEW`, never a guess.
+`completeness` lists each declaration as detected, uncertain or not detected in the uploaded photos
+(never "legally missing"), and names the verified requirement that covers it when one exists — MetrIQ
+produces no automatic compliance verdict, so this is reported as **knowledge**, never a check result.
+`POST /inspection/analyze` (multipart, field `image`) runs OCR → declarations → product identification
+→ verified standard retrieval → requirement knowledge → completeness. A standard match is retrieval
+evidence, not a compliance or certification decision. Requirement text is quoted word for word from
+verified knowledge records (`data/inspection_requirements.json`); MetrIQ never runs a rule over it.
 
-### Escalation — officer review is the final step
+### Resolution — could MetrIQ establish everything from the photos?
 
 ```
-image → OCR → declarations → product → BIS + Legal Metrology evidence → deterministic rules
-      → SYSTEM RESULT (PASS / FAIL / REVIEW)
-      → can the system confidently resolve this case?
-            yes → final system result            (officer_status NOT_REQUIRED, never queued)
-            no  → officer review queue → officer decision → final record
+image → OCR → declarations → product → BIS + Legal Metrology evidence
+      → could MetrIQ establish every part of the evidence chain?
+            yes → nothing further is outstanding
+            no  → MetrIQ states every point it could not establish, and why
 ```
 
 `app/escalation.py` decides this deterministically from the finished analysis — no model, and it
-changes no result. Every inspection that cannot be resolved lists why, each reason with its
-evidence system and the OCR regions / checks behind it: pipeline error, unreadable photos, low
-image quality, product not identified, several plausible products or standards, product not
-confirmed, no verified BIS standard, hallmark / HUID information (MetrIQ never verifies a HUID),
-conflicting declarations (including across sides), uncertain OCR evidence, evidence not found,
-requirements not checkable from an image, a Legal Metrology scope exclusion, and a REVIEW result.
-Requirement areas that cannot be checked block a PASS (they could overturn it) but not a FAIL that
-clear evidence established; every other reason always escalates. With today's verified data every
-real inspection escalates — no standard has every requirement checkable — and that is shown, not
-hidden.
+changes no result and produces no legal or compliance verdict. Every inspection that could not be
+fully established lists why, each reason with its evidence system and the OCR regions behind it:
+pipeline error, unreadable photos, low image quality, product not identified, several plausible
+products or standards, product not confirmed, no verified BIS standard, hallmark / HUID information
+(MetrIQ never verifies a HUID), conflicting declarations (including across sides), and uncertain OCR
+evidence. With today's verified data most real inspections leave at least one point unestablished —
+and that is shown, not hidden. MetrIQ never converts an unestablished point into a verdict.
 
 ### Hallmark / HUID evidence — observed, never authenticated
 
 The Hallmarking page can inspect a hallmark photo (a **hallmark inspection**): OCR → hallmark evidence
-(`app/hallmark.py`) → escalation → officer review → report. MetrIQ extracts a *potential* HUID (a labelled
+(`app/hallmark.py`) → resolution → report. MetrIQ extracts a *potential* HUID (a labelled
 six-character alphanumeric code), the purity / fineness mark and any "BIS" text, each linked to its OCR region,
 and runs only checks the verified BIS Hallmarking FAQ supports: a HUID is readable (observed, not verified),
 the purity mark is a permitted grade (IS 1417 gold / IS 2112 silver), the BIS logo (not supported — a graphic),
 and HUID authenticity (not supported — external authoritative verification required, e.g. BIS Care App).
 `verification_status` is `NOT_VERIFIED` or `NOT_DETECTED`; there is no VERIFIED state, no check can FAIL, and
-the hallmark result is always REVIEW, so hallmark inspections go to an officer. Low-confidence, multiple or
+the hallmark result is always REVIEW, and the article is reported as needing external authoritative
+verification. Low-confidence, multiple or
 unlabelled HUID candidates are never selected. Printed text such as "HUID VERIFIED" is recorded as an
 untrusted claim and changes nothing. Legal Metrology package-label rules are not applied to a hallmark
 inspection. An optional HUID reference field only compares text with what OCR read.
 
-### Officer review and inspection history
+### Saved inspections and history
 
-**Save for officer review** sends the same photos to `POST /inspections`: the backend runs
+**Save inspection** sends the same photos to `POST /inspections`: the backend runs
 its own analysis and stores it in PostgreSQL with the photos, so a saved result can never
-come from the browser. Every saved inspection keeps two things apart:
+come from the browser. A saved record is immutable — MetrIQ records what its deterministic
+pipeline established, and nothing else can overwrite it:
 
 | | Written by | Changes later? |
 |---|---|---|
-| **System result** — BIS result, Legal Metrology result, combined `system_result`, reasons, full analysis (declarations, OCR regions, checks, evidence, sources) | the deterministic pipeline, once | never — a database trigger rejects any update |
-| **Escalation** — `escalation_required`, `escalation_reasons` | the escalation assessment, once | never |
-| **Officer review** — `officer_status`, `officer_decision`, `officer_result` (override only), `officer_note`, review timestamps | the officer | `NOT_REQUIRED` is final; otherwise once: `PENDING → IN_REVIEW → COMPLETED`, and a completed review is final |
+| **Evidence** — product identification, standards, requirement knowledge, declarations, OCR regions, full analysis | the deterministic pipeline, once | never — a database trigger rejects any update |
+| **Resolution** — `escalation_required`, `escalation_reasons` | the resolution assessment, once | never |
 
-Combined system result: FAIL if BIS or Legal Metrology FAILs, PASS only if both PASS, otherwise
-REVIEW. REVIEW is expected and not hidden: a label can pass every checkable Legal Metrology rule
-while other requirement areas cannot be established from a photo — that is what the officer
-review is for. Decisions: **Accept** the system result, **Override** it (with the officer's result
-and a required note), or **Manual review** (note required).
+MetrIQ produces no combined pass/fail/review verdict. "Not fully established" is expected and not
+hidden: a label can carry every declaration MetrIQ looks for while other requirement areas still
+cannot be confirmed from a photo. MetrIQ says so and lists the evidence; it never turns an
+unestablished point into a pass or a failure.
 
-- **Review** (`/review`) — only escalated inspections (PENDING or IN_REVIEW), with why each was escalated.
-- **History** (`/history`) — every saved inspection: date, product, BIS standard, system result,
-  officer status, final decision. `/history/:id` reopens it with the stored photos, OCR boxes,
-  declarations, BIS and Legal Metrology checks, evidence and the review panel.
+- **History** (`/history`) — every saved inspection: date, product, BIS standard, whether
+  everything was established from the photos, and what was not. `/history/:id` reopens it with the
+  stored photos, OCR boxes, declarations, requirement knowledge and the evidence graph.
 - **Report** — "View report" on a saved inspection opens a PDF built from the stored record (ReportLab,
   bundled Noto Sans fonts): summary, stored photos with OCR boxes, OCR evidence, declarations with their
-  stored statuses, BIS standard evidence (or an explicit "no verified standard"), Legal Metrology
-  requirements (checkable vs not checkable), compliance results from the deterministic rules, the
-  automated system result with escalation reasons, officer review, a final outcome that keeps the system
-  result and the officer's decision side by side, and only the sources stored with the evidence. No officer
-  identity is shown (there are no officer accounts).
-- **Dashboard** — counts from the database, with system results (PASS / FAIL / REVIEW) and officer
-  review states (pending / in review / completed) shown separately.
+  stored statuses, BIS standard evidence (or an explicit "no verified standard"), Legal Metrology and BIS
+  requirement knowledge (quoted verified text, never a check table), and what MetrIQ could establish from
+  the evidence, with only the sources stored with the evidence. Every statement in it is the deterministic
+  system's own; nothing is recomputed.
+- **Dashboard** — counts from the database: total saved inspections, how many were fully resolved by
+  MetrIQ from the photos, and how many still need further verification.
 
 | Endpoint | |
 |---|---|
 | `POST /inspections` | multipart photos (`image` or `images` + `sides`), optional `inspection_type` `PACKAGE` / `HALLMARK`; other fields → 422 |
-| `GET /inspections` | newest first; `?officer_status=PENDING&officer_status=IN_REVIEW` |
+| `GET /inspections` | newest first; `?escalated=true` / `false` filters on the resolution |
 | `GET /inspections/stats` | database counts |
 | `GET /inspections/{id}` · `GET /inspections/{id}/images/{index}` | saved record · stored photo |
 | `GET /inspections/{id}/report.pdf` | evidence-backed PDF report of the saved record — read-only, nothing recomputed, no model |
-| `POST /inspections/{id}/review` | `{"action":"START"}` or `{"action":"COMPLETE","decision":…,"officer_result":…,"note":…}`; unknown fields (e.g. `system_result`) → 422, wrong state or not escalated → 409, unknown id → 404, database down → 503 |
 
-### What the officer sees
+### What the inspection shows
 
 <table>
 <tr>
@@ -207,15 +209,15 @@ product**, each with a "Why this result?" built from real matching signals.
 </tr>
 </table>
 
-| Endpoint | What it does | Local model? |
+| Endpoint | What it does | Grounded model |
 |---|---|---|
 | `GET /health` | liveness | — |
 | `GET`/`POST /search` | deterministic lexical retrieval over the BIS knowledge base | no |
 | `POST /product-standard` | Product → candidate Indian Standard + deterministic "Why this result?" | no |
-| `POST /inspection/analyze` | image → OCR → declarations → product → verified Indian Standard | only if rules miss |
-| `POST /ask` | grounded BIS Q&A, in English / Hindi / Telugu | yes |
-| `POST /certification-guidance` | certification journey (deterministic) + grounded explanation (`explain=false` skips the model) | optional |
-| `POST /laboratory-search` | testing laboratories for a standard or product (`explain=false` skips the model) | optional |
+| `POST /inspection/analyze` | image → OCR → declarations → product → verified Indian Standard | LM Studio, only if rules miss |
+| `POST /ask` | grounded BIS Q&A, in English / Hindi / Telugu — also serves Hallmarking, which has no dedicated endpoint | OpenRouter, always |
+| `POST /certification-guidance` | certification journey (deterministic) + grounded explanation (`explain=false` skips the model) | OpenRouter, optional |
+| `POST /laboratory-search` | testing laboratories for a standard or product (`explain=false` skips the model) | LM Studio, optional |
 
 ### Hallmarking & HUID
 
@@ -305,8 +307,8 @@ called; the model never decides which laboratories are relevant.
 
 Laboratory discovery is **informational**. A saved inspection shows the
 laboratories listed for its identified standard, and the PDF report has a
-"Relevant testing laboratories" section — neither affects PASS / FAIL / REVIEW,
-and neither implies any laboratory tested the item.
+"Relevant testing laboratories" section — neither is a compliance verdict of any
+kind, and neither implies any laboratory tested the item.
 
 Multilingual (Milestone 17) works unchanged: Hindi and Telugu laboratory
 questions reach the same standard and the same laboratories as the English one.
@@ -352,7 +354,7 @@ user's language beside the original, never instead of it.
 
 **Limits carry across languages unchanged.** If retrieval finds nothing, the
 assistant abstains in the user's language — it never invents a standard to fill
-the gap. Certification journeys, compliance results, OCR text and declarations
+the gap. Certification journeys, requirement knowledge, OCR text and declarations
 stay canonical: OCR output is raw evidence and is never translated, and product
 identification, the vision path and the inspection pipeline are untouched by
 this layer.
@@ -387,9 +389,11 @@ product, manufacturer or licence is certified, and never a legal determination.
 MetrIQ states no fee amount, processing time, required document or testing
 requirement: those live only in the BIS documents it links to.
 
-The grounded endpoints call a **local** [LM Studio](https://lmstudio.ai) server.
-If it is offline, the deterministic endpoints keep working fully and the grounded
-ones return a clear `503` — never a fabricated answer.
+The grounded explanation (`explain=true`) calls OpenRouter, pinned to its own
+`OPENROUTER_GROUNDED_MODEL` (see "MetrIQ Copilot" below) — not LM Studio. If
+OpenRouter is unconfigured or down, the deterministic journey keeps working
+fully and the grounded explanation returns a clear `503` — never a fabricated
+answer.
 
 ---
 
@@ -403,18 +407,22 @@ backend/                      Python 3.14 · FastAPI
     inspection_api.py         POST /inspection/ocr, POST /inspection/analyze
     declarations.py           deterministic declarations (DETECTED / UNCERTAIN / NOT_DETECTED)
     product_identification.py product + standard candidates over the knowledge base
-    requirements.py           verified inspection requirements: load, validate, coverage
-    compliance.py             deterministic compliance engine (PASS / FAIL / REVIEW) + generic declaration rules
-    package_label.py          Legal Metrology package-label requirements (separate result from BIS)
-    pipeline.py               OCR → declarations → product → standards → BIS compliance + package label
-    db.py, records.py         PostgreSQL session; saved inspections + officer review (SQLAlchemy)
-    records_api.py            /inspections: save, list, stats, detail, stored photos, review
+    requirements.py           verified inspection requirements: load, validate, coverage (knowledge only —
+                              no compliance engine; MetrIQ produces no PASS/FAIL/REVIEW verdict)
+    pipeline.py               OCR → declarations → product → standards → completeness
+    db.py, records.py         PostgreSQL session; saved inspections (SQLAlchemy)
+    records_api.py            /inspections: save, list, stats, detail, stored photos, PDF report
+    escalation.py             could the photos establish every applicable requirement? (deterministic)
+    evidence_graph.py         projects existing evidence onto nodes/edges — explains, never decides
+    graph_api.py              POST /evidence-graph (read-only)
   migrations/                 Alembic schema migrations (alembic.ini in backend/)
     retrieval/                deterministic lexical search (text.py, engine.py)
     rag.py                    grounded Q&A (/ask)
     product.py                Product → Standard + "Why this result?"
     certification.py, laboratory.py
-    llm.py                    local LM Studio adapter (OpenAI-compatible)
+    llm.py                    local LM Studio adapter (OpenAI-compatible) — used by inspection's
+                              product-identification fallback and Laboratory search only
+    openrouter.py             OpenRouter provider — /ask, Certification and the copilot
     api.py / main.py          router / app
   tests/                      plain-Python runners, bridged to pytest
 data/
@@ -447,7 +455,7 @@ uvicorn app.main:app --reload            # http://127.0.0.1:8000
 
 ### Inspection database — PostgreSQL
 
-Saved inspections and officer reviews need a local PostgreSQL (everything else runs without it;
+Saved inspections need a local PostgreSQL (everything else runs without it;
 the `/inspections` endpoints return 503 until it is available). On Arch Linux:
 
 ```bash
@@ -472,10 +480,15 @@ npm install
 npm run dev                              # http://localhost:5173  (proxies /api → :8000)
 ```
 
-### Local model (for the grounded endpoints)
+### Local model (inspection fallback + Laboratory search only)
 
-Load a small instruction model in [LM Studio](https://lmstudio.ai) (default
-`qwen/qwen3-4b`) and start its server on port `1234`. On a laptop, load it with
+`/ask`, Certification and the copilot are grounded through OpenRouter (see
+"MetrIQ Copilot" below) — LM Studio is **not** required for those. It remains
+in use in exactly two places: the inspection pipeline's product-identification
+fallback, and Laboratory search's optional `explain=true` path. Load a small
+instruction model in [LM Studio](https://lmstudio.ai) (default `qwen/qwen3-4b`)
+and start its server on port `1234` only if you want those two paths grounded;
+everything else in this Quickstart works without it. On a laptop, load it with
 `--parallel 1`. Override with env vars if needed:
 
 ```bash
@@ -503,7 +516,7 @@ OCR / declarations / vision ---+
 deterministic identification --+
 BIS retrieval -----------------+--> CANONICAL PRODUCT CONTEXT --> panel · copilot
 certification journey ---------+
-compliance rule engine --------+
+requirement knowledge ---------+
 BIS LIMS laboratory snapshot --+
 hallmark observations ---------+
 ```
@@ -544,6 +557,86 @@ inspections need no migration, and records saved before this milestone simply
 have no context.
 
 
+
+### Evidence graph — how MetrIQ arrived at this result
+
+**The MetrIQ evidence graph visualizes relationships already established by the
+deterministic evidence pipeline. It does not independently infer standards,
+compliance, authenticity, laboratory validity, or certification applicability.**
+
+It is a projection, not a reasoning engine: `app/evidence_graph.py` reads a
+finished analysis (or a finished product context) and turns the relationships
+those systems already recorded into nodes and edges. It calls no model, runs no
+retrieval, evaluates no rule, and nothing downstream reads it — deleting it
+changes no result. No graph database.
+
+```
+OCR region / visual observation --OBSERVED_IN-->  declaration
+product           --IDENTIFIED_FROM-->            declaration · OCR region
+product           --MATCHED_TO-->                 verified Indian Standard
+standard          --SOURCED_FROM-->               verified BIS record
+standard          --RELATED_TO-->                 certification route · laboratory listing
+standard          --REQUIRES-->                   verified requirement (knowledge, never a check)
+hallmark / HUID observation --SUPPORTED_BY-->     the evidence it read
+```
+
+**11 node types** — `PRODUCT`, `OCR_EVIDENCE`, `DECLARATION`, `VISION_OBSERVATION`,
+`STANDARD`, `CERTIFICATION`, `REQUIREMENT`, `LABORATORY`, `HALLMARK_OBSERVATION`,
+`HUID_OBSERVATION`, `SOURCE` — and **8 edge types**, each edge carrying a
+deterministic explanation taken from the evidence itself (the product → standard
+edge quotes the existing "Why this result?", not a new one). There is no `RULE`
+or `SYSTEM_RESULT` node and no `CHECKED_BY` or `RESULTED_IN` edge — that
+vocabulary was the compliance-verdict projection, removed along with the engine
+that used to produce it. Every node names the system that produced it and
+carries the limitations that belong to it.
+
+What the graph will not do:
+
+- **no verdict of its own, and no verdict vocabulary at all.** `REQUIREMENT`
+  nodes are verified knowledge — what a standard specifies — never a check
+  result. Hallmark observations project directly, with no rule wrapper.
+- **no inferred certification route.** No verified route → an explicit
+  `NOT_AVAILABLE` node with its own message.
+- **no laboratory status.** Validity is only `VALID_AT_SNAPSHOT` /
+  `EXPIRED_AT_SNAPSHOT` / `NOT_STATED`, ordering is alphabetical, and
+  accreditation, NABL status, current scope, availability and contacts are absent
+  because the snapshot does not hold them.
+- **no authentication.** A hallmark or HUID is an *observation* node; HUID
+  authenticity is permanently `NOT_SUPPORTED`; an uncertain purity stays
+  uncertain; the BIS logo can never be confirmed from OCR; a label that prints
+  "HUID VERIFIED" is kept as untrusted OCR evidence.
+- **no invented product.** On the text-query path the graph begins
+  `PRODUCT → NOT_IDENTIFIED` and says a typed description is not evidence about a
+  physical item — then shows the verified standard that was actually retrieved.
+- **only this case.** Never the whole knowledge base, laboratory snapshot or
+  inspection history.
+
+```http
+POST /evidence-graph     exactly one of:
+                           {"inspection_id": "INS-…"}     server-derived from the stored analysis
+                           {"analysis": {...}}            the analysis on screen, as /inspection/analyze made it
+                           {"product_context": {...}}     as POST /product-context returned it
+```
+
+The two client-echoed forms are the same trust model the copilot's live path has
+always had, and no more: the response models *are* the whitelist, the request
+carries no node, edge, label or status field at all, and a node smuggled inside an
+analysis never reaches the graph. Anything else is a 422. Reading a saved
+inspection is read-only — the session is rolled back and never committed.
+
+**In the UI** (`components/EvidenceGraph.tsx`) the graph is read-only and layered:
+OCR / visual evidence → declarations → product → standard → requirements /
+certification / laboratories / hallmark observations → sources. Click a node for
+its evidence, provenance, source link and its
+relationships with their explanations; click an OCR node and its box lights up on
+the photograph. "Focus on the path" collapses it to the chain, and "what this
+graph does not establish" lists the boundaries. The layers *are* the small-screen
+vertical chain, so there is no canvas and no separate mobile view. It appears in
+the inspection workspace (live and saved) and on the Standards page. The copilot
+can explain it (`EXPLAIN_EVIDENCE_GRAPH`) using only the relationships the graph
+actually holds. The PDF report is unchanged — it already carries the underlying
+evidence sections.
+
 ### MetrIQ Copilot — grounded explanations (optional)
 
 An optional explanation layer. **MetrIQ's copilot explains evidence produced by the
@@ -551,8 +644,9 @@ deterministic system; it does not independently establish standards, compliance,
 laboratory status, certification applicability, or hallmark/HUID authenticity.**
 
 It reads a **finished** result and puts it into plain language: it never retrieves a
-standard, never runs a check and never decides PASS / FAIL / REVIEW — the
-deterministic result is shown beside every answer and comes from the record. With no
+standard and never states a compliance verdict — MetrIQ produces none, so any
+PASS/FAIL/REVIEW or "compliant" claim in a generated answer is withheld as
+fabricated by definition, not weighed against a stored result. With no
 key configured, everything else works exactly as before; only the explanation is
 unavailable.
 
@@ -561,18 +655,20 @@ sends the whole knowledge base, and only the sections the question needs):
 
 | Page | Context | Example question |
 |---|---|---|
-| Inspection / officer review | the finished inspection | "Why this result?" · "What information is missing?" |
+| Inspection / saved record | the finished inspection | "Why this result?" · "What information is missing?" |
 | Standards | the product → standard retrieval | "Why was this standard retrieved?" |
 | Certification | the retrieved certification journey | "Explain these certification steps" |
 | Laboratories | the BIS LIMS snapshot lookup | "Why were these laboratories returned?" |
 | Standards (product intelligence) | the canonical product context | "Summarise everything MetrIQ found" |
 
-Four evidence states are kept apart and are never collapsed into "missing":
+Five evidence states are kept apart and are never collapsed into "missing":
 `NOT_DETECTED` (the photographs did not show it — not a statement that it is legally
 missing), `UNCERTAIN` (found but unreadable; the value is withheld on purpose),
-`UNSUPPORTED` (MetrIQ has no verified deterministic rule for it — not a pass and not
-a failure) and `NOT_AVAILABLE_IN_KNOWLEDGE_BASE` (a statement about MetrIQ's
-coverage, never about what exists).
+`VERIFIED_REQUIREMENT` (a verified requirement mentions this field — a link to
+knowledge, not a pass or a failure), `NOT_ESTABLISHED` (MetrIQ holds no verified
+requirement linking this field — not a statement that nothing is required) and
+`NOT_AVAILABLE_IN_KNOWLEDGE_BASE` (a statement about MetrIQ's coverage, never
+about what exists).
 
 **Answers follow the user's language** (English / Hindi / Telugu, the Milestone 17
 selection). The *evidence* is never translated: standard numbers, rule ids, record
@@ -585,13 +681,18 @@ OpenRouter — there is deliberately no `VITE_` variable for it.
 # backend/.env  (gitignored — never commit it, never put it in the frontend)
 OPENROUTER_API_KEY=sk-or-v1-...
 OPENROUTER_MODEL=inclusionai/ling-3.0-flash-vl:free
+
+# /ask (also serves Hallmarking) and Certification's explain=true path — the
+# same key, but a model pinned INDEPENDENTLY of OPENROUTER_MODEL above, so the
+# two never silently move together:
+OPENROUTER_GROUNDED_MODEL=inclusionai/ling-3.0-flash-vl:free
 ```
 
 The model id is configuration, not code — any OpenRouter chat model works.
-`inclusionai/ling-3.0-flash-vl:free` is the default and is verified end to end
-(2026-09-20). The previous default, `deepseek/deepseek-v4-flash-0731:free`, is no
-longer served by OpenRouter and returns HTTP 404; if you see that, set
-`OPENROUTER_MODEL` to a model the provider currently lists.
+`inclusionai/ling-3.0-flash-vl:free` is the default for both and is verified end
+to end (2026-09-20). The previous copilot default, `deepseek/deepseek-v4-flash-0731:free`,
+is no longer served by OpenRouter and returns HTTP 404; if you see that, set
+`OPENROUTER_MODEL` (or `OPENROUTER_GROUNDED_MODEL`) to a model the provider currently lists.
 If a free model starts returning HTTP 429, check
 `curl https://openrouter.ai/api/v1/key -H "Authorization: Bearer $OPENROUTER_API_KEY"`
 before assuming your allowance is spent — a provider's shared free pool can refuse
@@ -608,8 +709,8 @@ does not consume the day's allowance.
 
 A request is sent only when you press a question — never on page load, never in the
 background, never from the pipeline. One user action is one model call; language
-detection, retrieval, compliance and every explanation MetrIQ writes itself stay
-deterministic. Automated tests stub the provider, so running the suite costs nothing.
+detection, retrieval and every explanation MetrIQ writes itself stay deterministic.
+Automated tests stub the provider, so running the suite costs nothing.
 
 **What MetrIQ withholds.** After the model replies, MetrIQ re-reads the generated
 text deterministically and replaces it with its own sentence (in the user's
@@ -617,14 +718,16 @@ language) when the text:
 
 - cites an Indian Standard number, a HUID or a URL that is not in the context;
 - claims a hallmark, HUID or item was authenticated;
-- states an overall result other than the deterministic one;
+- states or implies any compliance verdict at all — a PASS/FAIL/REVIEW, or that an
+  item "is compliant"/"is non-compliant" — since MetrIQ produces none, any such
+  claim is fabricated by definition;
 - claims a laboratory is accredited, currently valid, operational or available, or
   ranks one as best / nearest / recommended — a BIS LIMS record is a **dated
   snapshot** (retrieved 2026-09-19), and it establishes only that the laboratory was
   listed against that standard on that date;
 - states a fee or amount that is not in the evidence.
 
-The deterministic result, the evidence, the sources and the officer workflow are
+The underlying evidence and the sources are
 unaffected either way. If the provider times out, is rate-limited, is unconfigured
 or returns unusable output, the endpoint returns 429 / 503 with a short sentence —
 no provider URL, no key, no raw exception — and every MetrIQ result stays exactly as
@@ -648,13 +751,16 @@ candidate with which one applies:
 
 | Status | What MetrIQ can do | Count |
 |---|---|---:|
-| `INSPECTION_SUPPORTED` | identify, explain **and** run deterministic image checks | 2 |
-| `STANDARD_ONLY` | identify and explain from official evidence; no image-checkable rule | 91 |
+| `INSPECTION_SUPPORTED` | identify, explain **and** report image-observable requirement knowledge for it | 2 |
+| `STANDARD_ONLY` | identify and explain from official evidence; no image-observable requirement data | 91 |
 | `UNSUPPORTED` | outside package-label inspection (jewellery hallmarking) | 4 |
 
-A larger knowledge base did **not** create rules: requirements stay at 15 (7
-checkable) and deterministic rules at 7. A standard is only inspection-supported
-when official, image-observable requirement evidence exists.
+A larger knowledge base did **not** grow this: requirements stay at 15 (7 classified
+as image-observable in principle) and the requirement data still specifies 7 rule
+types — but there is no compliance engine left to execute them. These are counts of
+what the verified data is annotated with, not of checks that run; MetrIQ reports
+that annotation as knowledge, never as a check result. A standard is only
+inspection-supported when official, image-observable requirement evidence exists.
 
 ```bash
 cd backend
@@ -681,7 +787,7 @@ equal, and the code enforces that rather than trusting the model:
 | Produces | text, boxes, confidence, declarations | a product impression |
 | May report MRP, quantity, IS number, licence, HUID | yes | **never** — deleted before the app sees it |
 | May name a BIS standard | via deterministic retrieval | **never** — it only supplies a product clue |
-| May decide compliance | no (rules do) | **never** |
+| May decide compliance | **never** — MetrIQ produces no compliance verdict | **never** |
 
 Its key is deliberately **separate** from the copilot's, so the two quotas and
 outages are independent:
@@ -704,7 +810,7 @@ into a prompt:
 |---|---|---|
 | names the product | agrees | identified; agreement stated, **confidence unchanged** |
 | names the product | disagrees | **REVIEW** — the conflict is quoted, MetrIQ does not choose |
-| unreadable | names a product | **REVIEW** — needs officer confirmation against the label |
+| unreadable | names a product | **REVIEW** — needs manual confirmation against the label |
 | names the product | unavailable / not configured | unchanged, OCR only |
 
 Without a key, MetrIQ behaves exactly as it did before this feature existed.
@@ -725,7 +831,8 @@ npm run build                                   # production build
 
 Backend suites are plain-Python runners (each exits non-zero on failure);
 `tests/test_plain_runners.py` runs them all under pytest, so `pytest -q` is an
-authoritative gate. Model-dependent tests use a stub — no LM Studio needed.
+authoritative gate. Model-dependent tests use a stub — no LM Studio or
+OpenRouter call is made and no quota is spent. 304 tests pass.
 
 ---
 
@@ -733,13 +840,13 @@ authoritative gate. Model-dependent tests use a stub — no LM Studio needed.
 
 Phases 1–14 are complete (see [`CLAUDE.md`](CLAUDE.md) for the full log). What remains:
 
-- [x] **Compliance engine** — deterministic PASS / FAIL / REVIEW over verified requirements (currently 2 of 97 standards have checkable requirements; everything else is `STANDARD_ONLY` → REVIEW)
-- [x] **Legal Metrology package-label requirements** — 11 requirements from the Legal Metrology (Packaged Commodities) Rules, 2011 and amendments (official Department of Consumer Affairs PDFs); 6 are checked deterministically (MRP, net quantity, manufacturer name + address, commodity name, month and year of manufacture, consumer-care phone + e-mail), 5 cannot be checked from a photo. Reported separately from BIS compliance.
-- [x] **Hallmark / HUID evidence** — potential HUID and purity extraction, observed vs not verified, officer escalation, report section
-- [ ] **Requirement coverage** — more verified BIS requirements (still 1 checkable BIS rule)
-- [x] **Officer review & inspection history** — saved inspections in PostgreSQL, immutable system result, officer accept / override / manual review with notes, real History, Review queue and Dashboard
-- [x] **Escalation** — deterministic resolve-or-escalate decision with evidence-linked reasons; officer review only for cases the system cannot resolve
+- [x] **Requirement knowledge** — verified BIS and Legal Metrology package-label requirements (quoted word for word, source-linked); the deterministic PASS/FAIL/REVIEW compliance engine that used to run them was removed in the final hardening pass, so this is reported as knowledge, never a check result
+- [x] **Hallmark / HUID evidence** — potential HUID and purity extraction, observed vs not verified, external verification required, report section
+- [ ] **Requirement coverage** — more verified BIS requirements
+- [x] **Saved inspections & history** — saved inspections in PostgreSQL, immutable evidence, real History and Dashboard
+- [x] **Resolution** — deterministic decision on whether the photos established the evidence chain, with evidence-linked reasons for every point they did not, never a legal or compliance verdict
 - [x] **Inspection report** — evidence-backed PDF audit trail of any saved inspection
+- [x] **Evidence graph** — every relationship the deterministic pipeline established, as a read-only graph: product ← OCR / declarations / visual observation, product → standard → requirement, plus certification route, laboratory listings and hallmark observations, each with its provenance and its verified source
 
 ---
 

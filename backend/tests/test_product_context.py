@@ -168,22 +168,21 @@ def test_product_to_certification_connection() -> None:
 
 
 def test_product_to_inspection_connection() -> None:
-    print("\nD. an inspected product reaches its compliance evidence")
+    print("\nD. an inspected product reaches its evidence, no compliance verdict")
     inspection = WATER.section(pc.INSPECTION)
-    check("the inspection is AVAILABLE", inspection.status == pc.AVAILABLE)
-    check("the system result is the rule engine's own",
-          inspection.detail.get("system_result") == WATER_ANALYSIS["escalation"]["system_result"])
-    check("the BIS and Legal Metrology results are reported separately",
-          inspection.detail.get("bis_result") == WATER_ANALYSIS["compliance"]["overall_status"]
-          and inspection.detail.get("legal_metrology_result")
-          == WATER_ANALYSIS["package_label"]["overall_status"])
-    for key in ("failed_checks", "review_checks", "passed_checks", "checks_with_no_verified_rule"):
-        check(f"{key} is a list of rule ids from the record", isinstance(inspection.detail.get(key), list))
-    check("checks with no verified rule are named, never shown as passes",
-          all(rid not in (inspection.detail.get("passed_checks") or [])
-              for rid in inspection.detail.get("checks_with_no_verified_rule") or []))
+    check("the inspection is AVAILABLE or NOT_APPLICABLE, never a verdict",
+          inspection.status in (pc.AVAILABLE, pc.NOT_APPLICABLE))
+    check("whether the evidence chain was fully established is reported",
+          inspection.detail.get("evidence_fully_established") == (not WATER_ANALYSIS["escalation"]["required"]))
+    check("open items are named, from the record's own escalation reasons",
+          inspection.detail.get("open_items") == [r["code"] for r in WATER_ANALYSIS["escalation"]["reasons"]])
+    check("no compliance-verdict keys leak into the context",
+          not {"system_result", "bis_result", "legal_metrology_result", "failed_checks",
+               "review_checks", "passed_checks", "checks_with_no_verified_rule"} & set(inspection.detail))
     check("'not detected' is explained as a fact about the photographs",
           any("never reported as legally missing" in x for x in inspection.limitations))
+    check("MetrIQ states plainly it produces no legal/compliance verdict",
+          any("does not produce a legal or compliance verdict" in x for x in inspection.limitations))
     check("provenance names the rule engine", pc.DETERMINISTIC_RULE_ENGINE in inspection.provenance)
 
     check("a product that has not been inspected says exactly that",
@@ -410,8 +409,8 @@ def test_client_payload_is_whitelisted() -> None:
     check("a product context can be explained", res.status_code == 200, res.text[:200])
     check("an unexpected top-level field never reaches the model",
           "unexpected_top_level" not in provider.calls[0]["user"])
-    check("the response says there is no system result to protect here",
-          res.json()["system_result"] is None and res.json()["context_type"] == "PRODUCT")
+    check("the response says there is no escalation state to protect here",
+          res.json()["escalation_required"] is None and res.json()["context_type"] == "PRODUCT")
 
     bad = CLIENT.post("/copilot/explain", json={
         "capability": "EXPLAIN_PRODUCT_CONTEXT",

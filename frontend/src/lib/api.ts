@@ -13,7 +13,8 @@
     POST /ask                (grounded BIS Q&A — used by the Hallmarking view)
     POST /inspection/ocr     (Instant OCR — raw evidence only)
     POST /inspection/analyze (Smart Inspection — OCR + downstream pipeline)
-    /inspections             (saved inspections + officer review; backend computes every result)
+    /inspections             (saved inspections; the backend computes every result)
+    /evidence-graph          (relationships the deterministic pipeline already established)
     /copilot/status          (is the grounded explanation layer configured? — never a key)
     /copilot/explain         (an explanation of one finished inspection; it never changes a result)
 
@@ -358,7 +359,7 @@ export interface AskResponse {
 
 /* ---- inspection: IMAGE -> OCR (/inspection/ocr) -> pipeline (/analyze) --- */
 
-/** Package sides a photo can show. UNKNOWN when the officer did not say. */
+/** Package sides a photo can show. UNKNOWN when the user did not say. */
 export const PACKAGE_SIDES = ["FRONT", "BACK", "LEFT", "RIGHT", "TOP", "BOTTOM", "UNKNOWN"] as const;
 export type PackageSide = (typeof PACKAGE_SIDES)[number];
 
@@ -496,6 +497,16 @@ export interface ProductIdentification {
   signals: FusionSignals;
   vision_status: "OK" | "UNAVAILABLE" | "NOT_RUN";
   unverified_standard_numbers: string[];
+  /** Which of MetrIQ's modelled requirement-data products this package is, under the
+   *  identified standard — a pure requirements-lookup, never a rule verdict. */
+  product_applicability:
+    | "PRODUCT_CONFIRMED"
+    | "PRODUCT_NOT_MODELLED"
+    | "PRODUCT_NOT_CONFIRMED"
+    | "PRODUCT_AMBIGUOUS"
+    | null;
+  modelled_product_id: string | null;
+  modelled_product_category: string | null;
   notes: string[];
 }
 
@@ -505,146 +516,6 @@ export interface StandardCandidate extends ProductStandardResult {
   tier: "product" | "alias" | "category" | "standard_number";
   printed_on_label: boolean;
   evidence: ProductEvidence[];
-}
-
-/** Package evidence behind a compliance check: declaration -> OCR regions. */
-export interface CheckEvidence {
-  declaration_field: string;
-  declaration_status: string;
-  value: string | null;
-  raw_text: string;
-  source_regions: string[];
-  image_id: string | null;
-  ocr_confidence: number | null;
-  bbox: [number, number, number, number] | null;
-  source_images: string[];
-  source_sides: PackageSide[];
-}
-
-/** The verified knowledge record a requirement quotes — BIS or Legal Metrology. */
-export interface RequirementSource {
-  knowledge_id: string;
-  title: string;
-  quote: string; // word for word from the verified record
-  source_url: string | null;
-  document_name: string | null;
-  reference: string | null;
-  verification_status: string;
-  last_verified: string | null;
-  source_authority: SourceAuthority;
-  source_organization: string | null;
-}
-
-/** Which authority a requirement comes from. The two are never merged. */
-export type SourceAuthority = "BIS" | "LEGAL_METROLOGY";
-
-export type CheckResult = "PASS" | "FAIL" | "REVIEW" | "NOT_SUPPORTED" | "NOT_APPLICABLE";
-
-export interface ComplianceCheck {
-  rule_id: string;
-  requirement: string;
-  rule_type: string;
-  standard_number: string | null; // null for Legal Metrology package-label requirements
-  result: CheckResult;
-  reason_code: string; // machine-readable
-  reason: string; // deterministic, produced by the rule
-  reason_category:
-    | "REQUIREMENT_SATISFIED"
-    | "REQUIREMENT_NOT_SATISFIED"
-    | "EVIDENCE_NOT_DETECTED"
-    | "EVIDENCE_NOT_DETERMINABLE"
-    | "CONFLICTING_EVIDENCE"
-    | "INSUFFICIENT_EVIDENCE"
-    | "NOT_SUPPORTED"
-    | "NOT_APPLICABLE";
-  rule_condition: string; // the exact deterministic condition the rule applies
-  observed_value: string | null;
-  expected_condition: string;
-  evidence_status: "SUFFICIENT" | "INSUFFICIENT" | "NOT_DETECTED" | "NOT_APPLICABLE";
-  evidence: CheckEvidence[];
-  source: RequirementSource | null;
-  source_category: SourceAuthority;
-  domain: string;
-  reference: string; // rule / clause, e.g. "Rule 6(1)(e)"
-  applicability: string;
-  supporting_sources: RequirementSource[]; // amendments and related rules, quoted
-}
-
-/** An applicability exclusion read on the package (e.g. "not for retail sale"). */
-export interface ExclusionFinding {
-  id: string;
-  description: string;
-  observed: string;
-  source_regions: string[];
-  sources: RequirementSource[];
-  evidence: CheckEvidence[];
-}
-
-/** Legal Metrology package-label requirements — separate from BIS compliance, never merged. */
-export interface PackageLabelEvaluation {
-  source_category: "LEGAL_METROLOGY";
-  source_authority: string;
-  overall_status: "PASS" | "FAIL" | "REVIEW";
-  reason_code: string;
-  reason: string;
-  scope_status: "IN_SCOPE" | "OUT_OF_SCOPE" | "NO_REQUIREMENT_DATA";
-  scope: string;
-  scope_source: RequirementSource | null;
-  exclusions_found: ExclusionFinding[];
-  assumptions: string[]; // applicability a label cannot show
-  assumption_sources: RequirementSource[];
-  checks: ComplianceCheck[];
-  supported_checks: number;
-  passed: number;
-  failed: number;
-  review: number;
-  not_supported: number;
-  not_applicable: number;
-  policy: string;
-  summary: string[];
-  notes: string[];
-  unreadable_images: string[];
-}
-
-/** What MetrIQ can inspect for this package: product -> standard -> requirements -> rules. */
-export interface InspectionCoverage {
-  supported_checks: number;
-  passed: number;
-  failed: number;
-  review: number;
-  not_supported: number;
-  product_applicability:
-    | "PRODUCT_CONFIRMED"
-    | "PRODUCT_NOT_MODELLED"
-    | "PRODUCT_NOT_CONFIRMED"
-    | "PRODUCT_AMBIGUOUS"
-    | "NO_STANDARD";
-  product_id: string | null;
-  product_name: string | null; // modelled inspection product, when confirmed
-  product_category: string | null;
-  applicability_source: RequirementSource | null; // verified record linking product -> standard
-  verified_requirements: number;
-  deterministic_rules: number;
-  unsupported_requirements: number;
-  not_applied_requirements: string[];
-  explanation: string; // deterministic: why coverage is what it is
-}
-
-/** Deterministic compliance evaluation — never decided by a model. */
-export interface ComplianceEvaluation {
-  overall_status: "PASS" | "FAIL" | "REVIEW";
-  coverage_status: "INSPECTION_SUPPORTED" | "STANDARD_ONLY" | "UNSUPPORTED" | "NO_STANDARD";
-  reason_code: string;
-  reason: string;
-  product_name: string | null;
-  standard_number: string | null;
-  knowledge_id: string | null;
-  coverage: InspectionCoverage;
-  checks: ComplianceCheck[];
-  policy: string;
-  notes: string[];
-  summary: string[]; // deterministic overall explanation, one fact per line
-  unreadable_images: string[];
 }
 
 /** Declaration completeness: what the photos show — never "legally missing". */
@@ -681,9 +552,6 @@ export interface PipelineStages {
   declaration_extraction: string;
   product_identification: string;
   standard_retrieval: string;
-  compliance: string;
-  officer_review: string;
-  package_label: string;
   hallmark: string;
 }
 
@@ -884,16 +752,16 @@ export type InspectionType = "PACKAGE" | "HALLMARK";
 export interface EscalationReason {
   code: string; // e.g. PRODUCT_NOT_IDENTIFIED, CONFLICTING_DECLARATIONS
   label: string;
-  source: "OCR" | "PRODUCT" | "BIS" | "LEGAL_METROLOGY" | "HALLMARKING" | "PIPELINE";
+  source: "OCR" | "PRODUCT" | "HALLMARKING" | "PIPELINE";
   message: string;
   source_regions: string[];
   checks: string[];
 }
 
-/** Can the system confidently resolve this inspection? Deterministic; changes no result. */
+/** Could MetrIQ establish this inspection's evidence chain from the photos?
+ *  Deterministic; never a legal or compliance judgment, and it decides nothing else. */
 export interface Escalation {
-  required: boolean; // true -> officer review queue; false -> the system result is final
-  system_result: "PASS" | "FAIL" | "REVIEW";
+  required: boolean; // true -> MetrIQ could not establish everything from the photos
   reasons: EscalationReason[];
 }
 
@@ -911,8 +779,6 @@ export interface InspectionAnalysis {
   product: ProductIdentification;
   standards: StandardCandidate[]; // ranked, verified knowledge-base records only
   retrieval_note: string;
-  compliance: ComplianceEvaluation; // BIS
-  package_label: PackageLabelEvaluation; // Legal Metrology
   completeness: DeclarationCompleteness;
   pipeline: PipelineStages;
   notes: string[];
@@ -933,12 +799,7 @@ export interface InspectionAnalysis {
 
 /* ------------------------------------------------ saved inspections --- */
 
-export type SystemResult = "PASS" | "FAIL" | "REVIEW";
-/** NOT_REQUIRED: resolved by the system, never queued. PENDING: waiting in the officer queue. */
-export type OfficerStatus = "NOT_REQUIRED" | "PENDING" | "IN_REVIEW" | "COMPLETED";
-export type OfficerDecision = "ACCEPT_SYSTEM_RESULT" | "OVERRIDE" | "MANUAL_REVIEW";
-
-/** One saved inspection in a list. `system_result` is fixed when saved; the officer fields come later. */
+/** One saved inspection in a list. `escalation_required` is fixed when the inspection is saved. */
 export interface InspectionSummary {
   inspection_id: string;
   created_at: string;
@@ -946,39 +807,93 @@ export interface InspectionSummary {
   product_name: string | null;
   product_category: string | null;
   standard_number: string | null;
-  bis_result: SystemResult;
-  legal_metrology_result: SystemResult;
-  system_result: SystemResult; // never changed by a review
   escalation_required: boolean;
   escalation_reasons: EscalationReason[];
-  officer_status: OfficerStatus;
-  officer_decision: OfficerDecision | null;
-  officer_result: SystemResult | null; // only for an OVERRIDE
-  final_result: SystemResult | "MANUAL_REVIEW" | null; // system result if not escalated; null until a review completes
-  review_started_at: string | null;
-  review_completed_at: string | null;
   image_count: number;
   sides: PackageSide[];
 }
 
 export interface InspectionRecord extends InspectionSummary {
-  system_reasons: { source: SourceAuthority | "HALLMARKING"; result: SystemResult; reason_code: string; reason: string }[];
-  officer_note: string | null;
   images: { index: number; image_id: string; side: PackageSide; filename: string; content_type: string; url: string }[];
   analysis: InspectionAnalysis; // the saved deterministic analysis and its evidence
 }
 
 export interface InspectionStats {
   total: number;
-  system: Record<SystemResult, number>;
-  bis: Record<SystemResult, number>;
-  legal_metrology: Record<SystemResult, number>;
-  escalated: number; // sent to the officer queue
-  officer: Record<OfficerStatus, number>;
-  decisions: Record<OfficerDecision, number>;
+  escalated: number; // the deterministic system could not establish the evidence chain from the photos
+  resolved: number; // the deterministic system fully established the evidence chain from the photos
 }
 
 
+
+/* ------------------------------------------------ evidence graph (M22) --- */
+
+/**
+ * Milestone 22. A READ-ONLY projection of relationships MetrIQ's deterministic
+ * pipeline already established. The graph infers nothing: a node or an edge
+ * exists only because a MetrIQ system recorded it.
+ */
+export type GraphNodeType =
+  | "PRODUCT"
+  | "OCR_EVIDENCE"
+  | "DECLARATION"
+  | "VISION_OBSERVATION"
+  | "STANDARD"
+  | "CERTIFICATION"
+  | "REQUIREMENT"
+  | "LABORATORY"
+  | "HALLMARK_OBSERVATION"
+  | "HUID_OBSERVATION"
+  | "SOURCE";
+
+export type GraphEdgeType =
+  | "IDENTIFIED_FROM"
+  | "SUPPORTED_BY"
+  | "MATCHED_TO"
+  | "EXPLAINS"
+  | "REQUIRES"
+  | "SOURCED_FROM"
+  | "RELATED_TO"
+  | "OBSERVED_IN";
+
+export interface GraphNode {
+  id: string;
+  type: GraphNodeType;
+  label: string;
+  status: string; // the status the producing system recorded, verbatim
+  layer: number; // 0 evidence → 5 source
+  detail: Record<string, unknown>;
+  provenance: string[];
+  source_regions: string[];
+  source_url: string | null;
+  limitations: string[];
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  type: GraphEdgeType;
+  explanation: string;
+}
+
+export interface EvidenceGraph {
+  origin: "INSPECTION" | "PRODUCT_CONTEXT";
+  inspection_id: string | null;
+  query: string;
+  root_id: string;
+  node_count: number;
+  edge_count: number;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  limitations: string[];
+  note: string;
+}
+
+/** Exactly one evidence source — the request carries no node, edge or status. */
+export type EvidenceGraphInput =
+  | { inspection_id: string }
+  | { analysis: InspectionAnalysis }
+  | { product_context: ProductContext };
 
 /* ------------------------------------------- inspection coverage (read-only) --- */
 
@@ -1010,14 +925,14 @@ export interface CoverageMatrix {
 
 /**
  * The optional explanation layer. It reads a finished inspection and puts it into
- * words; it cannot retrieve, decide or change anything. `system_result` below is
- * always the deterministic result read from the record — never the model's.
+ * words; it cannot retrieve, decide or change anything. MetrIQ produces no
+ * automatic compliance verdict, so there is none for the model to report —
+ * `escalation_required` below is always MetrIQ's own evidence, never the model's.
  */
 export type CopilotCapability =
   | "EXPLAIN_INSPECTION"
   | "SUMMARIZE"
   | "EXPLAIN_ESCALATION"
-  | "EXPLAIN_CHECKS"
   | "EXPLAIN_EVIDENCE"
   | "EXPLAIN_UNCERTAINTY"
   | "EXPLAIN_HALLMARK"
@@ -1027,6 +942,7 @@ export type CopilotCapability =
   | "EXPLAIN_STANDARD"
   | "EXPLAIN_LABORATORY"
   | "EXPLAIN_PRODUCT_CONTEXT"
+  | "EXPLAIN_EVIDENCE_GRAPH"
   | "MANUAL_VERIFICATION"
   | "QUESTION";
 
@@ -1071,9 +987,7 @@ export interface CopilotAnswer {
   language: AnswerLanguage; // the language the answer is written in
   confidence: "GROUNDED" | "UNSTRUCTURED" | "WITHHELD"; // deterministic, not the model's opinion
   inspection_id: string | null;
-  system_result: SystemResult | null; // deterministic, read from the record
-  escalation_required: boolean | null;
-  officer_status: OfficerStatus | null;
+  escalation_required: boolean | null; // deterministic, read from the record; null for a feature context
   answer: string;
   evidence: { claim: string; source: string }[];
   limitations: string[];
@@ -1095,10 +1009,6 @@ export interface CopilotInput {
   rule_id?: string;
   language?: LanguageChoice;
 }
-
-export type ReviewInput =
-  | { action: "START" }
-  | { action: "COMPLETE"; decision: OfficerDecision; officer_result?: SystemResult; note?: string };
 
 /** The evidence-backed PDF report of a saved inspection — generated on request from the stored record (read-only). */
 export const inspectionReportUrl = (id: string) => `${API_BASE}/inspections/${encodeURIComponent(id)}/report.pdf`;
@@ -1196,7 +1106,7 @@ export const api = {
       60_000 + 60_000 * uploads.length,
     ),
 
-  // Smart Inspection: OCR + declarations + product + standards + compliance.
+  // Smart Inspection: OCR + declarations + product identification + standards.
   analyzeInspection: (
     uploads: PackageUploadInput[],
     inspectionType: InspectionType = "PACKAGE",
@@ -1208,7 +1118,7 @@ export const api = {
       60_000 + 60_000 * uploads.length,
     ),
 
-  // Save: the backend re-runs the analysis on these photos and stores it for officer review.
+  // Save: the backend re-runs the analysis on these photos and stores it with its evidence.
   saveInspection: (
     uploads: PackageUploadInput[],
     inspectionType: InspectionType = "PACKAGE",
@@ -1220,11 +1130,8 @@ export const api = {
       60_000 + 60_000 * uploads.length,
     ),
 
-  listInspections: (officerStatuses: OfficerStatus[] = [], limit = 100) => {
-    const q = new URLSearchParams({ limit: String(limit) });
-    officerStatuses.forEach((st) => q.append("officer_status", st));
-    return request<{ items: InspectionSummary[]; total: number }>(`/inspections?${q}`);
-  },
+  listInspections: (limit = 100) =>
+    request<{ items: InspectionSummary[]; total: number }>(`/inspections?limit=${limit}`),
 
   inspectionStats: () => request<InspectionStats>("/inspections/stats"),
 
@@ -1242,6 +1149,10 @@ export const api = {
       30_000,
     ),
 
+  // Milestone 22: project existing evidence onto the graph. Read-only, no model.
+  evidenceGraph: (body: EvidenceGraphInput) =>
+    request<EvidenceGraph>("/evidence-graph", { method: "POST", body: JSON.stringify(body) }, 30_000),
+
   // Copilot: is an explanation service configured, and how much free budget is left?
   copilotStatus: () => request<CopilotStatus>("/copilot/status", undefined, 10_000),
 
@@ -1249,9 +1160,4 @@ export const api = {
   copilotExplain: (body: CopilotInput) =>
     request<CopilotAnswer>("/copilot/explain", { method: "POST", body: JSON.stringify(body) }, 90_000),
 
-  reviewInspection: (id: string, body: ReviewInput) =>
-    request<InspectionRecord>(`/inspections/${encodeURIComponent(id)}/review`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
 };

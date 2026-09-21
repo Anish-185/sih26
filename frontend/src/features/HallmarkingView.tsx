@@ -14,7 +14,7 @@ import {
   TextInput,
 } from "@/components/ui";
 import { Dropzone } from "@/components/Dropzone";
-import { EscalationPanel } from "@/features/records";
+import { ResolutionPanel } from "@/features/records";
 import { HallmarkEvidencePanel } from "@/features/HallmarkEvidence";
 import {
   Annotation,
@@ -154,7 +154,7 @@ export function HallmarkingView() {
 /* ------------------------------------------------------ hallmark inspection --- */
 
 /**
- * Photo -> OCR -> hallmark evidence -> escalation -> officer review. The analysis runs as a
+ * Photo -> OCR -> hallmark evidence -> what MetrIQ could not establish. The analysis runs as a
  * HALLMARK inspection: Legal Metrology package-label rules are not applied to jewellery.
  */
 function HallmarkInspection() {
@@ -215,9 +215,7 @@ function HallmarkInspection() {
                 <Save className="h-3.5 w-3.5" />
                 {save.loading
                   ? "Saving…"
-                  : result.escalation?.required === false
-                    ? "Save final result"
-                    : "Save and send to officer review"}
+                  : "Save inspection"}
               </Button>
             )}
           </div>
@@ -234,9 +232,8 @@ function HallmarkInspection() {
       {result && hallmark && (
         <>
           {result.escalation && (
-            <EscalationPanel
+            <ResolutionPanel
               required={result.escalation.required}
-              systemResult={result.escalation.system_result}
               reasons={result.escalation.reasons}
             />
           )}
