@@ -991,10 +991,6 @@ function stageTone(status: string): string {
     case "CLASSIFIED":
     case "MATCHED":
       return "text-accent";
-    case "PASS":
-      return "text-pass";
-    case "FAIL":
-      return "text-fail";
     case "DETECTED":
       return "text-accent";
     case "PARTIAL":

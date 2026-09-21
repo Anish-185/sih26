@@ -238,7 +238,7 @@ export function SystemLayerFooter() {
             {[
               ["01", "Extraction", "OCR & declared-value capture"],
               ["02", "Standards", "Deterministic BIS retrieval"],
-              ["03", "Rules", "Legal-metrology rule checks"],
+              ["03", "Knowledge", "Verified BIS requirement records"],
               ["04", "Evidence", "Evidence graph & report"],
             ].map(([n, t, d]) => (
               <div key={n} className="bg-accent p-5">

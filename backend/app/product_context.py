@@ -71,7 +71,7 @@ DECLARATION = "DECLARATION"
 VISION_OBSERVATION = "VISION_OBSERVATION"
 DETERMINISTIC_RETRIEVAL = "DETERMINISTIC_RETRIEVAL"
 BIS_KNOWLEDGE_BASE = "BIS_KNOWLEDGE_BASE"
-DETERMINISTIC_RULE_ENGINE = "DETERMINISTIC_RULE_ENGINE"
+DETERMINISTIC_EVIDENCE_PIPELINE = "DETERMINISTIC_EVIDENCE_PIPELINE"
 LABORATORY_SNAPSHOT = "LABORATORY_SNAPSHOT"
 HALLMARK_OBSERVATION = "HALLMARK_OBSERVATION"
 
@@ -294,7 +294,7 @@ def _inspection_section(analysis: dict | None, *, jewellery: bool) -> Section:
     if analysis is None:
         return Section(INSPECTION, NOT_AVAILABLE,
                        "No package inspection has been run for this product.",
-                       provenance=(DETERMINISTIC_RULE_ENGINE,))
+                       provenance=(DETERMINISTIC_EVIDENCE_PIPELINE,))
 
     escalation = analysis.get("escalation") or {}
     product = analysis.get("product") or {}
@@ -332,7 +332,7 @@ def _inspection_section(analysis: dict | None, *, jewellery: bool) -> Section:
         "MetrIQ reports observed evidence and verified knowledge; it does not produce a legal or compliance verdict.",
     ]
     return Section(INSPECTION, status, headline, detail=detail,
-                   provenance=(DETERMINISTIC_RULE_ENGINE, OCR_TEXT, DECLARATION),
+                   provenance=(DETERMINISTIC_EVIDENCE_PIPELINE, OCR_TEXT, DECLARATION),
                    limitations=tuple(limitations))
 
 

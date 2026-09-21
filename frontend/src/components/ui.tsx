@@ -168,13 +168,14 @@ export function Divider({ className }: { className?: string }) {
   return <hr className={cn("border-0 border-t border-line", className)} />;
 }
 
-/* ----------------------------------------------------------- StatusBadge --- */
+/* ----------------------------------------------------------- StatusBadge ---
+   The only remaining status badge: hallmark observations (M19). MetrIQ produces
+   no compliance verdict, so FAIL is unreachable here — see app/hallmark.py. */
 
-export type ComplianceStatus = "PASS" | "FAIL" | "REVIEW";
+export type HallmarkObservationStatus = "PASS" | "REVIEW";
 
-const statusStyles: Record<ComplianceStatus, string> = {
+const statusStyles: Record<HallmarkObservationStatus, string> = {
   PASS: "border-pass-line bg-pass-soft text-pass",
-  FAIL: "border-fail-line bg-fail-soft text-fail",
   REVIEW: "border-review-line bg-review-soft text-review",
 };
 
@@ -183,7 +184,7 @@ export function StatusBadge({
   size = "md",
   className,
 }: {
-  status: ComplianceStatus;
+  status: HallmarkObservationStatus;
   size?: "sm" | "md";
   className?: string;
 }) {

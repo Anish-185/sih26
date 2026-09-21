@@ -114,8 +114,8 @@ export function HallmarkingView() {
       {task.loading && (
         <p className="flex items-center gap-2 text-[12px] text-ink-faint">
           <span className="h-1 w-1 animate-pulse bg-accent" />
-          The local model is reading the retrieved BIS evidence — this can take a
-          moment.
+          The grounded model is reading the retrieved BIS evidence — this can take
+          a moment.
         </p>
       )}
       {task.error != null && <ErrorNote error={task.error} />}

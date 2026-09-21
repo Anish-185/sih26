@@ -710,7 +710,8 @@ export interface HallmarkEvidence {
   detected: boolean;
   verification_status: "NOT_VERIFIED" | "NOT_DETECTED"; // there is no VERIFIED state
   verification_note: string;
-  overall_status: "PASS" | "FAIL" | "REVIEW";
+  /** Always "REVIEW": authenticity cannot be established from an image. Never FAIL. */
+  overall_status: "REVIEW";
   reason_code: string;
   reason: string;
   huid: {

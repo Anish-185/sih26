@@ -62,7 +62,6 @@ SURFACE = colors.HexColor("#fdfaf1")
 ACCENT = colors.HexColor("#2246ef")
 RESULT_COLORS = {
     "PASS": (colors.HexColor("#1c7a4b"), colors.HexColor("#e8f1ec")),
-    "FAIL": (colors.HexColor("#b0271d"), colors.HexColor("#f6e8e6")),
     "REVIEW": (colors.HexColor("#8a6200"), colors.HexColor("#f3ecd9")),
 }
 NEUTRAL = (INK_SOFT, colors.HexColor("#f1eee6"))

@@ -183,7 +183,7 @@ def test_product_to_inspection_connection() -> None:
           any("never reported as legally missing" in x for x in inspection.limitations))
     check("MetrIQ states plainly it produces no legal/compliance verdict",
           any("does not produce a legal or compliance verdict" in x for x in inspection.limitations))
-    check("provenance names the rule engine", pc.DETERMINISTIC_RULE_ENGINE in inspection.provenance)
+    check("provenance names the evidence pipeline", pc.DETERMINISTIC_EVIDENCE_PIPELINE in inspection.provenance)
 
     check("a product that has not been inspected says exactly that",
           KETTLE.section(pc.INSPECTION).status == pc.NOT_AVAILABLE
@@ -368,7 +368,7 @@ def test_conflicts_are_preserved_not_resolved() -> None:
 def test_every_section_carries_provenance() -> None:
     print("\nO. every connected fact names the system that produced it")
     known = {pc.USER_DESCRIPTION, pc.OCR_TEXT, pc.DECLARATION, pc.VISION_OBSERVATION,
-             pc.DETERMINISTIC_RETRIEVAL, pc.BIS_KNOWLEDGE_BASE, pc.DETERMINISTIC_RULE_ENGINE,
+             pc.DETERMINISTIC_RETRIEVAL, pc.BIS_KNOWLEDGE_BASE, pc.DETERMINISTIC_EVIDENCE_PIPELINE,
              pc.LABORATORY_SNAPSHOT, pc.HALLMARK_OBSERVATION}
     for name, context in (("query", KETTLE), ("inspection", WATER), ("hallmark", JEWELLERY)):
         for section in context.sections:

@@ -77,9 +77,9 @@ export function DashboardView() {
 
           <p className="mt-7 max-w-lg text-[15px] leading-relaxed text-ink-soft">
             MetrIQ reads declared values from a product image, retrieves the
-            applicable Indian Standard, runs deterministic legal-metrology rule
-            checks, and reports a deterministic result — with every finding traced
-            to its source.
+            applicable Indian Standard, and connects it to the verified BIS
+            requirement, certification and laboratory knowledge — with every
+            finding traced to its source.
           </p>
 
           <div className="mt-9 flex flex-wrap items-stretch gap-3">

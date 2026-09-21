@@ -35,7 +35,7 @@ export function CertificationView() {
   const task = useAsyncTask(api.certificationGuidance);
 
   // Deep link from the Standards page or an inspection: ?standard=IS 302.
-  // The journey is retrieval-only, so this never waits on the local model.
+  // The journey is retrieval-only, so this never waits on the explanation model.
   const deepLink = params.get("standard") ?? "";
   useEffect(() => {
     if (!deepLink) return;
@@ -58,7 +58,7 @@ export function CertificationView() {
         <PageHeader
           eyebrow="Certification guidance"
           title="BIS certification, grounded in evidence"
-          lead="MetrIQ retrieves certification evidence from the BIS knowledge base and asks the local model to explain only that evidence. When the knowledge base does not support an answer it abstains — it does not decide the legal requirement."
+          lead="MetrIQ retrieves certification evidence from the BIS knowledge base and asks the configured grounded model to explain only that evidence. When the knowledge base does not support an answer it abstains — it does not decide the legal requirement."
         />
       </div>
 
@@ -112,8 +112,8 @@ export function CertificationView() {
       {task.loading && (
         <p className="flex items-center gap-2 text-[12px] text-ink-faint">
           <span className="h-1 w-1 animate-pulse bg-accent" />
-          The local model is reading the retrieved BIS evidence — this can take a
-          moment.
+          The grounded model is reading the retrieved BIS evidence — this can take
+          a moment.
         </p>
       )}
       {task.error != null && <ErrorNote error={task.error} />}

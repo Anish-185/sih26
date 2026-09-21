@@ -48,9 +48,8 @@ const CHAIN: GraphNodeType[] = ["PRODUCT", "STANDARD", "REQUIREMENT", "SOURCE"];
 /** Status colouring is the status the producing system recorded — never a score. */
 function tone(node: GraphNode): string {
   const s = node.status;
-  if (s === "PASS" || s === "MATCHED" || s === "IDENTIFIED" || s === "VERIFIED" || s === "DETECTED")
+  if (s === "MATCHED" || s === "IDENTIFIED" || s === "VERIFIED" || s === "DETECTED")
     return "border-pass-line bg-pass-soft text-pass";
-  if (s === "FAIL") return "border-fail-line bg-fail-soft text-fail";
   if (
     s === "REVIEW" ||
     s === "UNCERTAIN" ||

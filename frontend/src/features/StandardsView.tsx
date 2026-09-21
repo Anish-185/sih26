@@ -347,14 +347,16 @@ function StandardResult({
 
 export function ErrorNote({ error }: { error: unknown }) {
   const apiError = error instanceof ApiError ? error : null;
-  // A timeout or an unreachable local model is an environment condition, not a
-  // failed request the user should worry about — label it accordingly.
+  // A timeout or an unreachable explanation model is an environment condition,
+  // not a failed request the user should worry about — label it accordingly.
+  // Shared by Standards, Certification, Hallmarking and Laboratories, which do
+  // not all use the same provider, so the wording names neither.
   const modelSlow = apiError?.status === 408 || apiError?.isModelUnavailable;
   const msg =
     apiError?.detail ??
     (error instanceof Error ? error.message : "Something went wrong.");
   return (
-    <Callout title={modelSlow ? "The local model didn’t respond" : "Request failed"}>
+    <Callout title={modelSlow ? "The explanation model didn’t respond" : "Request failed"}>
       {msg}
     </Callout>
   );

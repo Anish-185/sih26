@@ -567,6 +567,51 @@ def test_answer_language_changes_but_evidence_does_not() -> None:
                   for x in ("import httpx", "from app.llm", "from app.openrouter")))
 
 
+# The same check test_multilingual.py runs for /ask and /certification-guidance:
+# the ANSWER TEXT itself — not just the request field or the prompt clause — is
+# in the requested language. The stub writes real Hindi/Telugu, so this proves
+# the copilot's own parse/guard/response path carries a non-Latin answer through
+# intact. It does NOT prove a live model obeys the instruction: no OpenRouter
+# call is made anywhere in this suite.
+
+_CANNED = {
+    "en": "MetrIQ retrieved IS 14543:2016 from the verified knowledge base.",
+    "hi": "MetrIQ ने सत्यापित ज्ञान आधार से IS 14543:2016 प्राप्त किया।",
+    "te": "MetrIQ ధృవీకరించిన విజ్ఞాన స్థావరం నుండి IS 14543:2016 పొందింది।",
+}
+
+
+class LanguageAwareProvider(StubProvider):
+    """Replies in whatever language the appended clause asks for."""
+
+    def generate(self, *, system_prompt, user_prompt, temperature=0.0, max_tokens=700) -> str:
+        for code, name in (("hi", "Hindi"), ("te", "Telugu")):
+            if f"LANGUAGE OF THE ANSWER: {name}." in system_prompt:
+                self.text = reply(_CANNED[code])
+                break
+        else:
+            self.text = reply(_CANNED["en"])
+        return super().generate(system_prompt=system_prompt, user_prompt=user_prompt,
+                                temperature=temperature, max_tokens=max_tokens)
+
+
+def test_the_copilot_answer_text_is_in_the_requested_language() -> None:
+    print("\nP2. the copilot's answer text itself is in the requested language")
+
+    for code in ("en", "hi", "te"):
+        result = InspectionCopilot(LanguageAwareProvider()).explain_feature(
+            "STANDARD", STANDARD_PAYLOAD, "EXPLAIN_STANDARD", language=code,
+        )
+        check(f"copilot {code}: the response reports the requested language",
+              result.language == code)
+        check(f"copilot {code}: nothing was withheld", not result.answer.withheld,
+              result.answer.withheld_reason)
+        check(f"copilot {code}: the ANSWER TEXT is actually in that script",
+              lang.detect(result.answer.answer) == code, result.answer.answer)
+        check(f"copilot {code}: the standard number is reproduced, never translated",
+              "IS 14543:2016" in result.answer.answer, result.answer.answer)
+
+
 # ------------------------------------------------- Q  no unsupported facts
 
 
@@ -785,6 +830,7 @@ def main() -> int:
     test_hallmark_and_huid_safety()
     test_certification_safety()
     test_answer_language_changes_but_evidence_does_not()
+    test_the_copilot_answer_text_is_in_the_requested_language()
     test_no_unsupported_facts()
     test_provider_failure_never_weakens_metriq()
     test_malformed_model_output()
