@@ -1295,3 +1295,325 @@ since "TREATEDWATER" → "treated water" is a correct evidence-backed repair; `t
 literal count went 97 → 505. Seven of M14's fifteen named coverage gaps are now closed (toaster,
 ceiling fan, pressure cooker, helmet, plywood, gas stove, bicycle); eight remain and are still
 reported as gaps.
+
+## Phase 1 — Reframe and demo hardening (2026-09-24)
+
+Not a new subsystem: a repositioning plus two pieces of demo insurance. **No feature was
+deleted and the inspection code is untouched** — a later phase re-sources its declared-field
+requirements from the standards themselves (IS 14543 clause 7 MARKING is the normative list),
+which is why it is reframed rather than cut.
+
+**Part A — the product is a BIS standards intelligence assistant.** The old identity,
+"MetrIQ — AI-Assisted Legal Metrology Inspection", described a compliance audit the problem
+statement never asked for and whose verdict engine the final hardening pass deliberately
+removed, so it promised something MetrIQ does not do. The name stays; the strapline is now
+"Indian Standards & BIS Services · Evidence-backed". Changed: `frontend/index.html` (title +
+meta), `frontend/package.json`, both READMEs, the footer strapline and its four-stage band in
+`components/layout.tsx`, and the home page. The camera is repositioned as a **standards
+discovery entry point** — photograph a product → identify it → the standard that governs it →
+the certification route → the laboratories BIS lists — sold as the fastest way *into* the
+standards when you do not know what a product is officially called, never as an inspection.
+The home page now leads with Q&A and Product → Standard; the camera is the demonstration
+inside that story (a text link under the hero CTAs, and the third button in the closing CTA).
+Hero counts are now read from `GET /inspection/coverage` (verified standards, standards with a
+certification route) alongside the saved-inspection total, so the page opens on knowledge
+rather than on audit counts.
+
+**The missing surface, added:** BIS Q&A is the problem statement's first MVP feature and was
+reachable only through the Hallmarking page. The ~90 lines of Q&A JSX inside
+`HallmarkingView.tsx` became `components/AskPanel.tsx` (question field, language picker,
+examples, the grounded answer, the empty state) and now serve two call sites: the new
+`features/AskView.tsx` at route `/ask` (nav "Ask", first in the bar) and Hallmarking, which
+differ only in their examples and empty-state copy. No new component vocabulary, no new
+colours, no redesign.
+
+**Part B — snapshot drift.** `backend/scripts/verify_snapshot.py` re-fetches the pages the
+knowledge base was built from, parses them with the SAME parsers that ingested them
+(`fetch_compulsory_certification.parse_scheme_i/ii`, `fetch_lims_laboratories.parse_rows` —
+imported, not reimplemented), hashes the PARSED ROWS with `hashlib.sha256`, and reports the
+difference against `data/source_snapshots.json`. Hashing the rows rather than the raw HTML is
+the point: page chrome, banners and nonces change on every request and would report drift that
+is not there, while a product appearing or disappearing always changes the hash — and because
+the rows are stored, the report NAMES the added and removed products, not just "CHANGED".
+**It never writes the knowledge base** (one `write_text` in the file, the baseline; asserted by
+test), the application never reads the baseline (asserted), and `--record` is the only way to
+move it. A source that is unreachable is reported as unreachable, never as drift. LIMS answers
+one standard per request, so it is sampled (`--lims-standards`, default 5) and the report
+prints the sample size next to the snapshot total — a sample is only honest if its size is on
+the page. First recorded baseline (2026-09-24): Scheme I 421 rows, Scheme II 75 rows, LIMS 132
+rows across 5 of 77 standards. This answers "what happens when BIS updates?" in one command,
+with no runtime dependency on a government portal.
+
+**Part C — evidence-only answers.** `/ask` used to return 503 when the provider was down, and
+free OpenRouter model slugs have been pulled out from under this project before. Retrieval has
+already succeeded by the time the model is called, so an outage now degrades the PROSE and
+never the evidence: `app/rag.render_evidence()` renders the retrieved verified records as plain
+text written by MetrIQ's own code — MetrIQ's fixed, translated lead sentence
+(`language.EVIDENCE_ONLY`, the fourth and last hard-coded translated string set, beside
+INSUFFICIENT / EMPTY_QUESTION / WITHHELD) followed by each record's stored title, standard
+number, content, organization, document and URL, verbatim. Record text stays in its stored
+English; the knowledge base is still never translated. `GroundedAnswer.explained` carries it
+through `/ask` (`AskResponse.explained`), and the UI labels it "Evidence only" with a callout —
+never silently. Abstention is unchanged and still never reaches the model. **Three tests were
+rewritten because the behaviour deliberately changed** (`test_rag.py`, `test_api_contract.py`,
+`test_multilingual.py`); `/ask` no longer has a 503 path at all. `/certification-guidance` and
+`/laboratory-search` keep theirs — only `/ask` was in scope.
+
+**Deliberately not done:** the optional VERIFIED / CACHED / CHANGED / NOT ESTABLISHED status
+vocabulary. The badge it would replace is *retrieval* confidence (how well a query matched a
+record); that vocabulary describes *snapshot freshness*, which is what Part B measures. Swapping
+one for the other would label every answer with a fact the badge does not know.
+
+**One pre-existing bug found and fixed while validating** (it failed at HEAD too, and it is
+exactly the fragility Part C exists for): `openrouter.DEFAULT_MODEL` and
+`vision.DEFAULT_VISION_MODEL` both still pointed at `inclusionai/ling-3.0-flash-vl:free`, which
+OpenRouter has since withdrawn — checked live against its model list, not from memory. The
+running configuration in the gitignored `backend/.env` had been moved on but the in-code
+fallbacks had not, so a fresh clone with no `.env` pointed at a 404. Both now carry live slugs
+(`nvidia/nemotron-3-super-120b-a12b:free` for text, `dots-studio/dots-3-note-preview:free` for
+vision), and the two tests that hard-coded the slug now assert the invariant that matters (the
+default is a concrete OpenRouter slug, and the constant is what the client uses) instead of a
+literal that will drift again.
+
+Tests: `test_snapshot_drift.py` (23 checks, entirely offline — hashing, row-level drift
+reporting, "reports but never writes", and the recorded baseline's integrity).
+
+## Phase 2 — Retrieval baseline and evaluation harness (2026-09-24)
+
+`backend/scripts/eval_retrieval.py` measures `app.retrieval.SearchEngine` offline — stdlib
+only, no LLM, no database, no network — and changes nothing about it (a test greps the harness
+for `RetrievalConfig(`, `threshold_`, `weight_` and asserts it writes only under `tests/data/`).
+`--json` for machine output, `--derive` to rebuild the query set from its sources.
+
+**The query set is derived, not authored.** A self-authored set with self-chosen expected
+answers is grading your own homework, so every expected answer is a pairing BIS, the Department
+of Consumer Affairs, or an earlier recorded measurement already made. 149 queries across six
+origins, each entry `{query, origin, expected_standard_number, expected_record_id, note}`:
+`bis_faq` (14 — every FAQ record's own title), `bis_listing` (72 — BIS's own product wording
+quoted inside each standards record as `The BIS list describes the product as: "X"`, kept only
+where X maps to exactly ONE standard, sampled every 4th in sorted order), `legal_metrology` (26 —
+keyword phrases unique to one record), `consumer_probe` (15 — the queries CLAUDE.md's Milestone
+14 section names as that milestone's measured misses; the other 15 of that 30-query probe were
+never enumerated and are deliberately NOT reconstructed), `hand_written` (12 — natural consumer
+phrasing, marked so it can be excluded from any number) and `adversarial` (10). `--derive`
+re-runs the whole derivation so the rules can be checked rather than trusted.
+
+**Two schema decisions the data forced.** `expected_record_id` exists because a FAQ or a Legal
+Metrology rule is a correct answer that has no standard number; without it every such query
+would have to be mislabelled "should find nothing". And **either expected field may be a LIST**:
+BIS lists four helmet standards and eight plywood standards, so "helmet" has four correct
+answers and no wrong one among them — collapsing that to one pick would assert a choice BIS does
+not make, and collapsing it to null would score a correct answer as a miss. **Abstention is
+expected iff both fields are null.**
+
+**Baseline (2026-09-24, 575 indexed records, top-5): recall@1 85.6%, recall@5 98.1%, abstention
+rate 24.4%, false-match rate 13.4%.** By origin, recall@1: `bis_listing` 94.4% (100% @5),
+`hand_written` 66.7% (91.7% @5), `bis_faq` 50.0% (92.9% @5), `consumer_probe` 100% on its 6
+answerable queries. False match is defined as a CONFIDENT (high/medium) answer with the expected
+one absent from the top 5 — a correct answer at rank 2 is a ranking weakness that recall@1 vs
+recall@5 already measures, and double-counting it as a false match would overstate the harm.
+`tests/data/eval_baseline.json` commits every row and every miss; a test asserts the committed
+file reproduces on a fresh run, so the published numbers can be re-derived at this commit.
+
+**What the baseline actually found, all of it real and none of it fixed here (Phase 2 measures):**
+
+1. **Legal Metrology is unreachable through this engine by design** — `engine.py` indexes only
+   records whose `source_authority` is `BIS`, so all 7 Legal Metrology records are loaded but
+   never indexed. Their 26 queries therefore expect abstention, and what the block really
+   measures is whether a Legal Metrology question gets confidently mis-answered with an unrelated
+   BIS standard. **It does: 16 of 26.** "medical devices" → IS 7620 (Part 1), "amendment 2021" →
+   IS 17526:2021, "net quantity" → IS 16513 : 2016 — all at medium confidence. This is the
+   single worst number in the baseline.
+2. **A single generic word matches at medium confidence.** "school bag" → IS 12650:2018 (jute
+   bags, on "bag"), "cooking oil" → IS 1342 (oil pressure stoves, on "oil"), "solar panel" →
+   IS 12933 (solar WATER HEATING collectors, on "solar"). Milestone 14 banned sector-guess
+   keywords for exactly this reason; the residue is that generic tokens still score.
+3. **A standard-number query can match on the YEAR alone.** "IS 456:2000" → IS 10325:2000 and
+   "IS 10500:2012" → IS 10322 (Part 5/Section 2): 2012. Both land at low confidence and neither
+   fabricates the absent standard, so nothing unsafe reaches a user — but the signal is wrong.
+4. **"refrigerator" is a VOCABULARY gap, not a coverage gap.** It was on the eight-gap list and
+   it does abstain, but BIS lists "Household Refrigerating Appliances" against
+   IS 17550 (Part 1): 2021. The record exists and the consumer's word does not reach it. Expected
+   is left null because that is the behaviour being baselined; closing it is a knowledge change.
+   *(Phase 3 correction: "solar panel" is the SAME case, and this baseline's note for it — "the
+   listings carry solar WATER HEATING collectors, not photovoltaic panels" — was WRONG. BIS lists
+   Crystalline Silicon and Thin-Film Terrestrial Photovoltaic (PV) modules under Scheme II
+   (IS 14286, IS 16077) and both are in the knowledge base; retrieval reaches the water-heating
+   records because those say "solar" while the PV records say "photovoltaic" and never "solar" or
+   "panel". The query-set note is corrected; the expected value stays null, so every metric above
+   is unchanged.)*
+5. **Adversarial: safe, but chattier than "abstain".** Only 4 of 10 abstain outright; the other 6
+   return low-confidence noise. **Zero are confident and zero fabricate a standard number**, and
+   both prompt injections fail to produce the IS 99999 they demand. So `test_eval_harness.py`
+   asserts the property that actually protects a user — never high/medium confidence, never a
+   standard number outside the knowledge base — and asserts strict abstention as a floor
+   (≥ 4, plus both nonsense strings) so a regression that made the engine chattier is still
+   caught. Asserting blanket abstention would have been asserting something false.
+
+Tests: `test_eval_harness.py` (44 checks — the harness runs and is deterministic, the query set
+is well formed and every expected standard/record actually exists in the knowledge base, the
+adversarial safety properties, the committed baseline reproduces, and the harness never touches
+retrieval internals).
+
+## Phase 3 — An informative abstention (2026-09-24)
+
+An unknown product used to produce a dead end. It now produces MetrIQ's own account of its
+coverage boundary. **No knowledge-base record, keyword or alias was added** — the gaps are real
+and guessing a standard for shampoo is the failure this project exists to prevent.
+
+**The eight "gaps" were re-checked against all 505 records first, and two of them are not gaps.**
+Checking only the two BIS listing pages the data came from would have repeated an error the
+Phase 2 baseline had already half-caught:
+
+* **refrigerator** — BIS lists "Household Refrigerating Appliances" (IS 17550 (Part 1): 2021) and
+  "Freezers" (IS 7872: 2018). Both are in the knowledge base. Retrieval returns nothing because
+  the records say *refrigerating* and the consumer says *refrigerator*, and the lexical engine
+  does not stem.
+* **solar panel** — BIS lists "Crystalline Silicon Terrestrial Photovoltaic (PV) modules"
+  (IS 14286) and the thin-film equivalent (IS 16077), both Scheme II. Retrieval returns the solar
+  WATER HEATING records instead, because those say *solar* while the PV records say
+  *photovoltaic* and never *solar* or *panel*. **Phase 2's baseline note said the listings carry
+  only solar water heating — that was wrong**, and the note has been corrected.
+
+The other six (shampoo, school bag, cooking oil, biscuits, paint, mixer grinder) are genuine:
+"shampoo", "cosmetic", "soap", "detergent" and "toiletry" appear in **zero** of the 505 records.
+
+**Which makes the obvious message impossible to write.** MetrIQ cannot tell at runtime whether a
+product is genuinely absent from BIS's listings or merely listed under wording the query did not
+match — so "this product is not on those lists" can never be asserted safely, and the phase's
+rule 2 is satisfied instead by stating BOTH possibilities and resolving neither, plus an explicit
+"It does NOT mean that no Indian Standard exists for this product." A test asserts that sentence
+appears **only** in its negated form, and that the bare claim appears nowhere in any language.
+
+`app/boundary.py` is the whole layer: it counts the coverage figures off the loaded knowledge base
+(505 standards = 436 Scheme I + 34 Scheme II + 35 from other official BIS pages, covering 464
+listed products, plus 7 Legal Metrology records — a test asserts the parts sum to the whole and
+that no figure is hard-coded), then assembles four sentences plus the next step. Every sentence
+lives in `language.BOUNDARY` in en / hi / te, the fifth and last hard-coded translated string set
+beside INSUFFICIENT, EMPTY_QUESTION, WITHHELD and EVIDENCE_ONLY. **No model is involved** — a test
+greps `boundary.py` for `llm`, `openrouter`, `generate(`, `httpx`. The one next step offered is
+BIS's own Know Your Standards search, by product name.
+
+**Weak matches (rule 5)** are carried in the boundary, never in `results`: standard number, title,
+confidence and the terms that matched, under MetrIQ's own sentence saying it is evidence of what
+the search did and that MetrIQ is **not** putting it forward as the answer. "solar panel" surfaces
+three solar-water-heating records this way; "shampoo" surfaces none and the block is absent.
+
+Wired into `ProductStandardFinder.find()` (which gained a `language` argument) and the `/ask`
+abstention path in `rag.py`; exposed as `boundary` on `ProductStandardResponse` and `AskResponse`,
+null whenever there is an answer. Frontend: one shared `components/CoverageBoundary.tsx`, rendered
+by the Standards abstention state and by `GroundedAnswer` in place of the bare "Insufficient
+verified evidence" callout. No redesign, no new colours — every sentence comes from the backend,
+so the browser cannot drift from what MetrIQ verified.
+
+Tests: `test_coverage_boundary.py` (140 checks — counted-not-typed figures, no standard number /
+scheme guess / category guess in any of the three languages for all eight products, the
+never-say-absent rule, the two vocabulary misses still being vocabulary misses, weak matches never
+offered as answers, the HTTP contract, and no model in the path). Three existing suites
+(`test_coverage.py`, `test_product_identification.py`, `test_why_completeness.py`) asserted
+`/product-standard`'s response keys with an exact set equality, which the new `boundary` field
+broke; each now asserts the invariant that actually matters — every original key survives, and
+`boundary` is null whenever there is an answer — rather than a literal that would break on the
+next extension.
+
+## Phase 4 — Every standard resolved to its real catalogue identity (2026-09-25)
+
+The knowledge base held BIS's PRODUCT wording from the compulsory-certification listings but
+not the standards' own catalogue titles. Phase 4 adds them, and records where each title's text
+came from.
+
+**SOURCE PROVENANCE IS A PARAMETER, NOT A CONSTANT.** BIS *sells* these standards, and the
+ministry that owns BIS proposed this problem statement, so `scripts/fetch_standard_titles.py`
+takes `--source bis | archive`, every index entry and every enriched record carries its route,
+and the UI shows it. Mirrored text is never presented as coming from bis.gov.in.
+
+**The BIS route goes further than expected: all the way, anonymously.** BIS's Know Your
+Standards page drives an Elasticsearch endpoint
+(`…/knowyourstandards/Elasticsearch/getsearchAjax`) that answers with **no login and no
+credentials** — it needs a session cookie from one page fetch plus browser `Referer` / `Origin`
+/ `Content-Type` headers (without them it is a flat 403, which is what makes it look closed),
+and the POST field is `search`, not `txt_search`. It returns structured rows: `vc_doc_num`,
+`is_part`, `is_sec`, `is_year`, `identical_is` and the full title. It is also CURRENT — it
+reports IS 14543:**2024** where our listing-derived record says 2016. **Where it stops:**
+metadata is all of it. Downloading the standard DOCUMENT's text needs a logged-in BIS session,
+and this tool does not attempt it; nothing in this phase required it, because titles, parts,
+years and editions all come from the catalogue search. It is, however, slow — roughly four
+responses a minute — so the full run takes about two hours and the on-disk cache
+(`backend/.cache/`, gitignored) makes a re-run instant.
+
+**The archive route validated the brief's own measurement.** Public.Resource.Org's mirror
+(identifiers `gov.in.is.*`, 22,025 items, confirmed) resolved **71.7% by exact identifier** —
+the brief predicted ~72%. Redirects must be followed or the download returns 0 bytes, as warned.
+The mirror is inconsistent about the ISO/IEC infix (`IS/ISO 6742-2` is `gov.in.is.iso.6742.2.*`
+but `IS/ISO 9994` is `gov.in.is.9994.*`), so both shapes are tried rather than guessed.
+
+**One real matching bug, caught and fixed rather than accepted.** Archive's query language makes
+`gov.in.is.302.2.*` match `gov.in.is.302.2.21.2018`, so `IS 302-2:26` "resolved" to Section 21 —
+a different standard. A wildcard hit is now accepted only when what follows the stem is a bare
+four-digit year (`_segments_match`). That moved 3 entries from WILDCARD to NOT_FOUND, which is
+the correct direction: the brief said to stop rather than loosen matching, and this tightened it.
+
+**Results.** `data/standard_archive_index.json` covers all 505. BIS primary, archive consulted
+only where BIS could not resolve, merged by `scripts/merge_standard_index.py`:
+
+| route | EXACT | WILDCARD | NOT_FOUND | resolved |
+|---|---:|---:|---:|---:|
+| BIS catalogue alone | 295 (58.4%) | 183 (36.2%) | 27 (5.3%) | 478 |
+| Archive alone | 362 (71.7%) | 109 (21.6%) | 34 (6.7%) | 471 |
+| **merged (shipped)** | **306 (60.6%)** | **186 (36.8%)** | **13 (2.6%)** | **492 (97.4%)** |
+
+(The two routes mean different things by EXACT: for the archive it is an exact identifier hit;
+for BIS it is that the year in our number matched an edition BIS lists.)
+
+**Enrichment** (`scripts/enrich_standard_titles.py`) adds, never replaces: 492 catalogue titles
+appended to `content` under a `Catalogue title:` label plus a provenance sentence naming the
+route; `source_url` is untouched, so the BIS listing page stays the primary source. The existing
+sentence "this record carries BIS's own product description … not the verbatim catalogue title"
+was rewritten, because it stopped being true once both are present — the listing names the
+notified PRODUCT, the catalogue names the STANDARD, and the record now says so. **63 years were
+filled in** where the source offered exactly one edition. **10 were refused** because several
+editions exist and choosing one would invent a fact: IS 302 (Part 2/Sec 3) [2007, 2024],
+IS 12615 [2018, 2026], IS 16102 (Part 1) [2012, 2026], IS 12640 (Part 2) [2011, 2016],
+IS 6452 [1989, 2026], IS 8042 [1988, 2015], IS 16242 (Part 1) [2014, 2025],
+IS 10322 (Part 5/Sec 1) [2012, 2026], IS 5175 [2022, 2026], IS 15392 [2003, 2019]. Every edition
+found is recorded in the index for a later phase. `schema.py` is unchanged; a title over 200
+characters is truncated in `title` and kept in full in `content`.
+
+**17 titles are flagged as damaged and kept exactly as returned.** The damage is in BIS's own
+catalogue — IS 16192 (Part 3) holds `â€"` where an em dash belongs, double-encoded at source
+(verified against the raw bytes; it is not a decoding error here). They are labelled "the text
+looks damaged and has NOT been corrected". An earlier version of the detector flagged 28 by
+treating en and em dashes as corruption; it now allows ordinary typographic punctuation and
+matches mojibake signatures instead.
+
+**13 standards remain unresolved by both routes** and were left untouched, not guessed: IS 16046,
+IS 8828, IS 302-2:26, IS 60669-2-1: 2008, IS 1989 (Part.2): 1986, IS 17043 (Part-1): 2024, the
+four IS 18471/18480 dual-numbered ISO adoptions, IS 12933 (Part 1)+(Part 2) and IS 16077, whose
+`standard_number` fields contain TWO standards each, and IS 10322 (Part 5)Section 9: 2017.
+
+**API and UI:** `ProductStandardResultOut.catalogue` carries `{title, source_route,
+source_label, official, title_suspect}`, parsed back out of `content` so there is one source of
+truth and no schema change. The Standards card shows the catalogue title beneath the product
+heading with a `BIS catalogue` / `third-party mirror` marker, and says plainly when a title was
+returned damaged.
+
+**Phase 2 harness re-run: the numbers did not move** — recall@1 85.6%, recall@5 98.1%, abstention
+24.4%, false-match 13.4%, identical to the Phase 3 baseline. A first run appeared to drop to
+79.8% / 92.3%, but every one of those 6 regressions was a stale expectation: the query set's
+`bis_listing` entries derive their expected answer from the knowledge base, and 63 numbers had
+just gained a year. Re-deriving the set (its documented rule) restored every figure; one
+hand-written literal (`IS 16333 (Part-3)` → `IS 16333 (Part-3):2022`) was updated for the same
+reason. The single genuine change is internal: "cement standard" moved from rank 2 to rank 3,
+still inside the top 5.
+
+**Seven existing suites broke on the same thing and were made year-tolerant, not re-pinned.**
+`test_product.py`, `test_why_this_result.py`, `test_standards_coverage.py` and
+`test_product_identification.py` asserted literal standard numbers ("IS 14625", "IS 8144",
+"IS 269") that BIS's listings write without a year. Phase 4 established those editions, so the
+literals went stale. Each comparison now ignores a trailing `:YYYY` — "IS 14625" and
+"IS 14625:2015" are the same standard with its edition now known — rather than being bumped to a
+new literal that would go stale again the next time an edition is resolved. Two Phase 2/3 suites
+needed the opposite treatment: the eval harness's matching stays STRICT (an edition year is part
+of a standard's identity, and loosening a measurement tool to make it pass would be exactly the
+self-grading the harness exists to avoid), so the hand-typed expectations in `eval_retrieval.py`
+were updated to the now-established numbers instead. Every metric came out identical.

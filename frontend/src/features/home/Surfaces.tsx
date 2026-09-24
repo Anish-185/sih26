@@ -5,7 +5,7 @@ import { Motif, Bracket } from "@/components/decor";
 import { Mono } from "@/components/ui";
 
 /**
- * The seven surfaces, as one switchable preview rather than seven cards.
+ * The surfaces, as one switchable preview rather than a wall of cards.
  * Pointer and keyboard both drive it; the preview is a description of what the
  * surface actually returns, never a mock result.
  */
@@ -20,6 +20,14 @@ interface Surface {
 
 const SURFACES: Surface[] = [
   {
+    to: "/ask",
+    name: "Ask BIS",
+    motif: "dome",
+    lead: "Ask about Indian Standards, certification, testing or hallmarking in plain English, Hindi or Telugu. The answer is written from retrieved BIS records and nothing else.",
+    returns: ["An answer grounded in verified BIS records", "Every record the answer was written from", "An explicit \u201cnot enough evidence\u201d when there is none"],
+    note: "The same evidence in every language. Only the prose changes.",
+  },
+  {
     to: "/standards",
     name: "Product → Standard",
     motif: "lotus",
@@ -31,7 +39,7 @@ const SURFACES: Surface[] = [
     to: "/inspection",
     name: "Inspection",
     motif: "fingerprint",
-    lead: "Photograph a package from any number of sides. MetrIQ reads it, extracts the declared values and links them to a verified standard.",
+    lead: "Do not know what the product is officially called? Photograph it. MetrIQ reads the label and takes you into the standards from there — the fastest way in.",
     returns: ["OCR regions with per-region confidence", "Declared fields, each tied to its region", "Product identification and standard candidates"],
     note: "A field that was not read is reported as not detected, never as missing.",
   },
@@ -86,7 +94,7 @@ export function Surfaces() {
   return (
     <section aria-labelledby={headingId}>
       <div className="max-w-xl">
-        <span className="eyebrow">Seven surfaces</span>
+        <span className="eyebrow">Eight surfaces</span>
         <h2 id={headingId} className="display mt-4 text-[1.8rem] sm:text-[2.4rem]">
           One evidence pipeline, seven ways in
         </h2>

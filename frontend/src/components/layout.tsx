@@ -12,9 +12,12 @@ import { cn } from "@/lib/cn";
 import { LinkButton, Mono } from "@/components/ui";
 import { BrailleField } from "@/components/decor";
 
-/* The bar carries the six surfaces. "Inspect a product" is the one action, so
-   it is a button rather than a seventh link of equal weight. */
+/* The bar carries the surfaces in the order the product is meant to be read:
+   ask a question, find the standard for a product, then the services around it.
+   The camera is one way into that story, not a seventh peer link, so it stays a
+   button. */
 const NAV = [
+  { to: "/ask", label: "Ask" },
   { to: "/standards", label: "Standards" },
   { to: "/inspection", label: "Inspection" },
   { to: "/certification", label: "Certification" },
@@ -150,8 +153,8 @@ function TopNav() {
 
         <div className="flex items-center gap-3">
           <HealthStatus />
-          <LinkButton to="/inspection" size="sm" className="hidden sm:inline-flex">
-            Inspect a product
+          <LinkButton to="/standards" size="sm" className="hidden sm:inline-flex">
+            Find a standard
           </LinkButton>
           <button
             type="button"
@@ -182,8 +185,8 @@ function TopNav() {
                 {item.label}
               </NavLink>
             ))}
-            <LinkButton to="/inspection" size="sm" className="mt-4 mb-2 self-start sm:hidden">
-              Inspect a product
+            <LinkButton to="/standards" size="sm" className="mt-4 mb-2 self-start sm:hidden">
+              Find a standard
             </LinkButton>
           </div>
         </nav>
@@ -231,20 +234,20 @@ export function SystemLayerFooter() {
 
         <div className="relative mx-auto max-w-[1240px] px-5 py-20 sm:px-8 sm:py-28">
           <div className="flex items-center gap-3">
-            <span className="eyebrow !text-white/70">The MetrIQ system layer</span>
+            <span className="eyebrow !text-white/70">The MetrIQ evidence layer</span>
             <span className="h-px w-8 bg-white/40" aria-hidden />
           </div>
           <p className="display mt-5 max-w-xl text-[1.9rem] leading-[1.08] sm:text-[2.4rem]">
-            Image to evidence to verified inspection report — every step recorded,
-            every finding traceable to a source.
+            A question — or a photograph — to the Indian Standard that governs the
+            product, and the official BIS page it came from.
           </p>
 
           <div className="mt-14 grid gap-px border border-white/15 bg-white/15 sm:grid-cols-4">
             {[
-              ["01", "Extraction", "OCR & declared-value capture"],
-              ["02", "Standards", "Deterministic BIS retrieval"],
-              ["03", "Knowledge", "Verified BIS requirement records"],
-              ["04", "Evidence", "Evidence graph & report"],
+              ["01", "Question", "Plain words, a photograph, or both"],
+              ["02", "Retrieval", "Deterministic search over verified BIS records"],
+              ["03", "Standard", "The Indian Standard, its route and its labs"],
+              ["04", "Evidence", "Every step traceable to an official source"],
             ].map(([n, t, d]) => (
               <div key={n} className="bg-accent p-5">
                 <Mono className="!text-white/50 text-[11px]">{n}</Mono>
@@ -259,7 +262,7 @@ export function SystemLayerFooter() {
           <div className="mt-16 flex flex-wrap items-end justify-between gap-6 border-t border-white/15 pt-8">
             <Wordmark className="text-white [&_span]:text-white" />
             <Mono className="!text-white/45 text-[11px]">
-              AI-Assisted Legal Metrology Inspection · Prototype
+              Indian Standards & BIS Services · Evidence-backed · Prototype
             </Mono>
           </div>
         </div>

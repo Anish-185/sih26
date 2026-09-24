@@ -195,8 +195,12 @@ def test_vision_is_configured_separately() -> None:
         os.environ.pop("VISION_MODEL", None)
         v = client()
         check("default vision model is the one configured for this project",
-              v.model == "inclusionai/ling-3.0-flash-vl:free", v.model)
-        check("DEFAULT_VISION_MODEL constant matches", DEFAULT_VISION_MODEL == "inclusionai/ling-3.0-flash-vl:free")
+              v.model == DEFAULT_VISION_MODEL, v.model)
+        # The slug is configuration and free slugs get withdrawn; what must hold is
+        # that the default is a real OpenRouter slug, not an empty string.
+        check("DEFAULT_VISION_MODEL is a concrete OpenRouter model slug",
+              "/" in DEFAULT_VISION_MODEL and DEFAULT_VISION_MODEL == DEFAULT_VISION_MODEL.strip(),
+              DEFAULT_VISION_MODEL)
 
         os.environ["VISION_MODEL"] = "some-other/vision:free"
         check("the vision model is configurable", VisionClient(api_key="k").model == "some-other/vision:free")

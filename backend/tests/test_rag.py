@@ -198,33 +198,66 @@ def test_ask_post_maps_sources_and_flags() -> None:
           not whitespace.grounded and whitespace.sources == [])
 
 
-# ------------------------------------------- 5. /ask returns 503 on LLM outage
+# ------------------------------- 5. /ask falls back to evidence on an LLM outage
 
-def test_ask_post_reports_503_when_the_explanation_model_is_unavailable() -> None:
-    from fastapi import HTTPException
+def test_ask_post_returns_the_evidence_when_the_model_is_unavailable() -> None:
+    """Phase 1, Part C. Retrieval already succeeded, so a provider outage must
+    degrade the prose, never the evidence — and never white-screen a demo."""
+    from app import language as lang
 
     original = api_module.get_answerer
     api_module.get_answerer = lambda: BISQuestionAnswerer(
         search_engine=ENGINE, llm=RaisingLLM()
     )
     try:
-        raised = None
-        try:
-            ask_post(AskRequest(question="What is HUID?"))
-        except HTTPException as exc:
-            raised = exc
-        check("ask_post: LLM outage raises HTTPException", raised is not None)
-        check("ask_post: the status code is 503",
-              raised is not None and raised.status_code == 503)
-        check("ask_post: the detail is a clean, provider-neutral message",
-              raised is not None and "Explanation service unavailable" in str(raised.detail))
+        down = ask_post(AskRequest(question="What is HUID?"))
+        check("ask_post: an LLM outage is answered, not refused", down.grounded)
+        check("ask_post: the outage is labelled, not hidden", down.explained is False)
+        check("ask_post: the retrieved sources are still returned",
+              down.source_count > 0 and len(down.sources) == down.source_count)
+        check("ask_post: MetrIQ says the answer carries no AI explanation",
+              lang.EVIDENCE_ONLY[lang.EN] in down.answer)
+        check("ask_post: the evidence itself is in the answer",
+              any(source.title in down.answer for source in down.sources))
+        check("ask_post: every source is named with its BIS organization",
+              all(source.source_organization in down.answer for source in down.sources))
 
-        # An abstaining question must NOT reach the raising LLM -> no 503.
+        hindi = ask_post(AskRequest(question="What is HUID?", language="hi"))
+        check("ask_post: the fallback respects the language layer",
+              lang.EVIDENCE_ONLY[lang.HI] in hindi.answer and hindi.language == lang.HI)
+
+        # An abstaining question never reaches the LLM: the abstention stands.
         abstain = ask_post(AskRequest(question="zzzz qqqq vvvv nonsense"))
         check("ask_post: abstention still works during an LLM outage",
-              not abstain.grounded and abstain.sources == [])
+              not abstain.grounded and abstain.sources == []
+              and abstain.explained is True)
     finally:
         api_module.get_answerer = original
+
+
+def test_the_evidence_fallback_invents_nothing() -> None:
+    """Every line is MetrIQ's own fixed sentence or a field copied from a record."""
+    from app import language as lang
+    from app.rag import render_evidence
+
+    results = ENGINE.search("hallmarking", 3).results
+    rendered = render_evidence(results, lang.EN)
+    allowed = {lang.EVIDENCE_ONLY[lang.EN]}
+    for result in results:
+        item = result.item
+        allowed |= {item.title, item.content, item.source_organization}
+        for optional in (item.standard_number, item.document_name, item.source_url):
+            if optional:
+                allowed.add(optional)
+
+    leftover = rendered
+    for fragment in sorted(allowed, key=len, reverse=True):
+        leftover = leftover.replace(fragment, " ")
+    # Only the numbering, the em dash and the separators MetrIQ writes itself.
+    check("render_evidence: nothing but record text and MetrIQ's own punctuation",
+          set(leftover) <= set("0123456789. \n—·"), repr(leftover[:200]))
+    check("render_evidence: no evidence means no prose", render_evidence([], lang.EN)
+          == lang.EVIDENCE_ONLY[lang.EN])
 
 
 # ------------------------------------------------ 6. system prompt trust rules
@@ -250,7 +283,8 @@ def main() -> int:
     test_low_signal_query_still_abstains()
     test_nonexistent_standard_number_is_never_returned()
     test_ask_post_maps_sources_and_flags()
-    test_ask_post_reports_503_when_the_explanation_model_is_unavailable()
+    test_ask_post_returns_the_evidence_when_the_model_is_unavailable()
+    test_the_evidence_fallback_invents_nothing()
     test_system_prompt_enforces_grounding()
 
     print(f"\n{_passed} passed, {_failed} failed")

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "MetrIQ — AI-Assisted Legal Metrology Inspection System (frontend)",
+  "description": "MetrIQ — Evidence-Backed Assistant for Indian Standards & BIS Services (frontend)",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

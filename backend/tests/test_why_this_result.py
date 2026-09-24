@@ -193,7 +193,10 @@ def test_phase5_behaviour_is_unchanged() -> None:
 
     check("LED lamp -> IS 16102 (Part 1)",
           "IS 16102 (Part 1)" in standards("LED lamp"))
-    check("feeding bottle -> IS 14625", "IS 14625" in standards("feeding bottle"))
+    # Phase 4 filled the edition in from BIS's catalogue ("IS 14625" ->
+    # "IS 14625:2015"); the same standard, so the year is not compared.
+    check("feeding bottle -> IS 14625",
+          any(n.split(":")[0].strip() == "IS 14625" for n in standards("feeding bottle")))
     check("stainless steel water bottle -> IS 17526:2021",
           "IS 17526:2021" in standards("stainless steel water bottle"))
     check("generic word does not leak IS 1786:2008",

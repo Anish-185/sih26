@@ -134,8 +134,11 @@ def test_category_matching() -> None:
     check("shared category phrase -> REVIEW", p.status == "REVIEW", p.reason)
     check("category REVIEW names the shared phrase", "feeding bottle" in p.reason)
     nums = {c.standard_number for c in p.candidates}
+    # Phase 4 completed both editions from BIS's own catalogue ("IS 14625" ->
+    # "IS 14625:2015"); the standards are the same, so the year is not compared.
+    bare = {n.split(":")[0].strip() for n in nums}
     check("category REVIEW lists both KB feeding-bottle standards",
-          {"IS 14625", "IS 5168"} <= nums, str(nums))
+          {"IS 14625", "IS 5168"} <= bare, str(nums))
     check("category candidates are tier 'category'", all(c.tier == "category" for c in p.candidates))
 
     steel, _ = identify(["MILTON", "Stainless Steel Water Bottle 1 L", "MRP ₹899"])
@@ -177,7 +180,12 @@ def test_product_to_standard_and_ranking() -> None:
         (["ULTRATECH", "Ordinary Portland Cement 53 Grade"], "IS 269"),
     ):
         p, _ = identify(lines)
-        check(f"{lines[1]!r} -> {expected}", p.status == "MATCHED" and p.standard_number == expected,
+        # The year may have been established since (Phase 4): "IS 269" ->
+        # "IS 269:2015" is the same standard, so it is compared without it.
+        found = (p.standard_number or "").split(":")[0].strip()
+        check(f"{lines[1]!r} -> {expected}",
+              p.status == "MATCHED" and found == expected.split(":")[0].strip()
+              and (p.standard_number == expected or ":" in (p.standard_number or "")),
               f"{p.status} {p.standard_number} {p.reason}")
 
     p, _ = identify(WATER)
@@ -335,8 +343,12 @@ def test_model_unavailable_and_model_hint() -> None:
 def test_product_standard_endpoint_compatible() -> None:
     client = TestClient(app)
     body = client.post("/product-standard", json={"product": "packaged drinking water"}).json()
+    # Phase 3 added `boundary` (null whenever there is an answer). The invariant
+    # that matters is backward compatibility: every original key is still there.
     check("/product-standard keeps its response keys",
-          set(body) == {"product", "results", "grounded", "confidence", "note"}, str(set(body)))
+          {"product", "results", "grounded", "confidence", "note"} <= set(body), str(set(body)))
+    check("/product-standard carries no boundary when it has an answer",
+          body.get("boundary") is None)
     check("/product-standard still ranks IS 14543:2016 first",
           body["results"] and body["results"][0]["standard_number"] == "IS 14543:2016")
     check("/product-standard results keep why + reasons",

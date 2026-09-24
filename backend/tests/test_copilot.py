@@ -236,9 +236,12 @@ def test_model_and_endpoint_configuration() -> None:
             os.environ.pop(key, None)
         p = OpenRouterLLM(api_key="test-key")
         check("default model is the free model the copilot is configured for",
-              p.model == "inclusionai/ling-3.0-flash-vl:free", p.model)
+              p.model == DEFAULT_MODEL, p.model)
         check("default base url is OpenRouter", p.base_url == DEFAULT_BASE_URL, p.base_url)
-        check("DEFAULT_MODEL constant matches", DEFAULT_MODEL == "inclusionai/ling-3.0-flash-vl:free")
+        # The slug itself is configuration and free slugs get withdrawn; what must hold
+        # is that the default is a real OpenRouter slug, not an empty string.
+        check("DEFAULT_MODEL is a concrete OpenRouter model slug",
+              "/" in DEFAULT_MODEL and DEFAULT_MODEL == DEFAULT_MODEL.strip(), DEFAULT_MODEL)
 
         os.environ["OPENROUTER_MODEL"] = "some-other/model:free"
         os.environ["OPENROUTER_BASE_URL"] = "https://example.invalid/v1"
@@ -870,6 +873,7 @@ def test_report_does_not_depend_on_the_explanation_service() -> None:
 def test_existing_ask_pipeline_is_unchanged() -> None:
     print("\n/ask and Certification are pinned to OpenRouter (final hardening pass); "
           "LM Studio remains only for inspection product-identification and Laboratory search")
+    from app import language as lang
     from app.llm import LLMError, LocalLLM
     from app.rag import SYSTEM_PROMPT as ASK_PROMPT, BISQuestionAnswerer
 
@@ -923,12 +927,13 @@ def test_existing_ask_pipeline_is_unchanged() -> None:
             raise LLMError("could not reach LM Studio (ConnectError)")
 
     answerer = BISQuestionAnswerer(search_engine=get_product_finder().search_engine, llm=Down())
-    raised = None
-    try:
-        answerer.ask("What is BIS certification?")
-    except LLMError as exc:
-        raised = exc
-    check("an /ask model outage still raises LLMError, never a fabricated answer", raised is not None)
+    down = answerer.ask("What is BIS certification?")
+    # Phase 1, Part C: an outage degrades the prose to MetrIQ's own rendering of
+    # the retrieved records — never a fabricated answer, and never a dead end.
+    check("an /ask model outage returns the retrieved evidence, never a model answer",
+          down.explained is False and bool(down.results))
+    check("and the outage is stated, not hidden",
+          lang.EVIDENCE_ONLY[lang.EN] in down.answer)
 
 
 def main() -> int:

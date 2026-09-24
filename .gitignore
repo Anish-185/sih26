@@ -6,6 +6,10 @@ venv/
 *.egg-info/
 .pytest_cache/
 
+# Phase 4: build-time HTTP cache for scripts/fetch_standard_titles.py, so a
+# re-run does not re-fetch bis.gov.in or archive.org. Derived, never evidence.
+backend/.cache/
+
 # Environment / secrets
 .env
 .env.local

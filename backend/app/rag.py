@@ -15,8 +15,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from app import boundary as boundary_module
 from app import language as lang
-from app.llm import LocalLLM
+from app.llm import LLMError, LocalLLM
 from app.openrouter import OpenRouterLLM
 from app.retrieval import RetrievalResult, SearchEngine
 
@@ -50,6 +51,13 @@ class GroundedAnswer:
     # The canonical English terms the query's non-English wording was mapped to
     # for retrieval. Empty when nothing needed rewriting.
     concepts: list[str] = field(default_factory=list)
+    # False when the explanation provider was unreachable and MetrIQ rendered the
+    # retrieved records itself (see `render_evidence`). The evidence is the same
+    # either way; only the prose around it differs.
+    explained: bool = True
+    # Phase 3: on abstention, MetrIQ's own explanation of its coverage boundary.
+    # None whenever there is an answer.
+    boundary: boundary_module.Boundary | None = None
 
 
 def _build_context(results: list[RetrievalResult]) -> str:
@@ -79,6 +87,35 @@ SOURCE URL: {item.source_url or "N/A"}
     return "\n---\n".join(blocks)
 
 
+def render_evidence(results: list[RetrievalResult], language: str) -> str:
+    """The retrieved records as plain prose, written by MetrIQ's own code.
+
+    Used when the explanation provider is unreachable. No model is involved, so
+    there is nothing to invent: every line below is either MetrIQ's own fixed
+    sentence (translated, like the abstention message) or a field copied
+    verbatim out of a verified record. Record text stays in its stored English —
+    the knowledge base is never translated.
+    """
+    blocks = [lang.evidence_only(language)]
+
+    for index, result in enumerate(results, start=1):
+        item = result.item
+        heading = f"{index}. {item.title}"
+        if item.standard_number:
+            heading = f"{index}. {item.standard_number} — {item.title}"
+
+        trail = " · ".join(
+            part for part in (
+                item.source_organization,
+                item.document_name,
+                item.source_url,
+            ) if part
+        )
+        blocks.append("\n".join(part for part in (heading, item.content, trail) if part))
+
+    return "\n\n".join(blocks)
+
+
 class BISQuestionAnswerer:
     """Deterministic retrieval followed by grounded generation.
 
@@ -96,6 +133,8 @@ class BISQuestionAnswerer:
         self.search_engine = search_engine
         self.llm = llm
         self.retrieval_limit = retrieval_limit
+        # Counted once from the loaded knowledge base (see app/boundary.py).
+        self.coverage = boundary_module.measure(search_engine.items)
 
     def ask(self, question: str, language: str = lang.AUTO) -> GroundedAnswer:
         # The language to answer in. An explicit choice wins; "auto" detects the
@@ -112,13 +151,19 @@ class BISQuestionAnswerer:
             limit=self.retrieval_limit,
         )
 
-        # Retrieval abstention means the LLM receives no context.
+        # Retrieval abstention means the LLM receives no context. Rather than a
+        # dead end, MetrIQ states its own boundary: what the verified data covers,
+        # what the search did, and where to look next (app/boundary.py).
         if outcome.abstained or not outcome.results:
             return GroundedAnswer(
                 answer=lang.insufficient(answer_language),
                 results=[],
                 language=answer_language,
                 concepts=normalized.concepts,
+                boundary=boundary_module.explain(
+                    question, self.coverage, answer_language,
+                    weak_matches=boundary_module.weak_matches_from(outcome.results),
+                ),
             )
 
         context = _build_context(outcome.results)
@@ -137,16 +182,26 @@ BIS EVIDENCE:
 Give a concise answer grounded in the supplied evidence.
 """
 
-        answer = self.llm.generate(
-            # Adds nothing for English, so English behaviour is unchanged.
-            system_prompt=lang.apply(SYSTEM_PROMPT, answer_language),
-            user_prompt=user_prompt,
-            temperature=0.1,
-        )
+        try:
+            answer = self.llm.generate(
+                # Adds nothing for English, so English behaviour is unchanged.
+                system_prompt=lang.apply(SYSTEM_PROMPT, answer_language),
+                user_prompt=user_prompt,
+                temperature=0.1,
+            )
+            explained = True
+        except LLMError:
+            # The provider is down, rate-limited or unconfigured. The retrieval
+            # above already succeeded, so MetrIQ has the evidence and renders it
+            # itself rather than failing the request. Deterministic, and
+            # explicitly labelled as evidence without an AI explanation.
+            answer = render_evidence(outcome.results, answer_language)
+            explained = False
 
         return GroundedAnswer(
             answer=answer,
             results=outcome.results,
             language=answer_language,
             concepts=normalized.concepts,
+            explained=explained,
         )

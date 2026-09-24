@@ -10,8 +10,9 @@ import { Mono } from "@/components/ui";
  * reader instead of demanding attention. The stage list is also clickable, and
  * the whole thing degrades to a plain ordered list on narrow screens.
  *
- * These four ARE a sequence (a photo becomes text becomes a product becomes a
- * standard), so they are numbered. Nothing here is a claim about a result.
+ * These four ARE a sequence (a question or a photo becomes a product becomes a
+ * standard becomes the services around it), so they are numbered. Nothing here
+ * is a claim about a result.
  */
 interface Stage {
   n: string;
@@ -26,23 +27,23 @@ interface Stage {
 const STAGES: Stage[] = [
   {
     n: "01",
-    name: "Capture",
-    line: "A photograph of the package",
+    name: "Ask",
+    line: "A question, a product name, or a photograph",
     detail:
-      "Photograph one side or several. Every image is read on its own, and a side that cannot be read is reported rather than treated as absent.",
+      "Describe the product in plain English, Hindi or Telugu — or photograph it and let MetrIQ read the label. A photograph is the fastest way in when you do not know what the product is officially called.",
     output: [
-      { label: "Image", value: "front.png · 1000 × 1150" },
-      { label: "Regions found", value: "15" },
-      { label: "Mean confidence", value: "88%" },
+      { label: "Question", value: "\u201cIs an LED bulb certified?\u201d" },
+      { label: "Or a photo", value: "front.png · 15 text regions" },
+      { label: "Languages", value: "English · हिन्दी · తెలుగు" },
     ],
-    foot: "Local OCR. No image leaves the machine for text.",
+    foot: "OCR runs locally. No image leaves the machine to become text.",
   },
   {
     n: "02",
     name: "Understand",
-    line: "Text becomes declared values",
+    line: "Words become an identified product",
     detail:
-      "Fixed rules turn the raw text into declared fields — net quantity, MRP, packer, dates — each one linked back to the exact region it was read from.",
+      "Fixed rules turn what you typed — or what the label printed — into an identified product and its declared values, each one linked back to the exact region it was read from.",
     output: [
       { label: "Net quantity", value: "1 L" },
       { label: "MRP", value: "₹20.00" },
@@ -61,7 +62,7 @@ const STAGES: Stage[] = [
       { label: "Standard", value: "IS 14543:2016" },
       { label: "Route", value: "Scheme I · ISI Mark" },
     ],
-    foot: "97 verified Indian Standards, each with an official BIS source.",
+    foot: "505 verified Indian Standards, each with an official BIS source.",
   },
   {
     n: "04",
@@ -89,7 +90,7 @@ export function Pipeline() {
         <div className="max-w-xl">
           <span className="eyebrow">How it works</span>
           <h2 id={headingId} className="display mt-4 text-[1.8rem] sm:text-[2.4rem]">
-            A photograph becomes a traceable chain
+            A question becomes a traceable chain
           </h2>
         </div>
         <p className="max-w-xs text-[13px] leading-relaxed text-ink-soft">
@@ -206,7 +207,7 @@ export function Pipeline() {
           to="/inspection"
           className="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.16em] text-accent transition-colors hover:text-accent-hover"
         >
-          Run this on your own package
+          Try it on a product of your own
           <span aria-hidden className="h-px w-6 bg-current" />
         </Link>
       </div>

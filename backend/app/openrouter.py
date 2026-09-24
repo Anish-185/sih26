@@ -21,7 +21,7 @@ surface, so the explanation layer stays provider-replaceable.
 Configuration (environment; ``backend/.env`` is read by ``load_env_file()``):
 
     OPENROUTER_API_KEY       required — server-side only, never sent to the browser
-    OPENROUTER_MODEL         default "inclusionai/ling-3.0-flash-vl:free"
+    OPENROUTER_MODEL         default "nvidia/nemotron-3-super-120b-a12b:free"
     OPENROUTER_BASE_URL      default "https://openrouter.ai/api/v1"
     OPENROUTER_TIMEOUT       seconds, default 60
     OPENROUTER_DAILY_LIMIT   default 45  (free tier allows ~50/day — headroom kept)
@@ -45,7 +45,11 @@ import httpx
 
 from app.llm import LLMError
 
-DEFAULT_MODEL = "inclusionai/ling-3.0-flash-vl:free"
+# Verified live against OpenRouter's model list on 2026-09-24. Free slugs get
+# withdrawn without notice — the previous default (inclusionai/ling-3.0-flash-vl
+# :free) had been pulled, which left a clone with no backend/.env pointing at a
+# 404. Re-check with scripts, not from memory, before a demo.
+DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_TIMEOUT = 60.0
 DEFAULT_DAILY_LIMIT = 45

@@ -12,6 +12,7 @@ Endpoints:
 from __future__ import annotations
 
 import os
+import re
 from functools import lru_cache
 from typing import Annotated
 
@@ -20,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app import lab_registry
 from app import language as lang
+from app.boundary import Boundary
 from app.certification import CertificationGuidanceService
 from app.certification_journey import (
     CertificationJourneyOut,
@@ -103,6 +105,111 @@ def get_laboratory_service() -> LaboratorySearchService:
         # Milestone 18: product -> standard reuses the existing finder, so there
         # is no second product classifier.
         product_finder=get_product_finder(),
+    )
+
+
+# ---------------------------------------------------------------------
+# Catalogue identity (Phase 4)
+# ---------------------------------------------------------------------
+#
+# The catalogue title and the route its text came from are stored inside each
+# record's `content` — one source of truth, no schema change. They are read back
+# out here so the UI can show the provenance, which is not optional: BIS SELLS
+# these standards, so text taken from a third-party mirror must never be
+# presented as though it came from bis.gov.in.
+
+_CATALOGUE_TITLE = re.compile(r'Catalogue title[^:]*:\s*"(?P<title>[^"]+)"')
+_DAMAGED = "looks damaged"
+
+
+class CatalogueOut(BaseModel):
+    """The standard's real catalogue identity, and where the text came from."""
+
+    title: str
+    # "bis"     — BIS's own Know Your Standards catalogue (official, primary)
+    # "archive" — the Public.Resource.Org mirror on the Internet Archive (fallback)
+    source_route: str
+    source_label: str
+    official: bool
+    # True when the source returned damaged text. It is shown as recorded and was
+    # never repaired, so the reader can see that it is the source that is wrong.
+    title_suspect: bool = False
+
+
+def _catalogue_out(content: str) -> CatalogueOut | None:
+    found = _CATALOGUE_TITLE.search(content or "")
+    if not found:
+        return None
+    mirrored = "MIRROR of the Indian Standards on the Internet Archive" in content
+    return CatalogueOut(
+        title=found.group("title"),
+        source_route="archive" if mirrored else "bis",
+        source_label=(
+            "Public.Resource.Org mirror on the Internet Archive — not a BIS publication"
+            if mirrored else
+            "BIS Know Your Standards catalogue (services.bis.gov.in)"
+        ),
+        official=not mirrored,
+        title_suspect=_DAMAGED in content[:found.end() + 200],
+    )
+
+
+# ---------------------------------------------------------------------
+# Coverage boundary (Phase 3)
+# ---------------------------------------------------------------------
+
+class WeakMatchOut(BaseModel):
+    """A record reached by a partial word match only.
+
+    Shown as evidence of what the search did — NEVER as an answer. Every surface
+    that renders it says so.
+    """
+
+    standard_number: str | None = None
+    title: str
+    confidence: str
+    matched_terms: list[str]
+    source_url: str | None = None
+
+
+class BoundaryOut(BaseModel):
+    """MetrIQ's own explanation of why it did not answer.
+
+    Written by code, in the user's language (app/language.py), never by a model.
+    It never claims that no Indian Standard exists for the product.
+    """
+
+    language: str
+    heading: str
+    lines: list[str]
+    next_step: str
+    next_step_url: str
+    weak_heading: str = ""
+    weak_note: str = ""
+    weak_matches: list[WeakMatchOut] = Field(default_factory=list)
+
+
+def _boundary_out(boundary: Boundary | None) -> BoundaryOut | None:
+    if boundary is None:
+        return None
+    return BoundaryOut(
+        language=boundary.language,
+        heading=boundary.heading,
+        lines=boundary.lines,
+        next_step=boundary.next_step,
+        next_step_url=boundary.next_step_url,
+        weak_heading=boundary.weak_heading,
+        weak_note=boundary.weak_note,
+        weak_matches=[
+            WeakMatchOut(
+                standard_number=match.standard_number,
+                title=match.title,
+                confidence=match.confidence,
+                matched_terms=match.matched_terms,
+                source_url=match.source_url,
+            )
+            for match in boundary.weak_matches
+        ],
     )
 
 
@@ -202,6 +309,13 @@ class AskResponse(BaseModel):
     # Canonical English terms the query's non-English wording was mapped to for
     # retrieval. Empty when nothing needed rewriting.
     matched_concepts: list[str] = Field(default_factory=list)
+    # False when the explanation provider was unreachable and the answer is the
+    # retrieved records rendered by MetrIQ's own code. The evidence and the
+    # sources are unchanged; only the prose differs.
+    explained: bool = True
+    # Phase 3: present only when MetrIQ abstained — its own account of what the
+    # verified data covers and where to look next.
+    boundary: BoundaryOut | None = None
 
 
 # ---------------------------------------------------------------------
@@ -217,6 +331,11 @@ class ProductStandardRequest(BaseModel):
         default=5,
         ge=1,
         le=50,
+    )
+    language: str = Field(
+        default=lang.AUTO,
+        description='Language for MetrIQ\'s own messages: "auto", "en", "hi" or "te". '
+                    "Evidence is identical in every language.",
     )
 
 
@@ -241,6 +360,8 @@ class ProductStandardResultOut(BaseModel):
     matched_terms: list[str]
     reasons: list[ReasonOut]
     why: WhyOut
+    # Phase 4: the real catalogue identity, with the route its text came from.
+    catalogue: CatalogueOut | None = None
     source_organization: str
     source_url: str | None = None
     document_name: str | None = None
@@ -255,6 +376,8 @@ class ProductStandardResponse(BaseModel):
     grounded: bool
     confidence: str
     note: str = ""
+    # Phase 3: present only when MetrIQ abstained.
+    boundary: BoundaryOut | None = None
 
 
 # ---------------------------------------------------------------------
@@ -563,13 +686,10 @@ def ask_post(
             language=empty_language,
         )
 
-    try:
-        result = get_answerer().ask(question, language=request.language)
-    except LLMError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Explanation service unavailable: {exc}",
-        ) from exc
+    # No 503 path: if the explanation provider is unreachable, the answerer
+    # renders the retrieved verified records itself (app/rag.render_evidence), so
+    # a provider outage degrades the prose and never the evidence.
+    result = get_answerer().ask(question, language=request.language)
 
     return AskResponse(
         question=question,
@@ -582,6 +702,8 @@ def ask_post(
         ],
         language=result.language,
         matched_concepts=result.concepts,
+        explained=result.explained,
+        boundary=_boundary_out(result.boundary),
     )
 
 
@@ -610,6 +732,7 @@ def product_standard_post(
     outcome = get_product_finder().find(
         product,
         limit=request.limit,
+        language=lang.resolve(product, request.language),
     )
 
     results = [
@@ -635,6 +758,7 @@ def product_standard_post(
                 signals=why.signals,
                 summary=why.summary,
             ),
+            catalogue=_catalogue_out(result.item.content),
             source_organization=result.item.source_organization,
             source_url=result.item.source_url,
             document_name=result.item.document_name,
@@ -655,6 +779,7 @@ def product_standard_post(
         grounded=outcome.grounded,
         confidence=outcome.confidence,
         note=outcome.note,
+        boundary=_boundary_out(outcome.boundary),
     )
 
 

@@ -182,7 +182,11 @@ def test_regression() -> None:
     single = analyzer.analyze(png(F), "front.png")
     check("25 single image still works with completeness", single.ocr.regions[0].id == "OCR-001" and single.completeness.items)
     body = TestClient(app).post("/product-standard", json={"product": "packaged drinking water"}).json()
-    check("23 Product -> Standard unchanged", set(body) == {"product", "results", "grounded", "confidence", "note"}
+    # Phase 3 added `boundary` (null whenever there is an answer); the original
+    # keys must all survive.
+    check("23 Product -> Standard unchanged",
+          {"product", "results", "grounded", "confidence", "note"} <= set(body)
+          and body.get("boundary") is None
           and body["results"][0]["standard_number"] == "IS 14543:2016" and body["results"][0]["why"]["summary"])
     retrieval_why = full.standards[0].why
     check("retrieval 'why this result' is a real explanation of the candidate standard",

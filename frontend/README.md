@@ -1,7 +1,7 @@
 # MetrIQ — Frontend
 
-React + TypeScript + Vite + Tailwind CSS v4. The UI for the MetrIQ
-(AI-Assisted Legal Metrology Inspection) system.
+React + TypeScript + Vite + Tailwind CSS v4. The UI for MetrIQ, the
+evidence-backed assistant for Indian Standards & BIS services.
 
 ## Run
 

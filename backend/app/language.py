@@ -288,6 +288,122 @@ WITHHELD = {
 }
 
 
+# MetrIQ's own sentence when the explanation provider is unreachable and /ask
+# falls back to rendering the retrieved records itself (Phase 1, Part C). Hard-
+# coded per language for the same reason as INSUFFICIENT and WITHHELD: MetrIQ is
+# speaking about its own evidence, and must be able to do so with no model
+# running at all. The records themselves stay in their stored English — the
+# knowledge base is never translated.
+EVIDENCE_ONLY = {
+    EN: ("An AI explanation is not available right now, so MetrIQ is showing the "
+         "verified BIS records it retrieved for this question, exactly as they are "
+         "stored. Nothing below was written by a language model."),
+    HI: ("इस समय AI व्याख्या उपलब्ध नहीं है, इसलिए MetrIQ ने इस प्रश्न के लिए जो सत्यापित "
+         "BIS रिकॉर्ड प्राप्त किए, उन्हें जैसा संग्रहीत है वैसा ही दिखाया जा रहा है। नीचे दिया गया "
+         "कुछ भी किसी भाषा मॉडल द्वारा नहीं लिखा गया है।"),
+    TE: ("ప్రస్తుతం AI వివరణ అందుబాటులో లేదు, అందువల్ల ఈ ప్రశ్నకు MetrIQ పొందిన ధృవీకరించిన "
+         "BIS రికార్డులను నిల్వ ఉన్న రూపంలోనే చూపిస్తోంది. కింద ఉన్నది ఏదీ భాషా నమూనా "
+         "(language model) రాసినది కాదు."),
+}
+
+
+def evidence_only(language: str) -> str:
+    return EVIDENCE_ONLY.get(language, EVIDENCE_ONLY[EN])
+
+
+# MetrIQ's own sentences for an informative abstention (Phase 3). Hard-coded per
+# language for the same reason as INSUFFICIENT, EMPTY_QUESTION and WITHHELD:
+# MetrIQ is speaking about its OWN coverage, not about BIS, and must be able to do
+# so with no model running.
+#
+# Every sentence is a claim about what MetrIQ holds and what its search did. None
+# of them is a claim about the product, and none of them says an Indian Standard
+# does not exist for it — those are different statements, and conflating them
+# would be a fabrication. The numbers are substituted from the knowledge base by
+# app/boundary.py, never typed here.
+#
+# NOTE on "{product} is not on those lists": it is deliberately NOT said. MetrIQ
+# cannot tell at runtime whether a product is genuinely absent from BIS's listings
+# or merely listed under wording the query did not match — "refrigerator" retrieves
+# nothing although BIS lists "Household Refrigerating Appliances", and "solar
+# panel" retrieves solar water heating although BIS lists "Photovoltaic (PV)
+# modules". So the boundary states BOTH possibilities and resolves neither.
+
+BOUNDARY = {
+    EN: {
+        "heading": "Why MetrIQ did not answer this",
+        "covers": ("MetrIQ's verified data covers {standards} Indian Standards that BIS lists "
+                   "under compulsory certification — {scheme_i} from the Scheme I (ISI Mark) "
+                   "listing and {scheme_ii} from the Scheme II (Compulsory Registration Scheme) "
+                   "listing, transcribed from BIS's own pages and covering {products} listed "
+                   "products, and {other} from other official BIS pages — plus "
+                   "{legal_metrology} Legal Metrology packaged-commodity rule records."),
+        "not_found": ("No standard in that verified data was matched to \u201c{product}\u201d."),
+        "two_reasons": ("That can mean one of two things, and MetrIQ cannot tell which: the "
+                        "product is not on the two BIS listing pages this data was built from, "
+                        "or it is listed there under different wording from the words you used. "
+                        "It does NOT mean that no Indian Standard exists for this product."),
+        "why_boundary": ("BIS notifies roughly {notified} products under compulsory certification. "
+                         "About {outside} of them sit in Quality Control Orders that BIS does not "
+                         "publish on those two pages, so they are outside this dataset."),
+        "where_next": "Search BIS's Know Your Standards by product name:",
+        "weak_heading": "A weak match was retrieved",
+        "weak_body": ("MetrIQ found the record below by a partial word match only. It is shown as "
+                      "evidence of what the search did, NOT as an answer, and MetrIQ is not "
+                      "putting it forward as the standard for this product."),
+    },
+    HI: {
+        "heading": "MetrIQ ने इसका उत्तर क्यों नहीं दिया",
+        "covers": ("MetrIQ के सत्यापित डेटा में BIS द्वारा अनिवार्य प्रमाणन के अंतर्गत सूचीबद्ध "
+                   "{standards} भारतीय मानक हैं — {scheme_i} स्कीम I (ISI मार्क) सूची से और "
+                   "{scheme_ii} स्कीम II (अनिवार्य पंजीकरण योजना) सूची से, जो BIS के अपने पृष्ठों से "
+                   "लिए गए हैं और {products} सूचीबद्ध उत्पादों को कवर करते हैं — तथा {other} अन्य आधिकारिक "
+                   "BIS पृष्ठों से; साथ ही {legal_metrology} लीगल मेट्रोलॉजी पैकेज्ड-कमोडिटी नियम रिकॉर्ड।"),
+        "not_found": ("उस सत्यापित डेटा में “{product}” से मेल खाता कोई मानक नहीं मिला।"),
+        "two_reasons": ("इसका अर्थ दो में से कुछ भी हो सकता है, और MetrIQ यह तय नहीं कर सकता कि कौन सा: "
+                        "या तो यह उत्पाद उन दो BIS सूची-पृष्ठों पर नहीं है जिनसे यह डेटा बना है, या वह वहाँ "
+                        "आपके उपयोग किए गए शब्दों से भिन्न शब्दों में सूचीबद्ध है। इसका यह अर्थ नहीं है कि "
+                        "इस उत्पाद के लिए कोई भारतीय मानक मौजूद नहीं है।"),
+        "why_boundary": ("BIS लगभग {notified} उत्पादों को अनिवार्य प्रमाणन के अंतर्गत अधिसूचित करता है। "
+                         "इनमें से लगभग {outside} ऐसे गुणवत्ता नियंत्रण आदेशों (QCO) में हैं जिन्हें BIS उन "
+                         "दो पृष्ठों पर प्रकाशित नहीं करता, इसलिए वे इस डेटासेट के बाहर हैं।"),
+        "where_next": "उत्पाद के नाम से BIS की Know Your Standards में खोजें:",
+        "weak_heading": "एक कमज़ोर मिलान मिला",
+        "weak_body": ("MetrIQ को नीचे दिया गया रिकॉर्ड केवल आंशिक शब्द-मिलान से मिला। यह केवल यह दिखाने "
+                      "के लिए है कि खोज ने क्या किया, उत्तर के रूप में नहीं — MetrIQ इसे इस उत्पाद के मानक "
+                      "के रूप में प्रस्तुत नहीं कर रहा है।"),
+    },
+    TE: {
+        "heading": "MetrIQ దీనికి ఎందుకు సమాధానం ఇవ్వలేదు",
+        "covers": ("MetrIQ ధృవీకరించిన డేటాలో BIS తప్పనిసరి ధృవీకరణ కింద జాబితా చేసిన "
+                   "{standards} భారతీయ ప్రమాణాలు ఉన్నాయి — {scheme_i} స్కీమ్ I (ISI మార్క్) "
+                   "జాబితా నుండి, {scheme_ii} స్కీమ్ II (తప్పనిసరి నమోదు పథకం) జాబితా నుండి, "
+                   "BIS సొంత పేజీల నుండి తీసుకున్నవి, {products} జాబితా చేసిన ఉత్పత్తులను "
+                   "కవర్ చేస్తాయి — మరో {other} ఇతర అధికారిక BIS పేజీల నుండి, అదనంగా "
+                   "{legal_metrology} లీగల్ మెట్రాలజీ ప్యాకేజ్డ్-కమోడిటీ "
+                   "నియమ రికార్డులు."),
+        "not_found": ("ఆ ధృవీకరించిన డేటాలో “{product}”కి సరిపోలిన ప్రమాణం ఏదీ దొరకలేదు."),
+        "two_reasons": ("దీనికి రెండు అర్థాలు ఉండవచ్చు, వాటిలో ఏది అన్నది MetrIQ నిర్ధారించలేదు: ఈ ఉత్పత్తి "
+                        "ఈ డేటా తయారైన రెండు BIS జాబితా పేజీలలో లేదు, లేదా మీరు వాడిన పదాలకు భిన్నమైన "
+                        "పదాలతో అక్కడ జాబితా చేయబడి ఉంది. ఈ ఉత్పత్తికి భారతీయ ప్రమాణం లేదని దీని "
+                        "అర్థం కాదు."),
+        "why_boundary": ("BIS సుమారు {notified} ఉత్పత్తులను తప్పనిసరి ధృవీకరణ కింద నోటిఫై చేస్తుంది. "
+                         "వాటిలో సుమారు {outside} ఉత్పత్తులు BIS ఆ రెండు పేజీలలో ప్రచురించని నాణ్యతా "
+                         "నియంత్రణ ఉత్తర్వుల (QCO) పరిధిలో ఉన్నాయి, కాబట్టి అవి ఈ డేటాసెట్ వెలుపల ఉన్నాయి."),
+        "where_next": "ఉత్పత్తి పేరుతో BIS Know Your Standards లో వెతకండి:",
+        "weak_heading": "బలహీనమైన సరిపోలిక దొరికింది",
+        "weak_body": ("కింది రికార్డు MetrIQ కు పాక్షిక పద-సరిపోలిక ద్వారా మాత్రమే దొరికింది. ఇది శోధన ఏమి "
+                      "చేసిందో చూపడానికే తప్ప సమాధానంగా కాదు — MetrIQ దీనిని ఈ ఉత్పత్తికి ప్రమాణంగా "
+                      "ముందుకు తీసుకురావడం లేదు."),
+    },
+}
+
+
+def boundary(language: str) -> dict:
+    """MetrIQ's own abstention sentences in the requested language."""
+    return BOUNDARY.get(language, BOUNDARY[EN])
+
+
 def withheld(language: str) -> str:
     return WITHHELD.get(language, WITHHELD[EN])
 

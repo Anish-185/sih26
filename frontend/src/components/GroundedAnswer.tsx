@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { ArrowUpRight, ExternalLink, FileText } from "lucide-react";
-import type { EvidenceSource } from "@/lib/api";
+import type { CoverageBoundary, EvidenceSource } from "@/lib/api";
+import { CoverageBoundaryPanel } from "@/components/CoverageBoundary";
 import { categoryLabel, confidenceLabel } from "@/lib/format";
 import { Callout, Chip, ConfidenceMeter, Mono, Panel } from "@/components/ui";
 import { Annotation, Bracket } from "@/components/decor";
@@ -21,6 +22,8 @@ export function GroundedAnswer({
   sources,
   context,
   abstentionMessage,
+  explained = true,
+  boundary = null,
 }: {
   question: string;
   answer: string;
@@ -30,6 +33,12 @@ export function GroundedAnswer({
   sources: EvidenceSource[];
   context?: { label: string; value: string | null } | null;
   abstentionMessage: string;
+  /** False when the provider was unavailable and `answer` is MetrIQ's own
+      rendering of the retrieved records. The evidence below is unaffected. */
+  explained?: boolean;
+  /** Present only when MetrIQ abstained: its own account of the coverage
+      boundary, rendered in place of a bare "nothing found". */
+  boundary?: CoverageBoundary | null;
 }) {
   return (
     <div className="relative border border-line bg-raised">
@@ -38,7 +47,7 @@ export function GroundedAnswer({
       {/* exhibit header */}
       <div className="flex items-center justify-between border-b border-line px-5 py-2.5 sm:px-6">
         <Mono muted className="text-[10px] uppercase tracking-[0.18em]">
-          {grounded ? "Grounded answer" : "Result"}
+          {!grounded ? "Result" : explained ? "Grounded answer" : "Evidence only"}
         </Mono>
         <Annotation className="hidden sm:inline-flex">Evidence first</Annotation>
       </div>
@@ -55,7 +64,23 @@ export function GroundedAnswer({
 
           <div className="px-5 py-6 sm:px-6">
             {grounded ? (
-              <Prose text={answer} />
+              <>
+                {!explained && (
+                  <div className="mb-5 border-l-2 border-review bg-surface px-4 py-3">
+                    <Mono muted className="text-[10px] uppercase tracking-[0.18em]">
+                      No AI explanation
+                    </Mono>
+                    <p className="mt-1.5 text-[12px] leading-relaxed text-ink-soft">
+                      The explanation service is unavailable. MetrIQ retrieved the
+                      verified BIS records below and rendered them itself — the
+                      evidence and its sources are unchanged.
+                    </p>
+                  </div>
+                )}
+                <Prose text={answer} />
+              </>
+            ) : boundary ? (
+              <CoverageBoundaryPanel boundary={boundary} />
             ) : (
               <Callout tone="abstain" title="Insufficient verified evidence">
                 {abstentionMessage}
@@ -86,6 +111,11 @@ export function GroundedAnswer({
             <SpecRow label="Grounded">
               <Mono className={grounded ? "text-pass" : "text-review"}>
                 {grounded ? "yes" : "no"}
+              </Mono>
+            </SpecRow>
+            <SpecRow label="Explanation">
+              <Mono muted className="text-[11px] uppercase tracking-[0.1em]">
+                {explained ? "AI, grounded" : "none — evidence only"}
               </Mono>
             </SpecRow>
             <SpecRow label="Confidence">

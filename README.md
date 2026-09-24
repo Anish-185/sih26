@@ -2,9 +2,9 @@
 
 # MetrIQ
 
-### AI-Assisted Legal Metrology Inspection · Evidence-Backed BIS Assistant
+### Evidence-Backed Assistant for Indian Standards & BIS Services
 
-**Point a photo of a product label at MetrIQ. It reads the declared values, works out the applicable Indian Standard, and shows its working — every value traced back to the pixel it came from.**
+**Ask about Indian Standards and BIS services in plain English, Hindi or Telugu — or photograph a product and let MetrIQ start from the label. Either way it answers only from verified BIS records, and shows you the official page every answer came from.**
 
 ![Python 3.14](https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.11x-009688?logo=fastapi&logoColor=white)

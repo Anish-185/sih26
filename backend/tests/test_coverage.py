@@ -383,7 +383,9 @@ def test_regression() -> None:
     check("/search still grounded", search.get("results"))
     body = client.post("/product-standard", json={"product": "packaged drinking water"}).json()
     check("22 Product -> Standard unchanged",
-          set(body) == {"product", "results", "grounded", "confidence", "note"}
+          # Phase 3 added `boundary`; the original keys must all survive.
+          {"product", "results", "grounded", "confidence", "note"} <= set(body)
+          and body.get("boundary") is None
           and body["results"][0]["standard_number"] == "IS 14543:2016")
     check("23 Why-this-result still present", body["results"][0]["why"]["summary"].startswith("Retrieved as a candidate standard"))
 

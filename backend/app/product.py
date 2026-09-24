@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from app import boundary as boundary_module
+from app import language as lang
 from app.retrieval.engine import RetrievalResult, SearchEngine
 
 # ---------------------------------------------------------------------------
@@ -123,6 +125,10 @@ class ProductStandardOutcome:
     # Phase 9: one deterministic "Why this result?" explanation per entry in
     # `results`, in the same order. Empty when the query abstained.
     explanations: list[WhyThisResult] = field(default_factory=list)
+    # Phase 3: on abstention, MetrIQ's own explanation of its coverage boundary —
+    # what the verified data holds, what the search did, and where to look next.
+    # None whenever there is an answer; there is no boundary to explain then.
+    boundary: boundary_module.Boundary | None = None
 
 
 class ProductStandardFinder:
@@ -130,11 +136,15 @@ class ProductStandardFinder:
 
     def __init__(self, search_engine: SearchEngine) -> None:
         self.search_engine = search_engine
+        # Counted once from the loaded knowledge base, so the numbers MetrIQ
+        # quotes about itself can never drift away from the data.
+        self.coverage = boundary_module.measure(search_engine.items)
 
     def find(
         self,
         product: str,
         limit: int = 5,
+        language: str = lang.EN,
     ) -> ProductStandardOutcome:
         product = product.strip()
 
@@ -178,6 +188,14 @@ class ProductStandardFinder:
         candidates = candidates[: max(1, min(limit, 50))]
 
         if not candidates:
+            # Nothing clearly describes the product. Rather than a dead end, say
+            # what the verified data covers, what the search did, and where to
+            # look next — and show any partial match as evidence, never as an
+            # answer. See app/boundary.py for what this deliberately never claims.
+            weak = boundary_module.weak_matches_from([
+                result for result in search.results
+                if result.item.category == "indian_standards" and result.item.standard_number
+            ])
             return ProductStandardOutcome(
                 product=product,
                 results=[],
@@ -187,6 +205,9 @@ class ProductStandardFinder:
                     "no Indian Standard in the knowledge base clearly describes "
                     "this product; only loose single-word matches were found, so "
                     "no recommendation is made"
+                ),
+                boundary=boundary_module.explain(
+                    product, self.coverage, language, weak_matches=weak,
                 ),
             )
 

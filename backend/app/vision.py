@@ -24,7 +24,7 @@ Configuration — a SEPARATE key from the DeepSeek copilot, so the two quotas an
 the two failure modes stay independent:
 
     OPENROUTER_VISION_API_KEY   required; server-side only, never sent to a browser
-    VISION_MODEL               default "inclusionai/ling-3.0-flash-vl:free"
+    VISION_MODEL               default "dots-studio/dots-3-note-preview:free"
     VISION_BASE_URL            default the shared OpenRouter base URL
     VISION_TIMEOUT             seconds, default 60
     VISION_MAX_IMAGES          images per inspection, default 2 (free-tier guard)
@@ -49,7 +49,9 @@ import httpx
 
 from app.openrouter import CopilotUnavailable, DEFAULT_BASE_URL, UsageLimiter, _status_code, load_env_file
 
-DEFAULT_VISION_MODEL = "inclusionai/ling-3.0-flash-vl:free"
+# Verified live (with image input) on 2026-09-24; see DEFAULT_MODEL on why this
+# is re-checked rather than trusted.
+DEFAULT_VISION_MODEL = "dots-studio/dots-3-note-preview:free"
 DEFAULT_TIMEOUT = 60.0
 DEFAULT_MAX_IMAGES = 2
 DEFAULT_DAILY_LIMIT = 40

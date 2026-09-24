@@ -6,6 +6,7 @@ import { AppLayout } from "@/components/layout";
 import { DashboardView } from "@/features/DashboardView";
 import { InspectionView } from "@/features/inspection/InspectionView";
 import { StandardsView } from "@/features/StandardsView";
+import { AskView } from "@/features/AskView";
 import { CertificationView } from "@/features/CertificationView";
 import { LaboratoriesView } from "@/features/LaboratoriesView";
 import { HallmarkingView } from "@/features/HallmarkingView";
@@ -19,6 +20,7 @@ const router = createBrowserRouter([
     element: <AppLayout />,
     children: [
       { index: true, element: <DashboardView /> },
+      { path: "ask", element: <AskView /> },
       { path: "inspection", element: <InspectionView /> },
       { path: "standards", element: <StandardsView /> },
       { path: "certification", element: <CertificationView /> },

@@ -31,6 +31,7 @@ import {
 } from "@/components/decor";
 import { CopilotPanel } from "@/features/CopilotPanel";
 import { ProductIntelligence } from "@/components/ProductIntelligence";
+import { CoverageBoundaryPanel } from "@/components/CoverageBoundary";
 import { EvidenceGraphSection } from "@/components/EvidenceGraphSection";
 
 const EXAMPLES = [
@@ -165,6 +166,8 @@ export function StandardsView() {
                 />
               ))}
             </ol>
+          ) : res.boundary ? (
+            <CoverageBoundaryPanel boundary={res.boundary} />
           ) : (
             <Callout tone="abstain" title="Retrieval abstained">
               {res.note ||
@@ -250,6 +253,37 @@ function StandardResult({
             {result.document_name ? ` · ${result.document_name}` : ""}
             {result.last_verified ? ` · verified ${result.last_verified}` : ""}
           </p>
+
+          {/* The catalogue title names the STANDARD; the heading above names the
+              product BIS notified. Both are true and they differ, so both are
+              shown — with the route the title's text came from, because BIS sells
+              these standards and a mirror must never read as a BIS publication. */}
+          {result.catalogue && (
+            <div className="mt-3 border-l-2 border-line-strong pl-3">
+              <span className="kicker block">Catalogue title</span>
+              <p className="mt-1 text-[13px] leading-snug text-ink">
+                “{result.catalogue.title}”
+              </p>
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-ink-faint">
+                <Mono
+                  muted
+                  className={cn(
+                    "text-[10px] uppercase tracking-[0.12em]",
+                    result.catalogue.official ? "text-accent" : "text-review",
+                  )}
+                >
+                  {result.catalogue.official ? "BIS catalogue" : "third-party mirror"}
+                </Mono>
+                {result.catalogue.source_label}
+              </p>
+              {result.catalogue.title_suspect && (
+                <p className="mt-1 text-[11px] leading-relaxed text-review">
+                  The source returned this title damaged. It is shown exactly as
+                  recorded and has not been corrected.
+                </p>
+              )}
+            </div>
+          )}
           {coverage && (
             <p className="mt-1.5 text-[12px] leading-relaxed text-ink-soft">
               <Mono

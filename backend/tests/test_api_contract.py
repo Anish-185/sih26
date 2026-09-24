@@ -224,14 +224,18 @@ def test_ask_contract() -> None:
         api_module.get_answerer = original
 
 
-def test_ask_returns_503_on_model_outage() -> None:
+def test_ask_falls_back_to_the_evidence_on_model_outage() -> None:
+    """Phase 1, Part C: an outage degrades the prose, never the evidence."""
     original = _swap_answerer(RaisingLLM())
     try:
         r = CLIENT.post("/ask", json={"question": "What is HUID?"})
-        check("/ask during outage: 503", r.status_code == 503)
-        check("/ask during outage: detail is a clean, provider-neutral message",
-              "Explanation service unavailable" in r.json().get("detail", ""))
-        # an abstaining question never reaches the model -> still 200
+        body = r.json()
+        check("/ask during outage: 200, not a 503", r.status_code == 200)
+        check("/ask during outage: the retrieved sources are still returned",
+              body["grounded"] is True and body["source_count"] > 0)
+        check("/ask during outage: the answer is labelled as unexplained evidence",
+              body["explained"] is False)
+        # an abstaining question never reaches the model -> unchanged
         r2 = CLIENT.post("/ask", json={"question": "zzzz qqqq vvvv nonsense"})
         check("/ask abstention survives an outage: 200, not grounded",
               r2.status_code == 200 and r2.json()["grounded"] is False)
@@ -287,7 +291,7 @@ def main() -> int:
     test_product_standard_contract()
     test_product_standard_never_invents_a_standard_number()
     test_ask_contract()
-    test_ask_returns_503_on_model_outage()
+    test_ask_falls_back_to_the_evidence_on_model_outage()
     test_grounded_surface_empty_input_contracts()
     test_routing()
 

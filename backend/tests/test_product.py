@@ -41,16 +41,28 @@ FINDER = ProductStandardFinder(SearchEngine())
 def standards(product: str) -> list[str]:
     return [r.item.standard_number for r in FINDER.find(product).results]
 
+def names(query: str) -> list[str]:
+    """Standard numbers for a query, ignoring a year Phase 4 filled in.
+
+    Phase 4 completed 63 numbers from BIS's own catalogue ("IS 14625" ->
+    "IS 14625:2015"). That is the SAME standard with its edition now known, so
+    these checks compare the number without its year rather than a literal that
+    would go stale again the next time an edition is established.
+    """
+    return [n.split(":")[0].strip() if ":" in n and n.split(":")[0].strip() else n
+            for n in standards(query)]
+
+
 
 def test_real_products_are_matched() -> None:
     out = FINDER.find("LED lamp")
     check("LED lamp -> IS 16102", "IS 16102 (Part 1)" in standards("LED lamp"))
     check("LED lamp is grounded", out.grounded)
 
-    check("feeding bottle -> IS 14625", "IS 14625" in standards("feeding bottle"))
+    check("feeding bottle -> IS 14625", "IS 14625" in names("feeding bottle"))
     check("electric iron -> IS 302 part 2/sec 3",
           "IS 302 (Part 2/Sec 3)" in standards("electric iron"))
-    check("microwave oven -> IS 302-2-25", "IS 302-2-25" in standards("microwave oven"))
+    check("microwave oven -> IS 302-2-25", "IS 302-2-25" in names("microwave oven"))
     check("laptop charger safety -> IS/IEC 62368",
           "IS/IEC 62368 (Part 1) : 2023" in standards("laptop charger safety"))
 
@@ -67,7 +79,7 @@ def test_single_word_products_still_work() -> None:
           out.confidence != "high", out.confidence)
     check("battery -> IS 16046", "IS 16046" in standards("battery"))
     check("tyre -> a tyre standard",
-          any(s in standards("tyre") for s in ("IS 15627", "IS 15633")))
+          any(s in names("tyre") for s in ("IS 15627", "IS 15633")))
 
 
 def test_stainless_steel_water_bottle_has_coverage() -> None:

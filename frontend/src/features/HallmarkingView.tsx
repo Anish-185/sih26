@@ -1,30 +1,24 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Save, ScanSearch } from "lucide-react";
-import { ApiError, api, type Confidence, type InspectionAnalysis, type LanguageChoice } from "@/lib/api";
+import { ApiError, api, type InspectionAnalysis } from "@/lib/api";
 import { useAsyncTask } from "@/lib/hooks";
 import {
   Button,
   Callout,
-  InlineLoading,
   Mono,
   PageHeader,
   SectionHeading,
-  TextArea,
   TextInput,
 } from "@/components/ui";
 import { Dropzone } from "@/components/Dropzone";
 import { ResolutionPanel } from "@/features/records";
 import { HallmarkEvidencePanel } from "@/features/HallmarkEvidence";
 import {
-  Annotation,
-  BlueprintField,
   Bracket,
   HeaderMotif,
 } from "@/components/decor";
-import { GroundedAnswer } from "@/components/GroundedAnswer";
-import { LanguagePicker } from "@/components/LanguagePicker";
-import { ErrorNote } from "@/features/StandardsView";
+import { AskPanel } from "@/components/AskPanel";
 
 const EXAMPLES = [
   "What is HUID and how can a consumer verify it?",
@@ -35,26 +29,6 @@ const EXAMPLES = [
 ];
 
 export function HallmarkingView() {
-  const [question, setQuestion] = useState("");
-  // Milestone 17: the answer language. Evidence and sources are identical in
-  // every language — only the prose changes.
-  const [language, setLanguage] = useState<LanguageChoice>("auto");
-  const task = useAsyncTask(api.ask);
-
-  function submit(e: FormEvent) {
-    e.preventDefault();
-    const q = question.trim();
-    if (q) task.run(q, language).catch(() => {});
-  }
-
-  const res = task.data;
-  // /ask has no confidence field; derive it from the retrieved evidence.
-  const confidence: Confidence = res
-    ? res.grounded
-      ? ((res.sources[0]?.confidence as Confidence) ?? "medium")
-      : "none"
-    : "none";
-
   return (
     <div className="space-y-12">
       <div className="relative">
@@ -76,77 +50,11 @@ export function HallmarkingView() {
 
       <SectionHeading kicker="Ask" title="Hallmarking & HUID questions" />
 
-      <div className="relative border border-line bg-raised">
-        <Bracket tone="accent" />
-        <form onSubmit={submit} className="space-y-4 p-5 sm:p-6">
-          <label className="kicker mb-2 block">Question</label>
-          <TextArea
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            placeholder="Ask about hallmarking, HUID, purity grades, or consumer verification…"
-            rows={3}
-          />
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <LanguagePicker value={language} onChange={setLanguage} />
-            <Button type="submit" size="lg" disabled={task.loading || !question.trim()}>
-              {task.loading ? <InlineLoading label="Reasoning" /> : "Ask"}
-            </Button>
-          </div>
-        </form>
-        <div className="flex flex-col gap-1.5 border-t border-line px-5 py-3 sm:px-6">
-          <span className="kicker">Examples</span>
-          {EXAMPLES.map((ex) => (
-            <button
-              key={ex}
-              type="button"
-              onClick={() => {
-                setQuestion(ex);
-                task.run(ex, language).catch(() => {});
-              }}
-              className="text-left text-[12px] text-ink-soft transition-colors hover:text-accent"
-            >
-              {ex}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {task.loading && (
-        <p className="flex items-center gap-2 text-[12px] text-ink-faint">
-          <span className="h-1 w-1 animate-pulse bg-accent" />
-          The grounded model is reading the retrieved BIS evidence — this can take
-          a moment.
-        </p>
-      )}
-      {task.error != null && <ErrorNote error={task.error} />}
-
-      {res && (
-        <GroundedAnswer
-          question={res.question}
-          answer={res.answer}
-          grounded={res.grounded}
-          confidence={confidence}
-          note=""
-          sources={res.sources}
-          context={null}
-          abstentionMessage="The available BIS knowledge base does not contain enough verified information to answer this reliably."
-        />
-      )}
-
-      {!res && task.error == null && !task.loading && (
-        <div className="relative border border-dashed border-line-strong bg-surface p-10">
-          <BlueprintField fade="radial" />
-          <div className="relative max-w-md">
-            <Annotation className="mb-3 inline-flex">Awaiting question</Annotation>
-            <div className="text-[15px] font-medium">No question asked yet</div>
-            <p className="mt-2 text-[13px] leading-relaxed text-ink-soft">
-              The answer and every BIS source used will appear here. Sources come
-              from the BIS Hallmarking FAQ, the mandatory-hallmarking order, and
-              BIS consumer pages.
-            </p>
-          </div>
-        </div>
-      )}
+      <AskPanel
+        examples={EXAMPLES}
+        placeholder="Ask about hallmarking, HUID, purity grades, or consumer verification…"
+        emptyHint="The answer and every BIS source used will appear here. Sources come from the BIS Hallmarking FAQ, the mandatory-hallmarking order, and BIS consumer pages."
+      />
     </div>
   );
 }

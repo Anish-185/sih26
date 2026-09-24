@@ -67,6 +67,22 @@ def numbers(query: str, limit: int = 5) -> list[str]:
     return [r.item.standard_number for r in top(query, limit).results]
 
 
+def reached(standard: str, query: str, limit: int = 5) -> bool:
+    """Did `query` reach `standard`, ignoring an edition year?
+
+    Phase 4 completed 63 numbers from BIS's own catalogue ("IS 8144" ->
+    "IS 8144:2025"). That is the same standard with its edition now established,
+    so these pairs — which come from BIS's listing, where the year is often
+    absent — are compared on the number and its parts, not on a literal that goes
+    stale every time an edition is resolved.
+    """
+    wanted = standard.split(":")[0].strip() if ":" in standard else standard
+    return any(
+        found == standard or (found.split(":")[0].strip() if ":" in found else found) == wanted
+        for found in numbers(query, limit)
+    )
+
+
 # --------------------------------------------------------------- 1-4 provenance
 
 
@@ -134,7 +150,12 @@ def test_growth_invented_nothing() -> None:
           "a new standard was given requirements")
 
     for number in ("IS 16333 (Part-3)", "IS 8828", "IS 1867 : 2023"):
-        item = next(i for i in STANDARDS if i.standard_number == number)
+        # Phase 4 may have completed the edition from BIS's own catalogue, so the
+        # lookup ignores a trailing year rather than pinning a literal that goes
+        # stale whenever an edition is established.
+        item = next(i for i in STANDARDS
+                    if i.standard_number == number
+                    or i.standard_number.startswith(number + ":"))
         text = item.content.lower()
         check(f"{number}: states what BIS lists, claims no certification outcome",
               "compulsory certification" in text and "not a statement about any particular item" in text,
@@ -199,7 +220,7 @@ def test_products_reach_their_standard() -> None:
         ("domestic gas stove", "IS 17153:2019"),
     ]
     for query, standard in expected:
-        check(f"'{query}' -> {standard}", standard in numbers(query), str(numbers(query)[:3]))
+        check(f"'{query}' -> {standard}", reached(standard, query), str(numbers(query)[:3]))
 
     check("a product with no verified standard still returns nothing invented",
           all(n in {i.standard_number for i in STANDARDS} for q, _ in expected for n in numbers(q)))
@@ -212,7 +233,7 @@ def test_common_names_and_ocr_noise() -> None:
                             ("cctv camera", "IS/IEC 62368 (Part 1) : 2023"),
                             ("smart watch", "IS/IEC 62368 (Part 1) : 2023"),
                             ("laptop", "IS/IEC 62368 (Part 1) : 2023")]:
-        check(f"common name '{query}' -> {standard}", standard in numbers(query), str(numbers(query)[:2]))
+        check(f"common name '{query}' -> {standard}", reached(standard, query), str(numbers(query)[:2]))
 
     vocab = _vocabulary(ITEMS)
     for joined, wanted in [("PACKAGEDDRINKINGWATER", "packaged drinking water"),

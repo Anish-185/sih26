@@ -15,20 +15,23 @@ import { Multilingual } from "./home/Multilingual";
 // Stable references: useOnMount re-runs when its task changes.
 const loadStats = () => api.inspectionStats();
 const loadRecent = () => api.listInspections(3);
+const loadCoverage = () => api.inspectionCoverage();
 
 /* ------------------------------------------------------------------ hero --- */
 
 function Hero() {
+  // Every number here is counted from what MetrIQ actually holds — the verified
+  // knowledge base and the saved-inspection database. Nothing is illustrative.
+  const coverage = useOnMount(loadCoverage);
   const stats = useOnMount(loadStats);
-  const s = stats.data;
-  // Counts come straight from the database. Unavailable -> "—", never invented.
-  const count = (n: number | undefined) => (n === undefined ? "—" : String(n).padStart(2, "0"));
+  const standards = coverage.data?.standards;
+  const count = (n: number | undefined) => (n === undefined ? "—" : String(n));
 
   return (
     <section className="relative grid items-center gap-x-8 gap-y-14 pt-4 lg:grid-cols-[1.04fr_0.96fr] lg:pt-10">
       <div className="relative z-10 max-w-2xl">
         <div className="ink-in flex items-center gap-3" style={{ animationDelay: "60ms" }}>
-          <span className="eyebrow">AI-assisted legal metrology inspection</span>
+          <span className="eyebrow">Indian Standards &amp; BIS services</span>
           <span className="h-px w-8 bg-accent/40" aria-hidden />
           <Annotation className="hidden sm:inline-flex">BIS / India</Annotation>
         </div>
@@ -37,34 +40,40 @@ function Hero() {
           className="display ink-in mt-7 text-[2.6rem] leading-[1] sm:text-[3.5rem] lg:text-[4.05rem]"
           style={{ animationDelay: "140ms" }}
         >
-          Turn product evidence into standards intelligence.
+          Which Indian Standard governs this product?
         </h1>
 
         <p
           className="ink-in mt-7 max-w-lg text-[15.5px] leading-[1.7] text-ink-soft"
           style={{ animationDelay: "240ms" }}
         >
-          Photograph a package. MetrIQ reads what is printed on it, connects the
-          declared values to a verified Indian Standard, and shows you the BIS page
-          it came from — with every step of the reasoning left open to inspection.
+          Ask in plain English, Hindi or Telugu. MetrIQ answers from verified BIS
+          records only — the standard, whether BIS notified it for compulsory
+          certification, the certification route, the laboratories BIS lists to
+          test it — and shows you the official page behind every one.
         </p>
 
         <div
           className="ink-in mt-9 flex flex-wrap items-stretch gap-3"
           style={{ animationDelay: "320ms" }}
         >
-          <LinkButton to="/inspection" size="lg">
-            <ScanLine className="h-4 w-4" />
-            Inspect a product
+          <LinkButton to="/ask" size="lg">
+            Ask a question
           </LinkButton>
           <LinkButton to="/standards" variant="secondary" size="lg">
-            Explore standards
+            Find a standard for a product
           </LinkButton>
         </div>
 
-        {/* Saved-inspection counts. MetrIQ produces no compliance verdict; what is
-            counted is whether the deterministic system could establish the
-            evidence chain from the photographs. */}
+        <p className="ink-in mt-5 text-[13px] leading-relaxed text-ink-faint" style={{ animationDelay: "360ms" }}>
+          Don't know what the product is called?{" "}
+          <Link to="/inspection" className="inline-flex items-center gap-1.5 text-accent hover:text-accent-hover">
+            <ScanLine className="h-3.5 w-3.5" />
+            Photograph it instead
+          </Link>{" "}
+          — MetrIQ reads the label and starts from there.
+        </p>
+
         <div
           className="ink-in mt-11 border-t border-line pt-6"
           style={{ animationDelay: "400ms" }}
@@ -72,9 +81,12 @@ function Hero() {
           <dl className="grid grid-cols-3 gap-x-6 gap-y-4">
             {(
               [
-                ["Saved inspections", s?.total],
-                ["Established from photos", s?.resolved],
-                ["Needs verification elsewhere", s?.escalated],
+                ["Verified Indian Standards", standards?.length],
+                [
+                  "With a certification route",
+                  standards?.filter((s) => s.certification_route).length,
+                ],
+                ["Products inspected by photo", stats.data?.total],
               ] as [string, number | undefined][]
             ).map(([label, value]) => (
               <div key={label}>
@@ -85,10 +97,10 @@ function Hero() {
               </div>
             ))}
           </dl>
-          {stats.error != null && (
+          {coverage.error != null && (
             <p className="mt-4 text-[12px] text-review">
-              Inspection statistics are unavailable — the inspection database could
-              not be reached.
+              Knowledge-base coverage is unavailable — the MetrIQ backend could not
+              be reached.
             </p>
           )}
         </div>
@@ -319,22 +331,22 @@ function FinalCta() {
       />
       <Reveal className="relative px-7 py-16 sm:px-12 sm:py-20">
         <h2 className="display max-w-lg text-[1.9rem] sm:text-[2.5rem]">
-          Start with a photograph.
+          Start with a question.
         </h2>
         <p className="mt-5 max-w-md text-[15px] leading-relaxed text-ink-soft">
-          Or begin from the other end and look up the Indian Standard for a product
-          you already have in mind.
+          Or, if the product is in front of you, photograph it — the label is the
+          fastest way into the standards that govern it.
         </p>
         <div className="mt-9 flex flex-wrap gap-3">
-          <LinkButton to="/inspection" size="lg">
-            <ScanLine className="h-4 w-4" />
-            Inspect a product
+          <LinkButton to="/ask" size="lg">
+            Ask about BIS
           </LinkButton>
           <LinkButton to="/standards" variant="secondary" size="lg">
             Find a standard
           </LinkButton>
-          <LinkButton to="/certification" variant="secondary" size="lg">
-            Certification guidance
+          <LinkButton to="/inspection" variant="secondary" size="lg">
+            <ScanLine className="h-4 w-4" />
+            Photograph a product
           </LinkButton>
         </div>
       </Reveal>

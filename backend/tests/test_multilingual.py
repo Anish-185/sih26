@@ -489,7 +489,8 @@ def test_http_contract() -> None:
     check("and that prompt is in Devanagari",
           lang.detect(empty.json()["answer"]) == lang.HI)
 
-    # An LLM outage is still a clean 503 in every language.
+    # An LLM outage falls back to the retrieved evidence — in the user's language
+    # (Phase 1, Part C). Never a fabricated answer, and never a dead end.
     real = api_module.get_answerer()
     saved = real.llm
     real.llm = RaisingLLM()
@@ -497,8 +498,11 @@ def test_http_contract() -> None:
         down = CLIENT.post("/ask", json={"question": KETTLE[lang.HI], "language": "hi"})
     finally:
         real.llm = saved
-    check("an LLM outage is still a 503, never a fabricated answer", down.status_code == 503,
-          str(down.status_code))
+    body = down.json()
+    check("an LLM outage returns the evidence, never a fabricated answer",
+          down.status_code == 200 and body["explained"] is False, str(down.status_code))
+    check("and MetrIQ explains the fallback in the requested language",
+          body["language"] == lang.HI and lang.EVIDENCE_ONLY[lang.HI] in body["answer"])
 
 
 # --------------------------------------------------------- 8. other routes

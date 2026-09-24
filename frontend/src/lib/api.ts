@@ -137,6 +137,8 @@ export interface ProductStandardResult {
   matched_terms: string[];
   reasons: Reason[];
   why: WhyThisResult;
+  /** Phase 4 — the real catalogue title and where its text came from. */
+  catalogue: CatalogueIdentity | null;
   source_organization: string;
   source_url: string | null;
   document_name: string | null;
@@ -151,6 +153,22 @@ export interface ProductStandardResponse {
   grounded: boolean;
   confidence: Confidence;
   note: string;
+  /** Present only when MetrIQ abstained — see CoverageBoundary. */
+  boundary: CoverageBoundary | null;
+}
+
+/**
+ * Phase 4 — the standard's real catalogue identity and the route its text came
+ * from. BIS SELLS these standards, so a title taken from the Public.Resource.Org
+ * mirror is always labelled as such and never shown as a bis.gov.in publication.
+ */
+export interface CatalogueIdentity {
+  title: string;
+  source_route: "bis" | "archive";
+  source_label: string;
+  official: boolean;
+  /** The source returned damaged text; it is shown as recorded, never repaired. */
+  title_suspect: boolean;
 }
 
 /** Milestone 16 — one verified knowledge record, quoted word for word. */
@@ -345,6 +363,33 @@ export interface ProductContext {
 export type AnswerLanguage = "en" | "hi" | "te";
 export type LanguageChoice = "auto" | AnswerLanguage;
 
+/* ------------------------------------------- coverage boundary (Phase 3) --- */
+
+/** A record reached by a partial word match only — evidence, never an answer. */
+export interface WeakMatch {
+  standard_number: string | null;
+  title: string;
+  confidence: string;
+  matched_terms: string[];
+  source_url: string | null;
+}
+
+/**
+ * MetrIQ's own explanation of why it did not answer, written by backend code in
+ * the user's language. It never claims that no Indian Standard exists for the
+ * product — only that MetrIQ's verified data did not match one.
+ */
+export interface CoverageBoundary {
+  language: string;
+  heading: string;
+  lines: string[];
+  next_step: string;
+  next_step_url: string;
+  weak_heading: string;
+  weak_note: string;
+  weak_matches: WeakMatch[];
+}
+
 export interface AskResponse {
   question: string;
   answer: string;
@@ -355,6 +400,14 @@ export interface AskResponse {
   language: AnswerLanguage;
   /** Canonical English terms the query's non-English wording mapped to. */
   matched_concepts: string[];
+  /**
+   * False when the explanation provider was unreachable and the answer is the
+   * retrieved verified records rendered by MetrIQ's own code. The evidence and
+   * the sources are unchanged; only the prose differs.
+   */
+  explained: boolean;
+  /** Present only when MetrIQ abstained. */
+  boundary: CoverageBoundary | null;
 }
 
 /* ---- inspection: IMAGE -> OCR (/inspection/ocr) -> pipeline (/analyze) --- */
@@ -1039,10 +1092,10 @@ function packageForm(
 export const api = {
   health: () => request<Health>("/health"),
 
-  productStandard: (product: string, limit = 6) =>
+  productStandard: (product: string, limit = 6, language: LanguageChoice = "auto") =>
     request<ProductStandardResponse>("/product-standard", {
       method: "POST",
-      body: JSON.stringify({ product, limit }),
+      body: JSON.stringify({ product, limit, language }),
     }),
 
   certificationGuidance: (
