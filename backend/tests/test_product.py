@@ -82,8 +82,12 @@ def test_stainless_steel_water_bottle_has_coverage() -> None:
     # word, so the guarantee is about ranking: the two standards that actually
     # describe this product come first, far ahead of any word-level match. The
     # explicit "not returned" checks below still bar unrelated domains.
+    # IS 17803's own title literally reads "Potable Water Bottles (Copper,
+    # Stainless Steel, Aluminium)" -- a full-title match against every query
+    # word -- so it now correctly outranks IS 17526, whose title never says
+    # "water" at all (that keyword-only match is described at Phase 5, above).
     check("the two water-bottle standards rank first and second",
-          [r.item.standard_number for r in out.results[:2]] == ["IS 17526:2021", "IS 17803:2022"],
+          [r.item.standard_number for r in out.results[:2]] == ["IS 17803:2022", "IS 17526:2021"],
           str([r.item.standard_number for r in out.results]))
     check("and they outrank every other candidate by a clear margin",
           len(out.results) < 3 or out.results[1].score > out.results[2].score * 1.5,

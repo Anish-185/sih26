@@ -128,7 +128,9 @@ def test_multiple_candidates() -> None:
 def test_irrelevant_and_empty_queries_abstain() -> None:
     print("\n[5/6] irrelevant and empty queries abstain")
 
-    irrelevant = ENGINE.search("pizza delivery bicycle helicopter")
+    # "bicycle" was dropped from this query: BIS lists Reflectors for Bicycles
+    # under Scheme I, so a bicycle term now legitimately retrieves a standard.
+    irrelevant = ENGINE.search("pizza delivery helicopter")
     check("irrelevant query abstains", irrelevant.abstained)
     check("irrelevant query has confidence 'none'", irrelevant.confidence == "none")
     check("irrelevant query returns no results", irrelevant.results == [])

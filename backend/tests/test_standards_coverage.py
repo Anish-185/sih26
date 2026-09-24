@@ -193,6 +193,10 @@ def test_products_reach_their_standard() -> None:
         ("ups inverter", "IS 16242 (Part 1)"),
         ("stainless steel water bottle", "IS 17526:2021"),
         ("microwave oven", "IS 302-2-25"),
+        ("toaster", "IS 302 (Part 2/Sec 9): 2009"),
+        ("ceiling fan", "IS 374:2019"),
+        ("pressure cooker", "IS 2347:2017"),
+        ("domestic gas stove", "IS 17153:2019"),
     ]
     for query, standard in expected:
         check(f"'{query}' -> {standard}", standard in numbers(query), str(numbers(query)[:3]))
@@ -232,7 +236,10 @@ def test_ambiguous_stays_ambiguous() -> None:
     scores = {r.score for r in out.results}
     check("the cement candidates score alike, so none is arbitrarily preferred", len(scores) <= 2, str(scores))
 
-    for unknown in ("toaster", "ceiling fan", "quantum flux capacitor", "zzzzqqq"):
+    # "toaster" and "ceiling fan" moved out of this list: BIS lists both under
+    # Scheme I (IS 302 Part 2/Sec 9 toasters; IS 374 electric ceiling type fans),
+    # so they are now covered products and are asserted as such above.
+    for unknown in ("shampoo", "school bag", "quantum flux capacitor", "zzzzqqq"):
         out = top(unknown)
         check(f"unknown product '{unknown}' invents no standard", not out.results, str(numbers(unknown)))
         check(f"unknown product '{unknown}' says so", out.confidence == "none" and out.note)
@@ -240,7 +247,11 @@ def test_ambiguous_stays_ambiguous() -> None:
     out = top("stainless steel water bottle", limit=6)
     check("several genuine candidates are all returned with their own evidence",
           len(out.results) >= 2 and all(r.reasons for r in out.results))
-    check("and the best-supported one ranks first", out.results[0].item.standard_number == "IS 17526:2021")
+    # IS 17803's own title reads "Potable Water Bottles (Copper, Stainless
+    # Steel, Aluminium)" -- every query word matches in the title itself --
+    # so it is the best-supported candidate (see test_product.py for the
+    # side-by-side scoring against IS 17526, whose title never says "water").
+    check("and the best-supported one ranks first", out.results[0].item.standard_number == "IS 17803:2022")
 
 
 def test_explanations_survive() -> None:

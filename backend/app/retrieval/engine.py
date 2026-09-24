@@ -401,10 +401,25 @@ class SearchEngine:
 
 
 def _contains_word(haystack: str, needle: str) -> bool:
-    """Whole-token containment on already-normalized (space-separated) text."""
+    """Whole-token containment on already-normalized (space-separated) text.
+
+    Tries a simple trailing-'s' plural in both directions ('bulb' <-> 'bulbs')
+    so a query written in either form still meets a knowledge-base keyword
+    written in the other — the same conservative stemming
+    app/product_identification.py already uses for phrase matching. The query
+    term itself is never rewritten (callers still see what the user typed);
+    only this containment check is plural-insensitive.
+    """
     if not haystack or not needle:
         return False
-    return f" {needle} " in f" {haystack} "
+    hay = f" {haystack} "
+    if f" {needle} " in hay:
+        return True
+    if len(needle) > 3 and needle.endswith("s") and not needle.endswith("ss"):
+        return f" {needle[:-1]} " in hay
+    if not needle.endswith("s"):
+        return f" {needle}s " in hay
+    return False
 
 
 def _distinct(values: list[str]) -> list[str]:

@@ -272,8 +272,14 @@ def test_ocr_joined_words() -> None:
     # Exact OCR output from a real Bisleri label photo (Open Food Facts 8906017290064).
     check("'DRINKINGWATEROZONISED' is split with knowledge-base words",
           _split_joined_words("PACKAGED DRINKINGWATEROZONISED", vocab) == "packaged drinking water ozonised")
-    check("a plural is not split into word + 's' (nothing to repair here)",
-          _split_joined_words("INGREDIENTS:TREATEDWATER,MINERALS", vocab) == "")
+    # The invariant that matters is that a plural is never broken into word + "s".
+    # ("TREATEDWATER" -> "treated water" IS a correct repair: both words are in the
+    # knowledge base, so the split is evidence-backed, not a guess.)
+    repaired = _split_joined_words("INGREDIENTS:TREATEDWATER,MINERALS", vocab)
+    check("a plural is not split into word + 's'",
+          not repaired.endswith(" s") and "mineral s" not in repaired, repr(repaired))
+    check("a genuinely joined pair is still repaired from knowledge-base words",
+          "treated water" in repaired, repr(repaired))
     check("words not starting with a knowledge-base word are left alone",
           _split_joined_words("calledlamps STOREINCOOLANDDRYPLACE Ratlamisev", vocab) == "")
 

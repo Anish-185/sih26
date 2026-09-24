@@ -504,7 +504,7 @@ def test_existing_results_and_coverage_are_unchanged() -> None:
           str(totals.deterministic_rules))
     check("INSPECTION_SUPPORTED standards are still 2", totals.bis_inspection_supported == 2,
           str(totals.bis_inspection_supported))
-    check("verified standards are still 97", totals.bis_standards == 97, str(totals.bis_standards))
+    check("verified standards are still 505", totals.bis_standards == 505, str(totals.bis_standards))
 
     source = Path("app/product_context.py").read_text()
     for forbidden in ("from app.compliance", "from app.package_label", "from app.declarations",

@@ -94,8 +94,11 @@ def test_grounded_certification_guidance() -> None:
         "How do I get BIS certification for a stainless steel water bottle?"
     )
     check("stainless steel bottle: grounded", out2.grounded)
-    check("stainless steel bottle: product context is IS 17526",
-          out2.product_context is not None and "17526" in out2.product_context)
+    # IS 17803's title says "Potable Water Bottles (Copper, Stainless Steel,
+    # Aluminium)" -- a full-title match -- so it is the identified product,
+    # ahead of IS 17526 (whose own title never says "water"; see test_product.py).
+    check("stainless steel bottle: product context is IS 17803",
+          out2.product_context is not None and "17803" in out2.product_context)
 
     # The "process" question is answerable from the certification category alone.
     service3, _ = make_service()
