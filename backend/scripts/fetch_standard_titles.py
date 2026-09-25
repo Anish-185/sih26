@@ -143,7 +143,10 @@ def cached(key: str, produce):
     value = produce()
     if value is not None:
         CACHE.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(value, ensure_ascii=False))
+        # Write-then-rename: a run killed mid-write must not leave an empty file behind.
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(value, ensure_ascii=False))
+        tmp.replace(path)
         time.sleep(DELAY)
     return value
 
@@ -306,7 +309,11 @@ def resolve_bis(parsed: dict, catalogue: BISCatalogue) -> dict:
           "title": _bis_title(row),
           "year": int(row["is_year"]) if str(row.get("is_year", "")).isdigit() else None,
           "bis_is_id": row.get("is_id"),
-          "identical_is": (row.get("identical_is") or "").strip() or None}
+          "identical_is": (row.get("identical_is") or "").strip() or None,
+          # BIS's own reaffirmation year for this edition. "0" means BIS states none.
+          "reaffirmed": int(row["reaffirm_year"])
+                        if str(row.get("reaffirm_year", "")).isdigit()
+                        and int(row["reaffirm_year"]) else None}
          for row in matches),
         key=lambda e: (e["year"] or 0), reverse=True,
     )

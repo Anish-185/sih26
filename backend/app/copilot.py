@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from app import language as lang
 from app.lab_registry import CURRENTNESS_NOTE, NOT_AVAILABLE, SNAPSHOT_NOTE
 from app.openrouter import CopilotUnavailable, OpenRouterLLM
+from app.standard_currency import mentions_withdrawal
 
 # --------------------------------------------------------------- system prompt
 
@@ -1154,6 +1155,8 @@ WITHHELD_MESSAGES = {
     "LABORATORY_RANKING_CLAIM": "the generated text ranked or recommended a laboratory, which MetrIQ "
                                 "does not do",
     "FABRICATED_AMOUNT": "the generated text stated a fee or amount that is not in the evidence",
+    "WITHDRAWAL_CLAIM": "the generated text claimed a standard had been taken out of force, and "
+                        "MetrIQ holds no withdrawal data",
 }
 
 
@@ -1204,6 +1207,8 @@ def guard(answer: CopilotAnswer, context_text: str, language: str = lang.EN) -> 
         reason = "FABRICATED_AMOUNT"
     elif _has_verdict_claim(text):
         reason = "FABRICATED_VERDICT"
+    elif mentions_withdrawal(text):
+        reason = "WITHDRAWAL_CLAIM"
     else:
         for sentence in re.split(r"(?<=[.!?])\s+", text):
             if _AUTHENTICATION.search(sentence) and not _NEGATION.search(sentence):

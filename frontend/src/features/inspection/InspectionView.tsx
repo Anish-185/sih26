@@ -49,6 +49,7 @@ import { CertificationJourney } from "@/components/CertificationJourney";
 import { CopilotPanel } from "../CopilotPanel";
 import { ProductIntelligence } from "@/components/ProductIntelligence";
 import { EvidenceGraphSection } from "@/components/EvidenceGraphSection";
+import { EditionCurrency } from "@/components/EditionCurrency";
 import { HallmarkEvidencePanel, showHallmark } from "../HallmarkEvidence";
 
 // upload (stage photos) -> ocr (Instant OCR running) -> evidence (raw OCR shown)
@@ -551,6 +552,13 @@ export function Workspace({
                 <span className={matched ? "text-ink" : "text-review"}>
                   {matched ? product.standard_number : "Needs review"}
                 </span>
+                {matched && (
+                  <EditionCurrency
+                    compact
+                    className="ml-2"
+                    currency={standards.find((c) => c.standard_number === product.standard_number)?.currency}
+                  />
+                )}
               </DefinitionRow>
             </dl>
           </Panel>
@@ -1498,6 +1506,7 @@ function StandardCandidatesPanel({
                       {c.document_name ? ` · ${c.document_name}` : ""}
                       {c.last_verified ? ` · verified ${c.last_verified}` : ""}
                     </p>
+                    <EditionCurrency currency={c.currency} className="mt-3" />
                   </div>
                   <div className="flex flex-col items-end gap-1">
                     <ConfidenceMeter confidence={c.confidence} />

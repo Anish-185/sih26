@@ -46,6 +46,7 @@ from app.lab_registry import (
 from app.llm import LocalLLM
 from app.product import ProductStandardFinder
 from app.rag import _build_context
+from app.standard_currency import mentions_withdrawal
 from app.retrieval import RetrievalResult, SearchEngine
 from app.retrieval.text import find_standard_numbers, standard_number_key
 
@@ -378,7 +379,8 @@ operational status.
                 user_prompt=user_prompt,
                 temperature=0.1,
             )
-        else:
+        if not explain or mentions_withdrawal(answer):
+            # MetrIQ has no withdrawal data, so such prose is replaced, not shown.
             answer = _deterministic_summary(sources, laboratories, lab_standard)
 
         return LaboratorySearch(

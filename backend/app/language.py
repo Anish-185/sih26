@@ -29,6 +29,7 @@ transliteration engine.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
 EN = "en"
@@ -156,6 +157,70 @@ FILLER: frozenset[str] = frozenset({
     "ku", "emi", "edi", "ela", "enti", "ento", "cheppandi", "kosam", "undi",
     "unnayi", "vartistundi", "kaavali", "kavali", "gurinchi", "gaani", "ide",
 })
+
+
+# Phase 6 — follow-up questions. Words that point back at the previous
+# question's product ("is IT mandatory?"). FILLER already holds the romanized
+# ones (yeh / iska / uska / ide) and they are reused, not duplicated in FILLER's
+# role: FILLER still decides what retrieval drops, this only decides whether a
+# question refers back. The native-script words were NOT in FILLER and are added
+# here.
+REFERRING_ASCII: frozenset[str] = frozenset({"it", "this", "that", "yeh", "iska", "uska", "ide"})
+REFERRING_PHRASES: tuple[str, ...] = ("the same",)
+REFERRING_NATIVE: frozenset[str] = frozenset({
+    # Hindi
+    "यह", "ये", "इस", "इसे", "इसका", "इसकी", "इसके",
+    # Telugu
+    "ఇది", "దీని", "దీనికి", "దీన్ని", "అది",
+})
+
+# Words a follow-up asks WITH, not ABOUT: the BIS process vocabulary of "is it
+# mandatory / where do I get it tested / does it need a licence". A follow-up
+# inherits the previous product only when nothing but these (plus stopwords,
+# FILLER and referring words) remains — any other word might be a product of
+# its own, and a wrong inherited product is worse than none.
+FOLLOW_UP_WORDS: frozenset[str] = frozenset({
+    "mandatory", "compulsory", "required", "requirement", "need", "needed", "needs",
+    "test", "tested", "testing", "tests", "lab", "labs", "laboratory", "laboratories",
+    "certification", "certificate", "certified", "licence", "license", "mark",
+    "marking", "isi", "registration", "register", "registered", "scheme", "apply",
+    "get", "done", "same", "also", "about", "covered", "under", "any", "should",
+    "must", "have", "has", "go", "check", "checked",
+    # Hindi
+    "क्या", "है", "हैं", "के", "लिए", "की", "का", "को", "में", "कहाँ", "कहां", "कैसे",
+    "कौन", "सा", "से", "भी", "अनिवार्य", "ज़रूरी", "जरूरी", "जांच", "जाँच", "परीक्षण",
+    "टेस्ट", "करवाएं", "कराएं", "करवाना", "होगा", "होता", "प्रमाणन", "लाइसेंस",
+    # Telugu
+    "ఎక్కడ", "ఏమిటి", "ఎలా", "తప్పనిసరి", "అవసరం", "పరీక్ష", "పరీక్షించాలి",
+    "చేయించాలి", "కూడా", "కి", "కోసం", "ఉందా", "సర్టిఫికేషన్", "లైసెన్స్",
+})
+
+_NATIVE_WORD = re.compile(r"[^\s?!.,;:।॥\"'()]+")
+
+
+def refers_back(text: str) -> bool:
+    """Does the question contain a word pointing back at the previous product?"""
+    lowered = (text or "").lower()
+    if any(re.search(rf"\b{re.escape(p)}\b", lowered) for p in REFERRING_PHRASES):
+        return True
+    if any(w in REFERRING_ASCII for w in _WORD.findall(lowered)):
+        return True
+    return any(w in REFERRING_NATIVE for w in _NATIVE_WORD.findall(text or ""))
+
+
+def native_leftovers(text: str) -> list[str]:
+    """Non-ASCII words that are neither referring nor follow-up words.
+
+    The retrieval normalizer drops non-ASCII text, so an unknown Hindi or Telugu
+    product name would otherwise vanish silently and let a follow-up inherit the
+    previous product. Run on the alias-rewritten text, so a known product has
+    already become canonical English.
+    """
+    # A word starting with a combining mark is the tail of a word an alias has
+    # already rewritten ("పరీక్షించాలి" -> "testing ించాలి"), not a new word.
+    return [w for w in _NATIVE_WORD.findall(text or "")
+            if not w.isascii() and w not in REFERRING_NATIVE and w not in FOLLOW_UP_WORDS
+            and not unicodedata.category(w[0]).startswith("M")]
 
 
 @dataclass(frozen=True)

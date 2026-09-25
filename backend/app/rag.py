@@ -13,13 +13,17 @@ are untouched — the language of interaction changes, the source of truth does 
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from app import boundary as boundary_module
 from app import language as lang
 from app.llm import LLMError, LocalLLM
 from app.openrouter import OpenRouterLLM
+from app.product import ProductStandardFinder
 from app.retrieval import RetrievalResult, SearchEngine
+from app.retrieval.text import tokenize
+from app.standard_currency import mentions_withdrawal
 
 
 SYSTEM_PROMPT = """You are the BIS Assistant for an evidence-backed Indian
@@ -42,6 +46,20 @@ Rules:
 
 
 @dataclass(frozen=True)
+class ConversationContext:
+    """Phase 6: what an answer resolved, so a follow-up can refer back to it.
+
+    Derived by MetrIQ from its own Product -> Standard retrieval; never by a
+    model. Several standards are carried exactly as stored and never narrowed:
+    only the product phrase is inherited, so MetrIQ never picks one for the user.
+    """
+
+    product: str                  # the product phrase the retrieval matched
+    standard_numbers: list[str]   # as stored, edition year included where present
+    category: str                 # knowledge-base category of those records
+
+
+@dataclass(frozen=True)
 class GroundedAnswer:
     answer: str
     results: list[RetrievalResult]
@@ -58,6 +76,26 @@ class GroundedAnswer:
     # Phase 3: on abstention, MetrIQ's own explanation of its coverage boundary.
     # None whenever there is an answer.
     boundary: boundary_module.Boundary | None = None
+    # Phase 6: what this answer resolved (None on abstention or when no product
+    # was confidently identified), and the product inherited from the previous
+    # question, if any.
+    context: ConversationContext | None = None
+    inherited: str | None = None
+
+
+# A Quality Control Order, a ministry or a year (an enforcement date) may appear
+# in an answer only when a retrieved record holds it. MetrIQ holds no QCO data
+# for individual products, so "is it mandatory?" must not be answered from one.
+_REGULATORY_TERMS = ("quality control order", "qco", "ministry")
+_YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
+
+
+def unsupported_regulatory_claim(answer: str, evidence: str) -> bool:
+    said, held = answer.lower(), evidence.lower()
+    if any(re.search(rf"\b{t}\b", said) and not re.search(rf"\b{t}\b", held)
+           for t in _REGULATORY_TERMS):
+        return True
+    return bool(set(_YEAR.findall(answer)) - set(_YEAR.findall(evidence)))
 
 
 def _build_context(results: list[RetrievalResult]) -> str:
@@ -135,8 +173,55 @@ class BISQuestionAnswerer:
         self.retrieval_limit = retrieval_limit
         # Counted once from the loaded knowledge base (see app/boundary.py).
         self.coverage = boundary_module.measure(search_engine.items)
+        self.product_finder = ProductStandardFinder(search_engine)
 
-    def ask(self, question: str, language: str = lang.AUTO) -> GroundedAnswer:
+    def resolve_context(self, text: str) -> ConversationContext | None:
+        """The product this text confidently names, from Product -> Standard.
+
+        Only a grounded high/medium outcome counts: an abstention, a coverage
+        boundary and its weak matches never become context ("solar panel" must
+        not hand "solar water heater" to the next question). The phrase is the
+        text's own words that the top standard matched in its title or keywords.
+        """
+        outcome = self.product_finder.find(text)
+        if not outcome.grounded or outcome.confidence not in ("high", "medium"):
+            return None
+        top = outcome.results[0]
+        terms = {r.term for r in top.reasons if r.field in ("title", "keywords")}
+        words: list[str] = []
+        for word in re.findall(r"[A-Za-z0-9]+", text):
+            # A process word ("testing", "compulsory") is never the product.
+            if (word.lower() in terms and word.lower() not in lang.FOLLOW_UP_WORDS
+                    and word.lower() not in (w.lower() for w in words)):
+                words.append(word)
+        if not words:
+            return None
+        return ConversationContext(
+            product=" ".join(words),
+            standard_numbers=[r.item.standard_number for r in outcome.results],
+            category=top.item.category,
+        )
+
+    def _inherit(self, question: str, normalized: lang.Normalized,
+                 context_product: str | None) -> str | None:
+        """A fixed rule, not a judgement: inherit only when the question refers
+        back AND names nothing of its own. Any leftover word (a known product, an
+        unknown one like "shampoo", a city) means the context is ignored."""
+        product = (context_product or "").strip()[:80]
+        if not product or not lang.refers_back(question):
+            return None
+        # FILLER too: normalize_query keeps an all-filler question unchanged.
+        if [t for t in tokenize(normalized.query)
+                if t not in lang.FOLLOW_UP_WORDS and t not in lang.FILLER]:
+            return None
+        if lang.native_leftovers(normalized.query):
+            return None
+        # The client echoed this back; re-derive it rather than trust it.
+        validated = self.resolve_context(product)
+        return validated.product if validated else None
+
+    def ask(self, question: str, language: str = lang.AUTO,
+            context_product: str | None = None) -> GroundedAnswer:
         # The language to answer in. An explicit choice wins; "auto" detects the
         # script. This never affects which evidence is retrieved.
         answer_language = lang.resolve(question, language)
@@ -146,8 +231,17 @@ class BISQuestionAnswerer:
         # else reaches retrieval exactly as the user typed it.
         normalized = lang.normalize_query(question)
 
+        # Phase 6: a follow-up ("is it mandatory?") gets the previous product
+        # added to its RETRIEVAL text only — the question itself is untouched.
+        inherited = self._inherit(question, normalized, context_product)
+        # An inheriting question names nothing of its own (that is the rule), so
+        # its retrieval text is the product plus the follow-up words it asked with.
+        retrieval_text = (" ".join([inherited, *(t for t in tokenize(normalized.query)
+                                                 if t in lang.FOLLOW_UP_WORDS)])
+                          if inherited else normalized.query)
+
         outcome = self.search_engine.search(
-            normalized.query,
+            retrieval_text,
             limit=self.retrieval_limit,
         )
 
@@ -164,6 +258,7 @@ class BISQuestionAnswerer:
                     question, self.coverage, answer_language,
                     weak_matches=boundary_module.weak_matches_from(outcome.results),
                 ),
+                inherited=inherited,
             )
 
         context = _build_context(outcome.results)
@@ -175,7 +270,7 @@ below.
 
 USER QUESTION:
 {question}
-
+{f"(The question refers to {inherited}, from the user's previous question.){chr(10)}" if inherited else ""}
 BIS EVIDENCE:
 {context}
 
@@ -190,6 +285,11 @@ Give a concise answer grounded in the supplied evidence.
                 temperature=0.1,
             )
             explained = True
+            if mentions_withdrawal(answer):
+                # MetrIQ has no withdrawal data: fall back to its own text.
+                raise LLMError("the explanation claimed a withdrawal")
+            if unsupported_regulatory_claim(answer, context):
+                raise LLMError("the explanation named an order, ministry or date not in the evidence")
         except LLMError:
             # The provider is down, rate-limited or unconfigured. The retrieval
             # above already succeeded, so MetrIQ has the evidence and renders it
@@ -204,4 +304,6 @@ Give a concise answer grounded in the supplied evidence.
             language=answer_language,
             concepts=normalized.concepts,
             explained=explained,
+            context=self.resolve_context(retrieval_text),
+            inherited=inherited,
         )

@@ -55,6 +55,7 @@ from app.product import ProductStandardFinder
 from app.product_identification import RETRIEVAL_NOTE, product_name_of
 from app.ocr import OCR_ENGINE, OcrError, RawRegion, run_ocr
 from app.pipeline import run_downstream
+from app.standard_currency import CurrencyOut, currency_for
 
 # Guard rails for a demo backend on a laptop.
 MAX_BYTES = 20 * 1024 * 1024          # 20 MB upload cap
@@ -365,6 +366,7 @@ class StandardCandidateOut(BaseModel):
     reference: str | None = None
     verification_status: str
     last_verified: str | None = None
+    currency: CurrencyOut | None = None
 
 
 class CoverageRowOut(BaseModel):
@@ -1211,6 +1213,7 @@ def _candidate_out(candidate) -> StandardCandidateOut:
         reference=item.reference,
         verification_status=item.verification_status,
         last_verified=item.last_verified.isoformat() if item.last_verified else None,
+        currency=currency_for(item.standard_number),
     )
 
 

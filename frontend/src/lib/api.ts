@@ -139,6 +139,8 @@ export interface ProductStandardResult {
   why: WhyThisResult;
   /** Phase 4 — the real catalogue title and where its text came from. */
   catalogue: CatalogueIdentity | null;
+  /** Phase 5 — absent on records saved before it. */
+  currency?: EditionCurrency | null;
   source_organization: string;
   source_url: string | null;
   document_name: string | null;
@@ -169,6 +171,27 @@ export interface CatalogueIdentity {
   official: boolean;
   /** The source returned damaged text; it is shown as recorded, never repaired. */
   title_suspect: boolean;
+}
+
+/**
+ * Phase 5 — whether the edition MetrIQ cites is the newest one ITS EVIDENCE
+ * shows. A statement about MetrIQ's evidence, never about BIS's catalogue.
+ */
+export interface EditionCurrency {
+  status: "ACTIVE" | "REAFFIRMED" | "SUPERSEDED_BY" | "NOT_ESTABLISHED";
+  label: string;
+  statement: string;
+  cited_edition: string | null;
+  later_edition: string | null;
+  reaffirmed_year: number | null;
+  reaffirmation_quote: string | null;
+  editions: string[];
+  evidence: "BIS_CATALOGUE" | "ARCHIVE_MIRROR" | "ARCHIVE_DOCUMENT" | "NONE";
+  official: boolean;
+  source_label: string;
+  source_url: string | null;
+  checked_on: string | null;
+  boundary: string;
 }
 
 /** Milestone 16 — one verified knowledge record, quoted word for word. */
@@ -205,6 +228,7 @@ export interface CertificationCandidate {
   score: number;
   source_url: string | null;
   why: WhyThisResult;
+  currency?: EditionCurrency | null;
 }
 
 /** The deterministic certification journey. Guidance about the route for a
@@ -215,6 +239,7 @@ export interface CertificationJourney {
   standard_selection: "CONFIRMED" | "MULTIPLE_CANDIDATES" | "NOT_IDENTIFIED";
   standard_number: string | null;
   standard_title: string | null;
+  currency?: EditionCurrency | null;
   candidates: CertificationCandidate[];
   scheme: CertificationScheme | null;
   verification_status: "VERIFIED" | "PARTIAL" | "INSUFFICIENT";
@@ -408,6 +433,18 @@ export interface AskResponse {
   explained: boolean;
   /** Present only when MetrIQ abstained. */
   boundary: CoverageBoundary | null;
+  /** Phase 6: what this answer resolved; null on abstention or no confident product. */
+  context: ConversationContext | null;
+  /** Phase 6: the product this question inherited from the previous one. */
+  inherited: string | null;
+}
+
+/** Phase 6: entities an /ask answer resolved, derived by MetrIQ — never a model. */
+export interface ConversationContext {
+  product: string;
+  /** Exactly as stored, edition year included. Several are never narrowed to one. */
+  standard_numbers: string[];
+  category: string;
 }
 
 /* ---- inspection: IMAGE -> OCR (/inspection/ocr) -> pipeline (/analyze) --- */
@@ -1144,10 +1181,12 @@ export const api = {
     ),
 
   // Grounded BIS Q&A (Phase 4). Used for the Hallmarking / HUID information view.
-  ask: (question: string, language: LanguageChoice = "auto") =>
+  // Phase 6: `context` is the previous answer's context, echoed back so a
+  // follow-up ("is it mandatory?") can refer to its product. Optional.
+  ask: (question: string, language: LanguageChoice = "auto", context: ConversationContext | null = null) =>
     request<AskResponse>(
       "/ask",
-      { method: "POST", body: JSON.stringify({ question, language }) },
+      { method: "POST", body: JSON.stringify({ question, language, context }) },
       120_000,
     ),
 

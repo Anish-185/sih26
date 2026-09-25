@@ -33,6 +33,7 @@ import { CopilotPanel } from "@/features/CopilotPanel";
 import { ProductIntelligence } from "@/components/ProductIntelligence";
 import { CoverageBoundaryPanel } from "@/components/CoverageBoundary";
 import { EvidenceGraphSection } from "@/components/EvidenceGraphSection";
+import { EditionCurrency } from "@/components/EditionCurrency";
 
 const EXAMPLES = [
   "stainless steel water bottle",
@@ -284,6 +285,7 @@ function StandardResult({
               )}
             </div>
           )}
+          <EditionCurrency currency={result.currency} className="mt-3" />
           {coverage && (
             <p className="mt-1.5 text-[12px] leading-relaxed text-ink-soft">
               <Mono

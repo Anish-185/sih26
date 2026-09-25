@@ -36,6 +36,7 @@ from app.product import ProductStandardFinder
 from app.product_context import ProductContextOut, build_from_query, context_out
 from app.rag import BISQuestionAnswerer
 from app.retrieval import RetrievalResult, SearchEngine, SearchOutcome
+from app.standard_currency import CurrencyOut, currency_for
 
 router = APIRouter(tags=["search"])
 
@@ -286,6 +287,28 @@ class SourceOut(BaseModel):
     last_verified: str | None = None
 
 
+class ConversationContextIn(BaseModel):
+    """Phase 6: the context an earlier /ask answer returned, echoed back.
+
+    A WHITELIST with extra="ignore", like the copilot's feature payloads: the
+    page may post the whole context object and only `product` is read. It is
+    never trusted either — /ask re-derives it through Product -> Standard and
+    ignores it unless the new question refers back and names nothing of its own.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    product: str = Field(default="", max_length=120)
+
+
+class ConversationContextOut(BaseModel):
+    """What this answer resolved, for the next question to refer back to."""
+
+    product: str
+    standard_numbers: list[str] = Field(description="Exactly as stored, edition year included.")
+    category: str
+
+
 class AskRequest(BaseModel):
     question: str = Field(
         default="",
@@ -295,6 +318,8 @@ class AskRequest(BaseModel):
         default=lang.AUTO,
         description='Answer language: "auto" (detect from the query), "en", "hi" or "te"',
     )
+    # Phase 6: optional. A request without it behaves exactly as before.
+    context: ConversationContextIn | None = None
 
 
 class AskResponse(BaseModel):
@@ -316,6 +341,11 @@ class AskResponse(BaseModel):
     # Phase 3: present only when MetrIQ abstained — its own account of what the
     # verified data covers and where to look next.
     boundary: BoundaryOut | None = None
+    # Phase 6: the entities this answer resolved (null on abstention or when no
+    # product was confidently identified), and the product this question
+    # inherited from the previous one (null when nothing was inherited).
+    context: ConversationContextOut | None = None
+    inherited: str | None = None
 
 
 # ---------------------------------------------------------------------
@@ -362,6 +392,8 @@ class ProductStandardResultOut(BaseModel):
     why: WhyOut
     # Phase 4: the real catalogue identity, with the route its text came from.
     catalogue: CatalogueOut | None = None
+    # Phase 5: is the cited edition the newest one MetrIQ's evidence shows?
+    currency: CurrencyOut | None = None
     source_organization: str
     source_url: str | None = None
     document_name: str | None = None
@@ -689,7 +721,10 @@ def ask_post(
     # No 503 path: if the explanation provider is unreachable, the answerer
     # renders the retrieved verified records itself (app/rag.render_evidence), so
     # a provider outage degrades the prose and never the evidence.
-    result = get_answerer().ask(question, language=request.language)
+    result = get_answerer().ask(
+        question, language=request.language,
+        context_product=request.context.product if request.context else None,
+    )
 
     return AskResponse(
         question=question,
@@ -704,6 +739,8 @@ def ask_post(
         matched_concepts=result.concepts,
         explained=result.explained,
         boundary=_boundary_out(result.boundary),
+        context=ConversationContextOut(**vars(result.context)) if result.context else None,
+        inherited=result.inherited,
     )
 
 
@@ -759,6 +796,7 @@ def product_standard_post(
                 summary=why.summary,
             ),
             catalogue=_catalogue_out(result.item.content),
+            currency=currency_for(result.item.standard_number),
             source_organization=result.item.source_organization,
             source_url=result.item.source_url,
             document_name=result.item.document_name,

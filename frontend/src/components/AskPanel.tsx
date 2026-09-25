@@ -1,7 +1,7 @@
 import { type FormEvent, useState } from "react";
-import { api, type Confidence, type LanguageChoice } from "@/lib/api";
+import { api, type Confidence, type ConversationContext, type LanguageChoice } from "@/lib/api";
 import { useAsyncTask } from "@/lib/hooks";
-import { Button, InlineLoading, TextArea } from "@/components/ui";
+import { Button, Chip, InlineLoading, TextArea } from "@/components/ui";
 import { Annotation, BlueprintField, Bracket } from "@/components/decor";
 import { GroundedAnswer } from "@/components/GroundedAnswer";
 import { LanguagePicker } from "@/components/LanguagePicker";
@@ -31,11 +31,21 @@ export function AskPanel({
   // every language — only the prose changes.
   const [language, setLanguage] = useState<LanguageChoice>("auto");
   const task = useAsyncTask(api.ask);
+  // Phase 6: the previous answer's context, sent with the next question so a
+  // follow-up ("is it mandatory?") can refer back. Nothing is stored server-side.
+  const [context, setContext] = useState<ConversationContext | null>(null);
+
+  function ask(q: string) {
+    task
+      .run(q, language, context)
+      .then((r) => setContext(r.context))
+      .catch(() => {});
+  }
 
   function submit(e: FormEvent) {
     e.preventDefault();
     const q = question.trim();
-    if (q) task.run(q, language).catch(() => {});
+    if (q) ask(q);
   }
 
   const res = task.data;
@@ -58,6 +68,19 @@ export function AskPanel({
             placeholder={placeholder}
             rows={3}
           />
+          {context && (
+            <div className="flex flex-wrap items-center gap-2 text-[12px] text-ink-soft">
+              <span>Follow-up questions can refer to</span>
+              <Chip>{context.product}</Chip>
+              <button
+                type="button"
+                onClick={() => setContext(null)}
+                className="text-ink-faint underline-offset-2 transition-colors hover:text-accent hover:underline"
+              >
+                Clear
+              </button>
+            </div>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <LanguagePicker value={language} onChange={setLanguage} />
             <Button type="submit" size="lg" disabled={task.loading || !question.trim()}>
@@ -73,7 +96,7 @@ export function AskPanel({
               type="button"
               onClick={() => {
                 setQuestion(ex);
-                task.run(ex, language).catch(() => {});
+                ask(ex);
               }}
               className="text-left text-[12px] text-ink-soft transition-colors hover:text-accent"
             >
@@ -92,6 +115,12 @@ export function AskPanel({
       )}
       {task.error != null && <ErrorNote error={task.error} />}
 
+      {res?.inherited && (
+        <p className="-mb-8 text-[12px] text-ink-soft">
+          Answering about <span className="font-medium text-ink">{res.inherited}</span>, from your
+          previous question.
+        </p>
+      )}
       {res && (
         <GroundedAnswer
           question={res.question}

@@ -23,7 +23,8 @@ from dataclasses import dataclass
 from app import language as lang
 from app.llm import LocalLLM
 from app.product import ProductStandardFinder, ProductStandardOutcome
-from app.rag import _build_context
+from app.rag import _build_context, render_evidence
+from app.standard_currency import mentions_withdrawal
 from app.retrieval import RetrievalResult, SearchEngine
 
 # Knowledge-base categories that carry BIS certification information.
@@ -219,6 +220,9 @@ certification is mandatory for this specific product, say so explicitly.
             user_prompt=user_prompt,
             temperature=0.1,
         )
+        if mentions_withdrawal(answer):
+            # MetrIQ has no withdrawal data: show the verified records instead.
+            answer = render_evidence(sources, answer_language)
 
         note = ""
         if product_context is None:

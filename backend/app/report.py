@@ -480,6 +480,15 @@ def _declarations(d: _Doc, an: dict) -> list:
     return out
 
 
+def _edition(currency: dict | None) -> list[tuple[str, str]]:
+    """Phase 5: the edition-currency row, only when the record stored one."""
+    if not currency:
+        return []
+    return [("Edition", f"{_t(currency['label'])} · {_t(currency['statement'])} "
+                        f"<font color='#8b8e94'>Source: {_t(currency['source_label'])}. "
+                        f"{_t(currency['boundary'])}</font>")]
+
+
 def _bis(d: _Doc, rec: dict, an: dict) -> list:
     product, standards = an["product"], an["standards"]
     out = d.section(6, "BIS standard evidence", "Standards come only from MetrIQ's verified BIS knowledge base, ranked "
@@ -503,6 +512,7 @@ def _bis(d: _Doc, rec: dict, an: dict) -> list:
                      ("Retrieval strength", f"{_t(c['confidence'])} (score {c['score']:.1f}, match tier {_t(c['tier'])})"
                                             + (" · IS number printed on the label" if c["printed_on_label"] else "")),
                      ("Why this result", _t(why.get("summary") or "—")),
+                     *_edition(c.get("currency")),
                      ("Evidence from the package", "<br/>".join(
                          f"{_t(e['clue']['kind'].replace('_', ' '))}: “{_t(e['clue']['text'])}” "
                          f"<font name='Mono' color='#8b8e94'>{_t(', '.join(e['clue']['source_regions']))} · "
@@ -543,6 +553,7 @@ def _certification(d: _Doc, an: dict) -> list:
         ("Product", _t(j.get("product") or (an.get("product") or {}).get("product") or "Not identified")),
         ("Standard", f"<font name='Mono'>{_t(j.get('standard_number') or '—')}</font>"
                      + (f" · {_t(j.get('standard_title'))}" if j.get("standard_title") else "")),
+        *_edition(j.get("currency")),
         ("Standard selection", _t(j.get("standard_selection"))),
         ("Verification status", _t(j.get("verification_status"))),
         ("Certification scheme", _t(scheme.get("name") or "Not established from a verified record")),

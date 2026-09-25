@@ -42,6 +42,7 @@ from pydantic import BaseModel
 from app.product import ProductStandardFinder, WhyThisResult, explain_candidate
 from app.requirements import knowledge_domain, JEWELLERY_HALLMARKING
 from app.retrieval import RetrievalResult, SearchEngine
+from app.standard_currency import CurrencyOut, currency_for
 
 # ------------------------------------------------------------------ statuses
 
@@ -652,6 +653,7 @@ class JourneyCandidateOut(BaseModel):
     score: float
     source_url: str | None = None
     why: WhyOut
+    currency: CurrencyOut | None = None
 
 
 class CertificationJourneyOut(BaseModel):
@@ -660,6 +662,7 @@ class CertificationJourneyOut(BaseModel):
     standard_selection: str
     standard_number: str | None = None
     standard_title: str | None = None
+    currency: CurrencyOut | None = None
     candidates: list[JourneyCandidateOut]
     scheme: SchemeOut | None = None
     verification_status: str
@@ -701,6 +704,7 @@ def journey_out(journey: CertificationJourney) -> CertificationJourneyOut:
         standard_selection=journey.standard_selection,
         standard_number=journey.standard_number,
         standard_title=journey.standard_title,
+        currency=currency_for(journey.standard_number),
         candidates=[
             JourneyCandidateOut(
                 standard_number=c.standard_number,
@@ -710,6 +714,7 @@ def journey_out(journey: CertificationJourney) -> CertificationJourneyOut:
                 score=c.score,
                 source_url=c.source_url,
                 why=why_out(c.why),
+                currency=currency_for(c.standard_number),
             )
             for c in journey.candidates
         ],

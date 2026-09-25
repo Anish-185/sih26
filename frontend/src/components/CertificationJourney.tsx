@@ -1,6 +1,7 @@
 import type { CertificationJourney as Journey } from "@/lib/api";
 import { Callout, Chip, Mono, Panel, PanelHeader } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { EditionCurrency } from "@/components/EditionCurrency";
 
 /** How much of this guidance the verified knowledge base actually supports. */
 const STATUS: Record<
@@ -115,6 +116,8 @@ export function CertificationJourney({ journey }: { journey: Journey }) {
           </div>
         </dl>
 
+        <EditionCurrency currency={journey.currency} />
+
         <p className="text-[12px] leading-relaxed text-ink-soft">{status.note}</p>
 
         {journey.message && <Callout tone="abstain">{journey.message}</Callout>}
@@ -148,6 +151,7 @@ export function CertificationJourney({ journey }: { journey: Journey }) {
                   <Mono className="text-[12px] font-semibold text-accent">{c.standard_number}</Mono>
                   <span className="text-[12px] text-ink-soft">{c.title}</span>
                   <Chip>{c.confidence}</Chip>
+                  <EditionCurrency currency={c.currency} compact />
                 </div>
                 <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">{c.why.summary}</p>
               </li>

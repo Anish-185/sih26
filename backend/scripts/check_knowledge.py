@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.knowledge.loader import DEFAULT_KNOWLEDGE_DIR, load_knowledge_base, main  # noqa: E402
 from app.certification_journey import SCHEME_NAMES, certification_coverage
+from app.standard_currency import distribution  # noqa: E402
 from app.requirements import (  # noqa: E402
     INSPECTION_SUPPORTED,
     STANDARD_ONLY,
@@ -151,6 +152,12 @@ def check_requirements(argv: list[str]) -> int:
     print(f"  Without sufficient guidance:            {c.insufficient}")
     for scheme, count in sorted(c.by_scheme.items()):
         print(f"    {SCHEME_NAMES[scheme]:56} {count}")
+
+    # Phase 5 — edition currency: a statement about MetrIQ's evidence, not BIS's catalogue.
+    numbers = [i.standard_number for i in items if i.category == "indian_standards" and i.standard_number]
+    print("\nEdition currency (is the cited edition the newest one MetrIQ's evidence shows?)")
+    for status, count in distribution(numbers).items():
+        print(f"  {status:<40} {count}")
 
     if requirements.errors:
         print(f"\nRequirement errors: {len(requirements.errors)}")
