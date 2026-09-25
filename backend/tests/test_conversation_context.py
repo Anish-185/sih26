@@ -196,6 +196,51 @@ def test_fallback_and_guard() -> None:
     check("a grounded answer passes the guard", r["explained"] is True)
 
 
+def test_qco_must_be_tied_to_the_product() -> None:
+    print("\n[8] Phase 6.1: a QCO may not be attached to a product without a record tying them")
+    from app.rag import SYSTEM_PROMPT, untied_qco_claim
+
+    ctx = {"product": "LED bulb"}
+    linked = _Recorder("Yes. LED lamps are listed under Scheme II, and BIS certification is "
+                       "required for products covered by a Quality Control Order (QCO).")
+    r = ask("is it mandatory?", ctx, llm=linked)
+    check("the general FAQ QCO sentence is really among the retrieved records",
+          any("mandatory" in (s["title"] or "").lower() for s in r["sources"]))
+    check("the live-transcript wording is replaced by MetrIQ's evidence text",
+          # The evidence text may quote the FAQ record itself, labelled as evidence;
+          # the model's sentence linking it to LED lamps must be gone.
+          r["explained"] is False and "listed under Scheme II, and BIS certification" not in r["answer"],
+          r["answer"][:120])
+    check("... and the context survives the fallback", r["inherited"] == "LED bulb"
+          and (r["context"] or {}).get("product") == "LED bulb")
+    r = ask("is it mandatory?", ctx, llm=_Recorder("LED lamps are listed under the Compulsory "
+                                                    "Registration Scheme (Scheme II)."))
+    check("the listing claim alone passes", r["explained"] is True)
+    r = ask("What is a Quality Control Order?", llm=_Recorder(
+        "A Quality Control Order (QCO) makes conformity to the relevant Indian Standard compulsory."))
+    check("a general QCO answer with no product in play passes", r["explained"] is True and r["context"] is None,
+          str(r["context"]))
+
+    from app.rag import ConversationContext
+    led = ConversationContext("LED bulb", ["IS 16102 (Part 1)"], "indian_standards")
+    results = ANSWERER.search_engine.search("LED bulb Quality Control Order", limit=5).results
+    tied = [type(x)(item=x.item.model_copy(update={"content": x.item.content + " IS 16102 (Part 1) is "
+                                                   "covered by a Quality Control Order."}),
+                    score=x.score, confidence=x.confidence, matched_terms=x.matched_terms, reasons=x.reasons)
+            for x in results[:1]] + results[1:]
+    check("a record naming the standard AND a QCO does tie them",
+          not untied_qco_claim("It is covered by a Quality Control Order.", tied, led))
+    check("without that record the same sentence is untied",
+          untied_qco_claim("It is covered by a Quality Control Order.", results, led))
+    check("the plural and the abbreviation are caught too",
+          untied_qco_claim("QCOs apply here.", results, led)
+          and untied_qco_claim("Quality Control Orders apply.", results, led))
+    check("the prompt separates listing from QCO coverage",
+          "Quality Control Order are different claims" in " ".join(SYSTEM_PROMPT.split()))
+    check("the prompt limits source descriptions to supplied text",
+          "only by using that source's supplied text" in " ".join(SYSTEM_PROMPT.split()))
+
+
 def test_word_lists() -> None:
     print("\n[7] the word lists")
     check("FILLER is unchanged in role: no native-script word was added to it",
@@ -213,6 +258,7 @@ def main() -> int:
     test_no_context_after_abstention()
     test_several_standards()
     test_fallback_and_guard()
+    test_qco_must_be_tied_to_the_product()
     test_word_lists()
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0

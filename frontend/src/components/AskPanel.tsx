@@ -1,7 +1,7 @@
 import { type FormEvent, useState } from "react";
 import { api, type Confidence, type ConversationContext, type LanguageChoice } from "@/lib/api";
 import { useAsyncTask } from "@/lib/hooks";
-import { Button, Chip, InlineLoading, TextArea } from "@/components/ui";
+import { ArrowLink, Button, Chip, InlineLoading, TextArea } from "@/components/ui";
 import { Annotation, BlueprintField, Bracket } from "@/components/decor";
 import { GroundedAnswer } from "@/components/GroundedAnswer";
 import { LanguagePicker } from "@/components/LanguagePicker";
@@ -115,11 +115,28 @@ export function AskPanel({
       )}
       {task.error != null && <ErrorNote error={task.error} />}
 
-      {res?.inherited && (
-        <p className="-mb-8 text-[12px] text-ink-soft">
-          Answering about <span className="font-medium text-ink">{res.inherited}</span>, from your
-          previous question.
-        </p>
+      {res?.context && (
+        <div className="-mb-8 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-ink-soft">
+          {res.inherited && (
+            <p>
+              Answering about <span className="font-medium text-ink">{res.inherited}</span>, from
+              your previous question.
+            </p>
+          )}
+          {/* One standard: link it exactly as stored. Several: the product
+              query, so MetrIQ never picks one on the user's behalf. */}
+          <ArrowLink
+            to={
+              res.context.standard_numbers.length === 1
+                ? `/laboratories?standard=${encodeURIComponent(res.context.standard_numbers[0])}`
+                : `/laboratories?q=${encodeURIComponent(res.context.product)}`
+            }
+          >
+            {res.context.standard_numbers.length === 1
+              ? `Testing laboratories for ${res.context.standard_numbers[0]}`
+              : `Testing laboratories for ${res.context.product}`}
+          </ArrowLink>
+        </div>
       )}
       {res && (
         <GroundedAnswer

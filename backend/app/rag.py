@@ -42,6 +42,15 @@ Rules:
    official BIS tool or page. Never output a HUID or similar identifier that is
    not present in the supplied context.
 7. Keep the answer concise and directly address the user's question.
+8. A general statement from an FAQ or general BIS record (for example what a
+   Quality Control Order does, or when certification is mandatory) must not be
+   applied to a specific product unless a supplied record names that product or
+   its standard. Being on a compulsory-certification listing and being covered by
+   a Quality Control Order are different claims; state only the one the records
+   make for that product.
+9. Describe what a source page or document contains only by using that
+   source's supplied text. Do not say a page lists, includes or provides anything
+   the supplied text does not show.
 """
 
 
@@ -96,6 +105,30 @@ def unsupported_regulatory_claim(answer: str, evidence: str) -> bool:
            for t in _REGULATORY_TERMS):
         return True
     return bool(set(_YEAR.findall(answer)) - set(_YEAR.findall(evidence)))
+
+
+_QCO = re.compile(r"\bquality control orders?\b|\bqcos?\b", re.IGNORECASE)
+
+
+def untied_qco_claim(answer: str, results: list[RetrievalResult],
+                     context: "ConversationContext | None") -> bool:
+    """A QCO named while discussing a specific product must be tied to it.
+
+    A retrieved FAQ can hold the general QCO sentence, which the check above
+    lets through; applied next to "LED bulb" it implies LED bulbs are under a
+    QCO. That is allowed only when ONE retrieved record mentions a QCO AND names
+    the product or one of its standard numbers.
+    """
+    if context is None or not _QCO.search(answer):
+        return False
+    names = [context.product.lower(), *(n.lower() for n in context.standard_numbers)]
+    for result in results:
+        item = result.item
+        text = " ".join([item.title, item.content, " ".join(item.keywords),
+                         item.standard_number or ""]).lower()
+        if _QCO.search(text) and any(name in text for name in names):
+            return False
+    return True
 
 
 def _build_context(results: list[RetrievalResult]) -> str:
@@ -262,6 +295,8 @@ class BISQuestionAnswerer:
             )
 
         context = _build_context(outcome.results)
+        # Resolved once, before generation: the guard below needs the product.
+        resolved = self.resolve_context(retrieval_text)
 
         # The model sees the question exactly as the user wrote it — the
         # rewritten form is for retrieval only.
@@ -290,6 +325,8 @@ Give a concise answer grounded in the supplied evidence.
                 raise LLMError("the explanation claimed a withdrawal")
             if unsupported_regulatory_claim(answer, context):
                 raise LLMError("the explanation named an order, ministry or date not in the evidence")
+            if untied_qco_claim(answer, outcome.results, resolved):
+                raise LLMError("the explanation tied a Quality Control Order to a product without evidence")
         except LLMError:
             # The provider is down, rate-limited or unconfigured. The retrieval
             # above already succeeded, so MetrIQ has the evidence and renders it
@@ -304,6 +341,6 @@ Give a concise answer grounded in the supplied evidence.
             language=answer_language,
             concepts=normalized.concepts,
             explained=explained,
-            context=self.resolve_context(retrieval_text),
+            context=resolved,
             inherited=inherited,
         )

@@ -50,6 +50,18 @@ export function LaboratoriesView() {
     // Consumed once, on arrival.
   }, [deepLink]);
 
+  // Phase 6.1: ?q=helmet from the Ask page when several standards were
+  // returned — the product text, so this page does its own lookup and no
+  // standard is picked on the user's behalf.
+  const productLink = params.get("q") ?? "";
+  useEffect(() => {
+    if (!productLink || deepLink) return;
+    setParams({}, { replace: true });
+    setQuery(productLink);
+    setStandard("");
+    task.run(productLink, "", false, language).catch(() => {});
+  }, [productLink]);
+
   function submit(e: FormEvent) {
     e.preventDefault();
     const q = query.trim();
