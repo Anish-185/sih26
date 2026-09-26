@@ -10,7 +10,7 @@ import type { QcoStatus as Qco } from "@/lib/api";
  * shout about an absence.
  */
 const TONE: Record<Qco["status"], string> = {
-  NOTIFIED: "text-accent",
+  IN_FORCE: "text-accent",
   UPCOMING: "text-review",
   NOT_ESTABLISHED: "text-ink-faint",
 };

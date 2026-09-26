@@ -2,6 +2,7 @@ import type { CertificationJourney as Journey } from "@/lib/api";
 import { Callout, Chip, Mono, Panel, PanelHeader } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { EditionCurrency } from "@/components/EditionCurrency";
+import { ListingOrders } from "@/components/ListingOrders";
 import { QcoStatus } from "@/components/QcoStatus";
 
 /** How much of this guidance the verified knowledge base actually supports. */
@@ -119,6 +120,7 @@ export function CertificationJourney({ journey }: { journey: Journey }) {
 
         <EditionCurrency currency={journey.currency} />
         <QcoStatus qco={journey.qco} />
+        <ListingOrders listing={journey.listing_orders} />
 
         <p className="text-[12px] leading-relaxed text-ink-soft">{status.note}</p>
 

@@ -163,6 +163,7 @@ export interface ProductStandardResult {
   /** Phase 5 — absent on records saved before it. */
   currency?: EditionCurrency | null;
   qco?: QcoStatus | null;
+  listing_orders?: ListingOrders | null;
   source_organization: string;
   source_url: string | null;
   document_name: string | null;
@@ -214,8 +215,36 @@ export interface QcoRow {
   read_on: string | null;
 }
 
+/**
+ * Phase 9.1 — the orders BIS's compulsory-certification listing NAMES for a
+ * product (its Notification column). Evidence only: it never sets a status, and a
+ * cell that also records a rescission / withdrawal / suspension / supersession is
+ * quoted, not interpreted. Every sentence comes from the backend.
+ */
+export interface ListingOrder {
+  number: string | null;
+  date: string | null;
+  text: string;
+  url: string | null;
+}
+
+export interface ListingGroup {
+  scheme: "I" | "II";
+  products: string[];
+  notification: string;
+  orders: ListingOrder[];
+  flags: ("RESCISSION" | "WITHDRAWAL" | "SUSPENSION" | "SUPERSESSION")[];
+  source_url: string;
+}
+
+export interface ListingOrders {
+  statements: string[];
+  groups: ListingGroup[];
+  read_on: string | null;
+}
+
 export interface QcoStatus {
-  status: "NOTIFIED" | "UPCOMING" | "NOT_ESTABLISHED";
+  status: "IN_FORCE" | "UPCOMING" | "NOT_ESTABLISHED";
   label: string;
   statements: string[];
   rows: QcoRow[];
@@ -278,6 +307,7 @@ export interface CertificationCandidate {
   why: WhyThisResult;
   currency?: EditionCurrency | null;
   qco?: QcoStatus | null;
+  listing_orders?: ListingOrders | null;
 }
 
 /** The deterministic certification journey. Guidance about the route for a
@@ -290,6 +320,7 @@ export interface CertificationJourney {
   standard_title: string | null;
   currency?: EditionCurrency | null;
   qco?: QcoStatus | null;
+  listing_orders?: ListingOrders | null;
   candidates: CertificationCandidate[];
   scheme: CertificationScheme | null;
   verification_status: "VERIFIED" | "PARTIAL" | "INSUFFICIENT";

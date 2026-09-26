@@ -410,17 +410,28 @@ def _contains_word(haystack: str, needle: str) -> bool:
     Tries a simple trailing-'s' plural in both directions ('bulb' <-> 'bulbs')
     so a query written in either form still meets a knowledge-base keyword
     written in the other — the same conservative stemming
-    app/product_identification.py already uses for phrase matching. The query
-    term itself is never rewritten (callers still see what the user typed);
-    only this containment check is plural-insensitive.
+    app/product_identification.py already uses for phrase matching. Phase 9.1:
+    -ches / -shes / -xes / -sses / -zes plurals also drop "es" ('wrenches' ->
+    'wrench', 'boxes' -> 'box', 'glasses' -> 'glass'), tried IN ADDITION to the
+    old '-s' form, so nothing that matched before stops matching; a singular reaches
+    its "-es" plural for -ch / -sh / -x / -z ('wrench' -> 'wrenches'), not -ss. The query term
+    itself is never rewritten; only this containment check is plural-insensitive.
     """
     if not haystack or not needle:
         return False
     hay = f" {haystack} "
     if f" {needle} " in hay:
         return True
+    if len(needle) > 3 and needle.endswith(("ches", "shes", "xes", "sses", "zes")) \
+            and f" {needle[:-2]} " in hay:
+        return True
     if len(needle) > 3 and needle.endswith("s") and not needle.endswith("ss"):
         return f" {needle[:-1]} " in hay
+    # Singular -> "-es" plural, but not for -ss: "process" reaching "processes" made
+    # "certification process" confidently match welding clothing "for … allied
+    # processes" (test_certification caught it; the eval set has no such query).
+    if needle.endswith(("ch", "sh", "x", "z")) and f" {needle}es " in hay:
+        return True
     if not needle.endswith("s"):
         return f" {needle}s " in hay
     return False

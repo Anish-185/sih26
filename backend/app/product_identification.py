@@ -165,7 +165,11 @@ class ProductIdentification:
 def _tokens(text: str) -> list[str]:
     out = []
     for token in normalize(text).split():
-        if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
+        # -ches / -shes / -xes / -sses plurals drop "es" (wrenches -> wrench, boxes ->
+        # box, mattresses -> mattress). Not -zes: "sizes" -> "siz" would stop matching "size".
+        if len(token) > 3 and token.endswith(("ches", "shes", "xes", "sses")):
+            token = token[:-2]
+        elif len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
             token = token[:-1]  # bottles -> bottle, lamps -> lamp
         out.append(token)
     return out

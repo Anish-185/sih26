@@ -173,6 +173,15 @@ def check_requirements(argv: list[str]) -> int:
         if r["result"] == "MISMATCH":
             print(f"    Sr. {r['sr_no']:>3}  {r['printed']:<30} {r['reason']:<24} {r['product'][:40]}")
 
+    # Phase 9.1 — orders named by BIS's listing (evidence, never a status).
+    rows = qco._listing()["rows"]
+    joined = [r for r in rows if r["record_id"]]
+    flags = Counter(f for r in joined for f in r["flags"])
+    print(f"  Listing Notification rows: {len(rows)} — joined {len(joined)}, not joined "
+          f"{len(rows) - len(joined)}; standards with a listing order "
+          f"{len({r['kb_standard_number'] for r in joined if r['orders']})}; flagged cells "
+          + (", ".join(f"{k} {v}" for k, v in sorted(flags.items())) or "none"))
+
     if requirements.errors:
         print(f"\nRequirement errors: {len(requirements.errors)}")
         for err in requirements.errors:

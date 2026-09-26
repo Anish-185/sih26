@@ -37,7 +37,7 @@ from app.product import ProductStandardFinder
 from app.product_context import ProductContextOut, build_from_query, context_out
 from app.rag import BISQuestionAnswerer
 from app.retrieval import RetrievalResult, SearchEngine, SearchOutcome
-from app.qco import QcoOut
+from app.qco import ListingOrdersOut, QcoOut, listing_orders_for
 from app.qco import for_standard as qco_for_standard
 from app.standard_currency import CurrencyOut, currency_for
 
@@ -438,6 +438,8 @@ class ProductStandardResultOut(BaseModel):
     currency: CurrencyOut | None = None
     # Phase 9: Quality Control Order evidence for this standard, from quoted rows only.
     qco: QcoOut | None = None
+    # Phase 9.1: the orders BIS's listing names — evidence, never a status.
+    listing_orders: ListingOrdersOut | None = None
     source_organization: str
     source_url: str | None = None
     document_name: str | None = None
@@ -837,6 +839,7 @@ def product_standard_post(
             catalogue=_catalogue_out(result.item.content),
             currency=currency_for(result.item.standard_number),
             qco=qco_for_standard(result.item.standard_number, language),
+            listing_orders=listing_orders_for(result.item.standard_number, language),
             source_organization=result.item.source_organization,
             source_url=result.item.source_url,
             document_name=result.item.document_name,

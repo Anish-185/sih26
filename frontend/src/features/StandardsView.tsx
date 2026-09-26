@@ -35,6 +35,7 @@ import { ProductIntelligence } from "@/components/ProductIntelligence";
 import { CoverageBoundaryPanel } from "@/components/CoverageBoundary";
 import { EvidenceGraphSection } from "@/components/EvidenceGraphSection";
 import { EditionCurrency } from "@/components/EditionCurrency";
+import { ListingOrders } from "@/components/ListingOrders";
 import { QcoStatus } from "@/components/QcoStatus";
 
 const EXAMPLES = [
@@ -289,6 +290,7 @@ function StandardResult({
           )}
           <EditionCurrency currency={result.currency} className="mt-3" />
           <QcoStatus qco={result.qco} className="mt-3" />
+          <ListingOrders listing={result.listing_orders} className="mt-3" />
           {coverage && (
             <p className="mt-1.5 text-[12px] leading-relaxed text-ink-soft">
               <Mono

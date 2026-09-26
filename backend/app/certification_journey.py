@@ -42,7 +42,7 @@ from pydantic import BaseModel
 from app.product import ProductStandardFinder, WhyThisResult, explain_candidate
 from app.requirements import knowledge_domain, JEWELLERY_HALLMARKING
 from app.retrieval import RetrievalResult, SearchEngine
-from app.qco import QcoOut
+from app.qco import ListingOrdersOut, QcoOut, listing_orders_for
 from app.qco import for_standard as qco_for_standard
 from app.standard_currency import CurrencyOut, currency_for
 
@@ -657,6 +657,7 @@ class JourneyCandidateOut(BaseModel):
     why: WhyOut
     currency: CurrencyOut | None = None
     qco: QcoOut | None = None
+    listing_orders: ListingOrdersOut | None = None
 
 
 class CertificationJourneyOut(BaseModel):
@@ -669,6 +670,7 @@ class CertificationJourneyOut(BaseModel):
     # Phase 9: Quality Control Order evidence — a different fact from the scheme
     # listing this journey is built on, and never inferred from it.
     qco: QcoOut | None = None
+    listing_orders: ListingOrdersOut | None = None
     candidates: list[JourneyCandidateOut]
     scheme: SchemeOut | None = None
     verification_status: str
@@ -712,6 +714,7 @@ def journey_out(journey: CertificationJourney) -> CertificationJourneyOut:
         standard_title=journey.standard_title,
         currency=currency_for(journey.standard_number),
         qco=qco_for_standard(journey.standard_number) if journey.standard_number else None,
+        listing_orders=listing_orders_for(journey.standard_number),
         candidates=[
             JourneyCandidateOut(
                 standard_number=c.standard_number,
@@ -723,6 +726,7 @@ def journey_out(journey: CertificationJourney) -> CertificationJourneyOut:
                 why=why_out(c.why),
                 currency=currency_for(c.standard_number),
                 qco=qco_for_standard(c.standard_number),
+                listing_orders=listing_orders_for(c.standard_number),
             )
             for c in journey.candidates
         ],

@@ -16,6 +16,15 @@ Three rules it never breaks:
    tool only appends.
 
 Usage:  ./.venv/bin/python scripts/fetch_compulsory_certification.py [--dry-run]
+        ./.venv/bin/python scripts/fetch_compulsory_certification.py --notifications
+
+``--notifications`` (Phase 9.1) writes ``data/listing_notifications.json`` instead: for
+every listed row, the Notification cell VERBATIM, the orders it names (S.O. / G.S.R.
+number, date as printed, Gazette link) and flags for a cell that also records a
+rescission, withdrawal, suspension or supersession — joined to the knowledge-base
+record transcribed from that row by exact number and product wording, never fuzzily.
+It is a data snapshot like data/laboratories.json, not a knowledge-base category,
+and it never sets a status: the listing names orders, it does not say they are in force.
 """
 
 from __future__ import annotations
@@ -31,6 +40,7 @@ import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 TARGET = ROOT / "data" / "knowledge" / "indian_standards.json"
+NOTIFICATIONS = ROOT / "data" / "listing_notifications.json"
 
 SCHEME_I = (
     "https://www.bis.gov.in/product-certification/products-under-compulsory-"
@@ -66,14 +76,19 @@ def fetch(url: str) -> str:
 # ---------------------------------------------------------------------- parsing
 
 
-def _cells(row_html: str) -> list[tuple[str, int]]:
-    """Return (text, colspan) for every cell in one <tr>."""
-    out: list[tuple[str, int]] = []
+def _cells(row_html: str) -> list[tuple[str, int, int, list[tuple[str, str]]]]:
+    """Return (text, colspan, rowspan, links) for every cell in one <tr>.
+    ``links`` is each (href, link text) inside the cell, verbatim."""
+    out: list[tuple[str, int, int, list[tuple[str, str]]]] = []
     for match in re.finditer(r"<t([dh])\b([^>]*)>(.*?)</t\1>", row_html, re.S):
         text = html.unescape(re.sub(r"<[^>]+>", " ", match.group(3)))
         text = re.sub(r"\s+", " ", text).strip()
-        span = re.search(r'colspan="(\d+)"', match.group(2))
-        out.append((text, int(span.group(1)) if span else 1))
+        span = re.search(r'colspan="?(\d+)', match.group(2))
+        rows = re.search(r'rowspan="?(\d+)', match.group(2))
+        links = [(html.unescape(href),
+                  re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", label))).strip())
+                 for href, label in re.findall(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', match.group(3), re.S)]
+        out.append((text, int(span.group(1)) if span else 1, int(rows.group(1)) if rows else 1, links))
     return out
 
 
@@ -92,6 +107,8 @@ def parse_scheme_i(page: str) -> list[dict]:
     for table in _tables(page)[:1]:
         heading: str | None = None
         notification: str | None = None
+        links: list[tuple[str, str]] = []
+        span_left = 0           # rows the current Notification cell still covers
         for row_html in re.findall(r"<tr.*?</tr>", table, re.S):
             cells = _cells(row_html)
             if not cells:
@@ -104,8 +121,11 @@ def parse_scheme_i(page: str) -> list[dict]:
                 continue
             if len(cells) < 3 or not re.match(r"^\d+\.?$", texts[0]):
                 continue
-            if len(cells) >= 4 and texts[3]:
-                notification = texts[3]
+            if len(cells) >= 4:
+                notification, links, span_left = texts[3] or None, cells[3][3], cells[3][2]
+            elif span_left <= 0:            # no cell covers this row: record none
+                notification, links = None, []
+            span_left -= 1
             number, product = texts[1].strip(), texts[2].strip()
             if not number or not product or _is_denotified(heading):
                 continue
@@ -115,7 +135,7 @@ def parse_scheme_i(page: str) -> list[dict]:
             seen.add(key)
             rows.append({
                 "number": number, "product": product,
-                "heading": heading, "notification": notification,
+                "heading": heading, "notification": notification, "links": links,
             })
     return rows
 
@@ -126,6 +146,8 @@ def parse_scheme_ii(page: str) -> list[dict]:
     seen: set[tuple[str, str]] = set()
     for table in _tables(page):
         notification: str | None = None
+        links: list[tuple[str, str]] = []
+        span_left = 0
         for row_html in re.findall(r"<tr.*?</tr>", table, re.S):
             cells = _cells(row_html)
             texts = [c[0] for c in cells]
@@ -133,8 +155,11 @@ def parse_scheme_ii(page: str) -> list[dict]:
                 continue
             if not re.match(r"^\d+\.?$", texts[0]):
                 continue
-            if len(cells) >= 5 and texts[4]:
-                notification = texts[4]
+            if len(cells) >= 5:
+                notification, links, span_left = texts[4] or None, cells[4][3], cells[4][2]
+            elif span_left <= 0:
+                notification, links = None, []
+            span_left -= 1
             number, title, product = (t.strip() for t in texts[1:4])
             if not number or not product:
                 continue
@@ -144,7 +169,7 @@ def parse_scheme_ii(page: str) -> list[dict]:
             seen.add(key)
             rows.append({
                 "number": number, "title": title, "product": product,
-                "notification": notification,
+                "notification": notification, "links": links,
             })
     return rows
 
@@ -311,7 +336,124 @@ def build(dry_run: bool = False) -> int:
     return 0
 
 
+# ------------------------------------------------------- Phase 9.1: Notification column
+
+# "S.O. No. 191(E)", "SO 516(E)", "S.O.1246 (E)", "G.S.R. 759(E)", "GSR-NO-759(E)".
+_ORDER_NO = re.compile(r"\b(S\.?\s*O|G\.?\s*S\.?\s*R)\.?\s*(?:No\.?\s*)?(\d+)\s*\(\s*E\s*\)", re.I)
+_DATE = (r"(\d{1,2}(?:st|nd|rd|th)?\s*[A-Za-z]+\.?,?\s*\d{4}"
+         r"|\d{1,2}[./-]\d{1,2}[./-]\d{4})")
+_ORDER_DATE = re.compile(r"\b(?:dated|dt)\.?\s*" + _DATE, re.I)
+# A date printed straight after the order number, with or without "dated":
+# "(S.O. No. 3858 (E) 27/10/2020)", "(S.O. 2332(E), 24th May, 2023)".
+_DATE_AFTER = re.compile(r"\s*[,(]?\s*(?:(?:dated|dt)\.?\s*)?" + _DATE, re.I)
+FLAGS = {
+    "RESCISSION": re.compile(r"\brescind|\brescission", re.I),
+    "WITHDRAWAL": re.compile(r"\bwithdraw", re.I),
+    "SUSPENSION": re.compile(r"\bsuspen", re.I),
+    "SUPERSESSION": re.compile(r"\bsuperseded\b", re.I),
+}
+
+
+def order_number(text: str) -> str | None:
+    """'S.O. No. 191(E)' -> 'S.O. 191(E)'; 'GSR 759(E)' -> 'G.S.R. 759(E)'."""
+    found = _ORDER_NO.search(text or "")
+    if not found:
+        return None
+    kind = "S.O." if found.group(1).upper().replace(".", "").replace(" ", "") == "SO" else "G.S.R."
+    return f"{kind} {found.group(2)}(E)"
+
+
+def _date_of(text: str) -> str | None:
+    """The date as printed: right after the order number, else after "dated"."""
+    found = _ORDER_NO.search(text)
+    after = _DATE_AFTER.match(text, found.end()) if found else None
+    date = after or _ORDER_DATE.search(text)
+    return date.group(1) if date else None
+
+
+def orders_in(cell: str, links: list[tuple[str, str]]) -> list[dict]:
+    """Each order the cell names: one per link (its text verbatim), then any order
+    number printed in the cell without a link. Date as printed, or null."""
+    out: list[dict] = []
+    for href, label in links:
+        out.append({"text": label, "url": href, "number": order_number(label), "date": _date_of(label)})
+    linked = {o["number"] for o in out if o["number"]}
+    for match in _ORDER_NO.finditer(cell):
+        number = order_number(match.group(0))
+        if number not in linked:
+            out.append({"text": match.group(0), "url": None, "number": number,
+                        "date": _date_of(cell[match.start():match.end() + 40])})
+            linked.add(number)
+    return out
+
+
+_DESCRIBED = re.compile(r'The BIS list describes the product as: "(.+?)"')
+_DESCRIPTION = re.compile(r'BIS product description: "(.+?)"')
+_QUOTED_NUMBER = re.compile(r'against the standard "([^"]+)"')
+
+
+def _record_keys(item: dict) -> list[tuple[str, str, str]]:
+    """(scheme, listing number, product) for the row(s) a record was transcribed from,
+    read from the record's own text. Scheme II records hold several products."""
+    doc = item.get("document_name") or ""
+    scheme = "II" if "(Scheme II)" in doc else "I" if "(Scheme I)" in doc else None
+    if scheme is None:
+        return []
+    quoted = _QUOTED_NUMBER.search(item["content"])
+    number = quoted.group(1) if quoted else item["standard_number"]
+    described = _DESCRIBED.search(item["content"]) or _DESCRIPTION.search(item["content"])
+    if not described:
+        return []
+    products = described.group(1).split("; ") if scheme == "II" else [described.group(1)]
+    return [(scheme, number, product) for product in products]
+
+
+def build_notifications() -> int:
+    items = json.loads(TARGET.read_text(encoding="utf-8"))
+    index: dict[tuple[str, str, str], dict] = {}
+    for item in items:
+        for key in _record_keys(item):
+            index.setdefault(key, item)
+    read_on = dt.date.today().isoformat()
+    rows_out = []
+    for scheme, url, rows in (("I", SCHEME_I, parse_scheme_i(fetch(SCHEME_I))),
+                              ("II", SCHEME_II, parse_scheme_ii(fetch(SCHEME_II)))):
+        for row in rows:
+            cell = row["notification"] or ""
+            record = index.get((scheme, clean_number(row["number"]), row["product"]))
+            rows_out.append({
+                "scheme": scheme, "source_url": url,
+                "number_as_printed": row["number"], "product": row["product"],
+                "notification": row["notification"],
+                "orders": orders_in(cell, row["links"]),
+                # The cell's text, each link's text AND each link's file name: BIS
+                # often says "rescind" / "suspension" only in the PDF's name.
+                "flags": [name for name, rx in FLAGS.items()
+                          if rx.search(cell) or any(rx.search(label) or rx.search(href)
+                                                    for href, label in row["links"])],
+                "record_id": record["id"] if record else None,
+                "kb_standard_number": record["standard_number"] if record else None,
+            })
+    joined = [r for r in rows_out if r["record_id"]]
+    NOTIFICATIONS.write_text(json.dumps({
+        "note": ("Notification column of BIS's 'Products under Compulsory Certification' Scheme I "
+                 "and Scheme II pages, transcribed verbatim by scripts/fetch_compulsory_certification.py "
+                 "--notifications. The listing NAMES orders; it does not state that any order is in "
+                 "force. A row joins a knowledge-base record only on the exact number and product "
+                 "wording that record was transcribed from."),
+        "read_on": read_on, "rows": rows_out,
+    }, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"rows: {len(rows_out)} (Scheme I {sum(r['scheme'] == 'I' for r in rows_out)}, "
+          f"Scheme II {sum(r['scheme'] == 'II' for r in rows_out)}); joined {len(joined)}; "
+          f"records with a listing order: {len({r['record_id'] for r in joined if r['orders']})}")
+    print(f"written: {NOTIFICATIONS.relative_to(ROOT)}")
+    return 0
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true")
-    sys.exit(build(parser.parse_args().dry_run))
+    parser.add_argument("--notifications", action="store_true",
+                        help="write data/listing_notifications.json (Phase 9.1)")
+    args = parser.parse_args()
+    sys.exit(build_notifications() if args.notifications else build(args.dry_run))

@@ -501,6 +501,15 @@ def _qco(qco: dict | None) -> list[tuple[str, str]]:
     return [("Quality Control Order", f"{_t(qco['label'])} · {_t(' '.join(qco['statements']))}{rows}")]
 
 
+def _listing_orders(listing: dict | None) -> list[tuple[str, str]]:
+    """Phase 9.1: the orders BIS's listing names, only when the record stored them."""
+    if not listing:
+        return []
+    links = "".join(f"<br/><font color='#8b8e94'>{_t(o['text'])} · {_t(o['url'])}</font>"
+                    for g in listing.get("groups", []) for o in g.get("orders", []) if o.get("url"))
+    return [("Order named by BIS's listing", f"{_t(' '.join(listing['statements']))}{links}")]
+
+
 def _edition(currency: dict | None) -> list[tuple[str, str]]:
     """Phase 5: the edition-currency row, only when the record stored one."""
     if not currency:
@@ -536,6 +545,7 @@ def _bis(d: _Doc, rec: dict, an: dict) -> list:
                      *_text_held(why),
                      *_edition(c.get("currency")),
                      *_qco(c.get("qco")),
+                     *_listing_orders(c.get("listing_orders")),
                      ("Evidence from the package", "<br/>".join(
                          f"{_t(e['clue']['kind'].replace('_', ' '))}: “{_t(e['clue']['text'])}” "
                          f"<font name='Mono' color='#8b8e94'>{_t(', '.join(e['clue']['source_regions']))} · "
@@ -578,6 +588,7 @@ def _certification(d: _Doc, an: dict) -> list:
                      + (f" · {_t(j.get('standard_title'))}" if j.get("standard_title") else "")),
         *_edition(j.get("currency")),
         *_qco(j.get("qco")),
+        *_listing_orders(j.get("listing_orders")),
         ("Standard selection", _t(j.get("standard_selection"))),
         ("Verification status", _t(j.get("verification_status"))),
         ("Certification scheme", _t(scheme.get("name") or "Not established from a verified record")),

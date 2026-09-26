@@ -4,8 +4,8 @@ QCO records are rows of BIS's "Upcoming QCOs" table, excluded from the main sear
 and reached by exact standard number after retrieval. Every model call is stubbed.
 
   * no QCO status exists without a quoted official row;
-  * a compulsory-certification listing record alone never yields NOTIFIED;
-  * a passed enforcement date never yields NOTIFIED;
+  * a compulsory-certification listing record alone never yields IN_FORCE;
+  * a passed enforcement date never yields IN_FORCE;
   * no QCO record is returned by the main search;
   * a mismatched row never attaches to a standard (and every reason is reachable);
   * /ask may mention a QCO only when a QCO record is attached (both directions);
@@ -106,23 +106,23 @@ def test_every_status_is_a_quoted_row() -> None:
 
 
 def test_a_listing_is_not_a_qco() -> None:
-    print("\n[2] a listing-page record alone never yields NOTIFIED")
+    print("\n[2] a listing-page record alone never yields IN_FORCE")
     listed = [i for i in ALL if i.category == "indian_standards"
               and "Compulsory Certification" in (i.document_name or "")]
     uncovered = [i for i in listed if not qco.qco_for(i.standard_number)]
     check("hundreds of standards are on a compulsory-certification listing", len(listed) > 400, str(len(listed)))
-    check("every listed standard with no QCO row is NOT_ESTABLISHED — never NOTIFIED or UPCOMING",
+    check("every listed standard with no QCO row is NOT_ESTABLISHED — never IN_FORCE or UPCOMING",
           all(qco.status_for(i.standard_number).status == qco.NOT_ESTABLISHED for i in uncovered))
-    check("NOTIFIED is reached by no knowledge-base standard (no in-force table was found)",
-          all(qco.status_for(n).status != qco.NOTIFIED for n in KB))
-    check("no table maps to NOTIFIED", qco.NOTIFIED not in qco.STATUS_BY_TABLE.values())
+    check("IN_FORCE is reached by no knowledge-base standard (no in-force table was found)",
+          all(qco.status_for(n).status != qco.IN_FORCE for n in KB))
+    check("no table maps to IN_FORCE", qco.IN_FORCE not in qco.STATUS_BY_TABLE.values())
     kettle = qco.status_for("IS 367:1993")
     check("IS 367:1993 (Scheme I listing) is NOT_ESTABLISHED, and the sentence separates the two facts",
           kettle.status == qco.NOT_ESTABLISHED and "different fact" in kettle.statements[0])
 
 
 def test_a_passed_date_is_never_in_force() -> None:
-    print("\n[3] a passed enforcement date never yields NOTIFIED")
+    print("\n[3] a passed enforcement date never yields IN_FORCE")
     later = dt.date(2030, 1, 1)
     attached = [r["kb"] for r in qco.match_report(KB) if r["result"] == "ATTACHED"]
     outs = [qco.status_for(n, today=later) for n in attached]

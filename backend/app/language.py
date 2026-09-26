@@ -477,7 +477,7 @@ BOUNDARY = {
 # today's date; ministry names, IS numbers and dates are kept exactly as BIS printed them.
 QCO = {
     EN: {
-        "label": {"NOTIFIED": "QCO in force (per BIS table)", "UPCOMING": "QCO upcoming",
+        "label": {"IN_FORCE": "QCO in force (per BIS table)", "UPCOMING": "QCO upcoming",
                   "NOT_ESTABLISHED": "QCO not established"},
         "upcoming": ("BIS's table of upcoming Quality Control Orders, read on {read_on}, lists "
                      "\u201c{product}\u201d under a Quality Control Order (issuing ministry or "
@@ -502,7 +502,7 @@ QCO = {
                      "that row as printed; it does not say the order applies to your item."),
     },
     HI: {
-        "label": {"NOTIFIED": "QCO लागू (BIS तालिका के अनुसार)", "UPCOMING": "QCO आगामी",
+        "label": {"IN_FORCE": "QCO लागू (BIS तालिका के अनुसार)", "UPCOMING": "QCO आगामी",
                   "NOT_ESTABLISHED": "QCO स्थापित नहीं"},
         "upcoming": ("{read_on} को पढ़ी गई BIS की आगामी गुणवत्ता नियंत्रण आदेशों (QCO) की तालिका "
                      "“{product}” को {ministry} के एक गुणवत्ता नियंत्रण आदेश के अंतर्गत सूचीबद्ध "
@@ -525,7 +525,7 @@ QCO = {
                      "आदेश आपकी वस्तु पर लागू होता है।"),
     },
     TE: {
-        "label": {"NOTIFIED": "QCO అమలులో ఉంది (BIS పట్టిక ప్రకారం)", "UPCOMING": "QCO రాబోతోంది",
+        "label": {"IN_FORCE": "QCO అమలులో ఉంది (BIS పట్టిక ప్రకారం)", "UPCOMING": "QCO రాబోతోంది",
                   "NOT_ESTABLISHED": "QCO నిర్ధారించబడలేదు"},
         "upcoming": ("{read_on}న చదివిన BIS రాబోయే నాణ్యతా నియంత్రణ ఉత్తర్వుల (QCO) పట్టిక "
                      "“{product}”ను {ministry} జారీ చేసే నాణ్యతా నియంత్రణ ఉత్తర్వు కింద జాబితా "
@@ -550,6 +550,67 @@ QCO = {
 
 def qco(language: str) -> dict:
     return QCO.get(language, QCO[EN])
+
+
+# Phase 9.1 — the order(s) BIS's compulsory-certification LISTING names for a product
+# (its Notification column). The seventh translated string set. Always about what the
+# listing names, never "in force", never about the user's item; a cell that also
+# records a rescission / withdrawal / suspension / supersession is quoted and NOT
+# interpreted. Order numbers and dates stay exactly as BIS printed them.
+LISTING = {
+    EN: {
+        "scheme": {"I": "Scheme I", "II": "Scheme II"},
+        "names_one": "BIS's {scheme} listing names this order for {products}: {orders}.",
+        "names_many": "BIS's {scheme} listing names these orders for {products}: {orders}.",
+        "cell_only": "BIS's {scheme} listing's Notification cell for {products} reads: \u201c{cell}\u201d.",
+        "products_one": "\u201c{product}\u201d",
+        "products_many": "{count} products BIS lists against this standard",
+        "dated": "{number}, dated {date}",
+        "flag": ("The listing's cell also records {what}. MetrIQ quotes the cell and does not "
+                 "interpret it, and does not say which of these orders, if any, applies."),
+        "flags": {"RESCISSION": "a rescission", "WITHDRAWAL": "a withdrawal",
+                  "SUSPENSION": "a suspension", "SUPERSESSION": "a supersession"},
+        "and": " and ",
+        "boundary": ("This is what BIS's listing names. It does not state that an order is in force, "
+                     "and it is not a statement about any particular item."),
+    },
+    HI: {
+        "scheme": {"I": "स्कीम I", "II": "स्कीम II"},
+        "names_one": "BIS की {scheme} सूची {products} के लिए यह आदेश बताती है: {orders}।",
+        "names_many": "BIS की {scheme} सूची {products} के लिए ये आदेश बताती है: {orders}।",
+        "cell_only": "BIS की {scheme} सूची में {products} के लिए अधिसूचना कॉलम में लिखा है: “{cell}”।",
+        "products_one": "“{product}”",
+        "products_many": "इस मानक के अंतर्गत BIS द्वारा सूचीबद्ध {count} उत्पादों",
+        "dated": "{number}, दिनांक {date}",
+        "flag": ("सूची के इस कॉलम में {what} भी दर्ज है। MetrIQ कॉलम को उद्धृत करता है, उसकी व्याख्या "
+                 "नहीं करता, और यह नहीं कहता कि इनमें से कौन सा आदेश, यदि कोई, लागू होता है।"),
+        "flags": {"RESCISSION": "एक निरसन (rescission)", "WITHDRAWAL": "एक वापसी (withdrawal)",
+                  "SUSPENSION": "एक निलंबन (suspension)", "SUPERSESSION": "एक अधिक्रमण (supersession)"},
+        "and": " और ",
+        "boundary": ("यह वही है जो BIS की सूची बताती है। यह नहीं कहती कि कोई आदेश लागू है, और यह किसी "
+                     "विशेष वस्तु के बारे में कथन नहीं है।"),
+    },
+    TE: {
+        "scheme": {"I": "స్కీమ్ I", "II": "స్కీమ్ II"},
+        "names_one": "BIS {scheme} జాబితా {products}కి ఈ ఉత్తర్వును పేర్కొంటుంది: {orders}.",
+        "names_many": "BIS {scheme} జాబితా {products}కి ఈ ఉత్తర్వులను పేర్కొంటుంది: {orders}.",
+        "cell_only": "BIS {scheme} జాబితాలో {products}కి నోటిఫికేషన్ కాలమ్‌లో ఇలా ఉంది: “{cell}”.",
+        "products_one": "“{product}”",
+        "products_many": "ఈ ప్రమాణం కింద BIS జాబితా చేసిన {count} ఉత్పత్తులు",
+        "dated": "{number}, తేదీ {date}",
+        "flag": ("జాబితాలోని ఈ కాలమ్‌లో {what} కూడా నమోదై ఉంది. MetrIQ కాలమ్‌ను ఉటంకిస్తుంది, దానిని "
+                 "వ్యాఖ్యానించదు, వీటిలో ఏ ఉత్తర్వు వర్తిస్తుందో (ఏదైనా ఉంటే) చెప్పదు."),
+        "flags": {"RESCISSION": "ఒక రద్దు (rescission)", "WITHDRAWAL": "ఒక ఉపసంహరణ (withdrawal)",
+                  "SUSPENSION": "ఒక నిలుపుదల (suspension)", "SUPERSESSION": "ఒక భర్తీ (supersession)"},
+        "and": " మరియు ",
+        "boundary": ("ఇది BIS జాబితా పేర్కొన్నది మాత్రమే. ఏ ఉత్తర్వు అమలులో ఉందని ఇది చెప్పదు, ఏ "
+                     "ప్రత్యేక వస్తువు గురించీ ఇది వాక్యం కాదు."),
+    },
+}
+
+
+def listing(language: str) -> dict:
+    return LISTING.get(language, LISTING[EN])
 
 
 def boundary(language: str) -> dict:

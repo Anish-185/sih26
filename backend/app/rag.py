@@ -65,7 +65,15 @@ Rules:
    wording, Indian Standard and enforcement date exactly as printed. That table
    lists orders due for implementation: never say the order is in force, never
    say whether an enforcement date took effect, and never say what the user's
-   own item must do.
+   own item must do. The same holds for a supplied LISTING ORDER RECORD: it
+   says which orders BIS's compulsory-certification listing NAMES for a product;
+   quote its S.O. numbers and dates exactly, never say an order is in force or
+   applies, and when the record says its cell also records a rescission,
+   withdrawal, suspension or supersession, say so and do not interpret it.
+11. Attribute every statement about a Quality Control Order or any other order
+   to the source it comes from ("BIS's table of upcoming QCOs lists …",
+   "BIS's Scheme I listing names …"). Never state it as a bare fact about the
+   product ("there is a QCO for …", "X is covered by …").
 """
 
 
@@ -112,6 +120,8 @@ class GroundedAnswer:
     # Phase 9: Quality Control Order rows for the same confidently retrieved
     # standards clauses attach to (see app/qco.py).
     qco: list[KnowledgeItem] = field(default_factory=list)
+    # Phase 9.1: the orders BIS's listing names for those same standards.
+    listing_orders: list = field(default_factory=list)
 
 
 logger = logging.getLogger(__name__)
@@ -146,6 +156,9 @@ _YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
 
 def unsupported_regulatory_claim(answer: str, evidence: str) -> bool:
     said, held = answer.lower(), evidence.lower()
+    # BIS names these orders "… (Quality Control) Order, 2020"; that bracketed form
+    # IS the phrase "quality control order" (Phase 9.1 listing cells).
+    held = held.replace("(quality control) order", "quality control order")
     if any(re.search(rf"\b{t}\b", said) and not re.search(rf"\b{t}\b", held)
            for t in _REGULATORY_TERMS):
         return True
@@ -157,16 +170,18 @@ _QCO = re.compile(r"\bquality control orders?\b|\bqcos?\b", re.IGNORECASE)
 
 def untied_qco_claim(answer: str, results: list[RetrievalResult],
                      context: "ConversationContext | None",
-                     qco_rows: list[KnowledgeItem] | None = None) -> bool:
+                     qco_rows: list[KnowledgeItem] | None = None,
+                     listing_orders: list | None = None) -> bool:
     """A QCO named while discussing a specific product must be tied to it.
 
     A retrieved FAQ can hold the general QCO sentence, which the check above
     lets through; applied next to "LED bulb" it implies LED bulbs are under a
     QCO. That is allowed only when ONE retrieved record mentions a QCO AND names
     the product or one of its standard numbers — or (Phase 9) when a QCO record
-    was attached, which happens only for the standards this answer is about.
+    was attached, which happens only for the standards this answer is about, or
+    (Phase 9.1) an order BIS's listing names for one of them.
     """
-    if context is None or not _QCO.search(answer) or qco_rows:
+    if context is None or not _QCO.search(answer) or qco_rows or listing_orders:
         return False
     names = [context.product.lower(), *(n.lower() for n in context.standard_numbers)]
     for result in results:
@@ -246,9 +261,29 @@ SOURCE URL: {item.source_url}
     return "\n---\n" + "\n---\n".join(blocks)
 
 
+def _listing_context(listings: list) -> str:
+    """The orders BIS's listing names, cell verbatim, with MetrIQ's own sentences."""
+    if not listings:
+        return ""
+    blocks = []
+    for index, (number, out) in enumerate(listings, start=1):
+        cells = "\n".join(f"SCHEME {g.scheme} NOTIFICATION CELL, AS PRINTED: {g.notification}"
+                          for g in out.groups)
+        blocks.append(
+            f"""LISTING ORDER RECORD {index}
+STANDARD: {number}
+{cells}
+METRIQ SUMMARY: {" ".join(out.statements)}
+SOURCE URL: {out.groups[0].source_url}
+"""
+        )
+    return "\n---\n" + "\n---\n".join(blocks)
+
+
 def render_evidence(results: list[RetrievalResult], language: str,
                     attached: list[KnowledgeItem] | None = None,
-                    qco_rows: list[KnowledgeItem] | None = None) -> str:
+                    qco_rows: list[KnowledgeItem] | None = None,
+                    listings: list | None = None) -> str:
     """The retrieved records as plain prose, written by MetrIQ's own code.
 
     Used when the explanation provider is unreachable. No model is involved, so
@@ -288,6 +323,10 @@ def render_evidence(results: list[RetrievalResult], language: str,
         status = qco_module.status_for(item.standard_number, language)
         blocks.append("\n".join([status.label, *status.statements,
                                  item.document_name or "", item.source_url or ""]))
+
+    for number, _ in listings or []:
+        out = qco_module.listing_orders_for(number, language)
+        blocks.append("\n".join([number, *out.statements, out.groups[0].source_url]))
 
     return "\n\n".join(blocks)
 
@@ -416,8 +455,11 @@ class BISQuestionAnswerer:
         # Phase 9: QCO rows attach by the same rule, to the same standards.
         qco_rows = list({row.id: row for r in eligible if confident
                          for row in qco_module.qco_for(r.item.standard_number)}.values())
+        # Phase 9.1: the orders BIS's listing names, same rule, same standards.
+        listings = [(r.item.standard_number, found) for r in eligible if confident
+                    if (found := qco_module.listing_orders_for(r.item.standard_number))]
         context = (_build_context(outcome.results) + _clause_context(attached)
-                   + _qco_context(qco_rows))
+                   + _qco_context(qco_rows) + _listing_context(listings))
 
         # The model sees the question exactly as the user wrote it — the
         # rewritten form is for retrieval only.
@@ -446,8 +488,12 @@ Give a concise answer grounded in the supplied evidence.
                 raise _Guard("WITHDRAWAL_CLAIM")
             if unsupported_regulatory_claim(answer, context):
                 raise _Guard("UNSUPPORTED_REGULATORY_CLAIM")
-            if untied_qco_claim(answer, outcome.results, resolved, qco_rows):
+            if untied_qco_claim(answer, outcome.results, resolved, qco_rows, listings):
                 raise _Guard("UNTIED_QCO_CLAIM")
+            if qco_module.unsupported_order_numbers(answer, context):
+                # An S.O. / G.S.R. number MetrIQ never supplied, withheld like an
+                # invented IS number.
+                raise _Guard("UNSUPPORTED_ORDER_NUMBER")
             if clauses_module.unsupported_citations(answer, context):
                 # Withheld like an invented IS number: a clause MetrIQ never supplied.
                 raise _Guard("UNSUPPORTED_CLAUSE")
@@ -456,7 +502,7 @@ Give a concise answer grounded in the supplied evidence.
             # above already succeeded, so MetrIQ has the evidence and renders it
             # itself rather than failing the request. Deterministic, and
             # explicitly labelled as evidence without an AI explanation.
-            answer = render_evidence(outcome.results, answer_language, attached, qco_rows)
+            answer = render_evidence(outcome.results, answer_language, attached, qco_rows, listings)
             explained, fallback_reason = False, _fallback_reason(exc)
         # Logged so a fallback is never a mystery (the Phase 6.1 re-run hit one).
         logger.log(logging.INFO if fallback_reason == "MODEL" else logging.WARNING,
@@ -473,4 +519,5 @@ Give a concise answer grounded in the supplied evidence.
             clauses=attached,
             fallback_reason=fallback_reason,
             qco=qco_rows,
+            listing_orders=listings,
         )

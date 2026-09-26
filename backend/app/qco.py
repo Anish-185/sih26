@@ -8,7 +8,7 @@ standard number, after retrieval has chosen the standard.
 
     qco_for(number)          the rows whose IS number, as printed, is exactly that
                              standard after normalising whitespace and a missing "IS "
-    status_for(number, …)    NOTIFIED | UPCOMING | NOT_ESTABLISHED, with MetrIQ's own
+    status_for(number, …)    IN_FORCE | UPCOMING | NOT_ESTABLISHED, with MetrIQ's own
                              sentences (en / hi / te) and the quoted rows
     match_report(kb_numbers) every row: ATTACHED, or MISMATCH with its reason
 
@@ -18,7 +18,7 @@ Hard rules, each enforced here rather than hoped for:
 * Status follows the TABLE the row came from, never today's date. The upcoming table
   lists orders due for implementation, so its rows are UPCOMING — even after the
   printed date has passed, because dates are often deferred and MetrIQ cannot know.
-  NOTIFIED needs a BIS table that states an order is in force; Phase 9 found none
+  IN_FORCE needs a BIS table that states an order is in force; Phase 9 found none
   (the compulsory-certification listing pages carry notification links but never say
   "in force", and mix in rescind and suspension orders), so nothing here yields it.
 * Being on a "Products under Compulsory Certification" page is not a QCO and is never
@@ -29,8 +29,10 @@ Hard rules, each enforced here rather than hoped for:
 from __future__ import annotations
 
 import datetime as dt
+import json
 import re
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 
@@ -39,13 +41,13 @@ from app.knowledge.loader import load_knowledge_base
 from app.knowledge.schema import KnowledgeItem
 from app.retrieval.text import STOPWORDS, normalize
 
-NOTIFIED = "NOTIFIED"
+IN_FORCE = "IN_FORCE"
 UPCOMING = "UPCOMING"
 NOT_ESTABLISHED = "NOT_ESTABLISHED"
-STATUSES = (NOTIFIED, UPCOMING, NOT_ESTABLISHED)
+STATUSES = (IN_FORCE, UPCOMING, NOT_ESTABLISHED)
 
 # The table each record came from decides its status. A table that states orders are
-# in force would map to NOTIFIED; BIS publishes none as HTML (Phase 9, Step 1).
+# in force would map to IN_FORCE; BIS publishes none as HTML (Phase 9, Step 1).
 UPCOMING_TABLE = "https://www.bis.gov.in/upcoming-qcos-notified-and-due-for-implementation/?lang=en"
 STATUS_BY_TABLE = {UPCOMING_TABLE: UPCOMING}
 
@@ -119,7 +121,7 @@ class QcoRowOut(BaseModel):
 class QcoOut(BaseModel):
     """Quality Control Order evidence for one standard. Never about the user's item."""
 
-    status: str = Field(description='"NOTIFIED" | "UPCOMING" | "NOT_ESTABLISHED"')
+    status: str = Field(description='"IN_FORCE" | "UPCOMING" | "NOT_ESTABLISHED"')
     label: str = Field(description="Short badge text, written by MetrIQ.")
     statements: list[str] = Field(description="MetrIQ's own sentences, in the requested language.")
     rows: list[QcoRowOut] = Field(default_factory=list)
@@ -182,6 +184,111 @@ def for_standard(standard_number: str | None, language: str = lang.EN) -> QcoOut
     currency = currency_for(standard_number)
     later = currency.later_edition if currency and currency.status == SUPERSEDED_BY else None
     return status_for(standard_number, language, later_edition=later)
+
+
+# ------------------------------------------------------------------ listing orders
+#
+# Phase 9.1: the orders BIS's compulsory-certification listing NAMES for a product —
+# its Notification column, snapshotted by
+# ``scripts/fetch_compulsory_certification.py --notifications`` into
+# data/listing_notifications.json and joined to the record transcribed from that row
+# by exact number and product wording. This is EVIDENCE, never a status: nothing
+# here reads or sets ``status``, so IN_FORCE cannot come from a listing.
+
+LISTING_PATH = Path(__file__).resolve().parents[2] / "data" / "listing_notifications.json"
+
+
+@lru_cache(maxsize=1)
+def _listing() -> dict:
+    return json.loads(LISTING_PATH.read_text(encoding="utf-8"))
+
+
+def orders_named_by_listing(standard_number: str | None) -> list[dict]:
+    """The listing rows joined to exactly this knowledge-base standard (the number as
+    stored). Rows that did not join a record are never returned."""
+    if not standard_number:
+        return []
+    return [r for r in _listing()["rows"] if r["kb_standard_number"] == standard_number]
+
+
+class ListingOrderOut(BaseModel):
+    number: str | None = Field(default=None, description='"S.O. 191(E)" — parsed; null when none printed.')
+    date: str | None = Field(default=None, description="As printed; null when none printed.")
+    text: str = Field(description="The link text or the cell text, verbatim.")
+    url: str | None = Field(default=None, description="The Gazette link the cell gives; recorded, never fetched.")
+
+
+class ListingGroupOut(BaseModel):
+    scheme: str
+    products: list[str]
+    notification: str = Field(description="The Notification cell, verbatim.")
+    orders: list[ListingOrderOut]
+    flags: list[str] = Field(default_factory=list,
+                             description="RESCISSION | WITHDRAWAL | SUSPENSION | SUPERSESSION — quoted, not interpreted.")
+    source_url: str
+
+
+class ListingOrdersOut(BaseModel):
+    """What BIS's listing names. Never a status, never about the user's item."""
+
+    statements: list[str]
+    groups: list[ListingGroupOut]
+    read_on: str | None = None
+
+
+def _group(rows: list[dict]) -> list[ListingGroupOut]:
+    """Rows sharing one Notification cell (e.g. 43 IS/IEC 62368 products) become one group."""
+    groups: dict[tuple, ListingGroupOut] = {}
+    for row in rows:
+        key = (row["scheme"], row["notification"])
+        if key not in groups:
+            groups[key] = ListingGroupOut(
+                scheme=row["scheme"], products=[], notification=row["notification"] or "",
+                orders=[ListingOrderOut(**o) for o in row["orders"]], flags=row["flags"],
+                source_url=row["source_url"])
+        groups[key].products.append(row["product"])
+    return list(groups.values())
+
+
+def listing_orders_for(standard_number: str | None, language: str = lang.EN) -> ListingOrdersOut | None:
+    """MetrIQ's sentences about the orders the listing names, or None when it names none."""
+    rows = [r for r in orders_named_by_listing(standard_number) if r["notification"]]
+    if not rows:
+        return None
+    text = lang.listing(language)
+    statements = []
+    groups = _group(rows)
+    for g in groups:
+        products = (text["products_one"].format(product=g.products[0]) if len(g.products) == 1
+                    else text["products_many"].format(count=len(g.products)))
+        scheme = text["scheme"][g.scheme]
+        named = [text["dated"].format(number=o.number, date=o.date) if o.date else o.number
+                 for o in g.orders if o.number]
+        named = list(dict.fromkeys(named))
+        if named:
+            key = "names_one" if len(named) == 1 else "names_many"
+            statements.append(text[key].format(scheme=scheme, products=products, orders="; ".join(named)))
+        else:
+            statements.append(text["cell_only"].format(scheme=scheme, products=products, cell=g.notification))
+        if g.flags:
+            statements.append(text["flag"].format(
+                what=text["and"].join(text["flags"][f] for f in g.flags)))
+    statements.append(text["boundary"])
+    return ListingOrdersOut(statements=statements, groups=groups, read_on=_listing().get("read_on"))
+
+
+# An order number an answer cites ("S.O. 191(E)", "SO 516 (E)", "G.S.R. 759(E)").
+_ORDER_NO = re.compile(r"\b(S\.?\s*O|G\.?\s*S\.?\s*R)\.?\s*(?:No\.?\s*)?(\d+)\s*\(\s*E\s*\)", re.I)
+
+
+def _order_keys(text: str) -> set[str]:
+    return {("SO" if m.group(1).upper().replace(".", "").replace(" ", "") == "SO" else "GSR") + m.group(2)
+            for m in _ORDER_NO.finditer(text or "")}
+
+
+def unsupported_order_numbers(answer: str, context: str) -> set[str]:
+    """S.O. / G.S.R. numbers the answer cites that appear nowhere in the supplied context."""
+    return _order_keys(answer) - _order_keys(context)
 
 
 # ------------------------------------------------------------------ matching

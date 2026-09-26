@@ -55,7 +55,7 @@ from app.product import ProductStandardFinder
 from app.product_identification import RETRIEVAL_NOTE, product_name_of
 from app.ocr import OCR_ENGINE, OcrError, RawRegion, run_ocr
 from app.pipeline import run_downstream
-from app.qco import QcoOut
+from app.qco import ListingOrdersOut, QcoOut, listing_orders_for
 from app.qco import for_standard as qco_for_standard
 from app.standard_currency import CurrencyOut, currency_for
 
@@ -370,6 +370,7 @@ class StandardCandidateOut(BaseModel):
     last_verified: str | None = None
     currency: CurrencyOut | None = None
     qco: QcoOut | None = None
+    listing_orders: ListingOrdersOut | None = None
 
 
 class CoverageRowOut(BaseModel):
@@ -1213,6 +1214,7 @@ def _candidate_out(candidate) -> StandardCandidateOut:
         last_verified=item.last_verified.isoformat() if item.last_verified else None,
         currency=currency_for(item.standard_number),
         qco=qco_for_standard(item.standard_number),
+        listing_orders=listing_orders_for(item.standard_number),
     )
 
 
