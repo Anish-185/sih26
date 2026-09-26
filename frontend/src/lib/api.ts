@@ -126,6 +126,27 @@ export interface WhyThisResult {
   strength: string;
   signals: string[];
   summary: string;
+  /** Phase 8: "CLAUSE" = MetrIQ holds OCR'd clause text; "IDENTITY" = number, title, listing only. */
+  text_level?: "CLAUSE" | "IDENTITY";
+  text_note?: string;
+  /** The scope clause(s), verbatim. Absent on records saved before Phase 8. */
+  scope?: ClauseEvidence[];
+}
+
+/** Phase 8: one clause, OCR text from the Public.Resource.Org / Internet Archive mirror. */
+export interface ClauseEvidence {
+  id: string;
+  standard_number: string;
+  clause: string;
+  heading: string;
+  text: string;
+  note: string;
+  /** As stored, e.g. "Clause 9, page 12 (PDF page 14)". */
+  reference: string;
+  source_url: string;
+  pdf_page: number | null;
+  /** MetrIQ's fixed label — shown wherever the text is. */
+  ocr_label: string;
 }
 
 export interface ProductStandardResult {
@@ -427,7 +448,7 @@ export interface AskResponse {
   matched_concepts: string[];
   /**
    * False when the explanation provider was unreachable and the answer is the
-   * retrieved verified records rendered by MetrIQ's own code. The evidence and
+   * retrieved records rendered by MetrIQ's own code. The evidence and
    * the sources are unchanged; only the prose differs.
    */
   explained: boolean;
@@ -437,6 +458,10 @@ export interface AskResponse {
   context: ConversationContext | null;
   /** Phase 6: the product this question inherited from the previous one. */
   inherited: string | null;
+  /** Phase 8: clause text attached to a confident answer; empty otherwise. */
+  clauses: ClauseEvidence[];
+  /** Phase 8: which path produced `answer` — MODEL, ABSTAINED, PROVIDER_ERROR, GUARD:<rule> … */
+  fallback_reason: string;
 }
 
 /** Phase 6: entities an /ask answer resolved, derived by MetrIQ — never a model. */

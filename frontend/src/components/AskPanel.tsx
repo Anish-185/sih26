@@ -150,6 +150,8 @@ export function AskPanel({
           abstentionMessage={abstentionMessage}
           explained={res.explained}
           boundary={res.boundary}
+          clauses={res.clauses ?? []}
+          fallbackReason={res.fallback_reason}
         />
       )}
 

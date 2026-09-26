@@ -94,6 +94,7 @@ const CERTIFICATION_PROMPT: { code: CopilotCapability; label: string } = {
 
 const WITHHELD_LABEL: Record<string, string> = {
   FABRICATED_STANDARD: "cited a standard that is not in this record",
+  FABRICATED_CLAUSE: "cited a clause that is not in the evidence MetrIQ supplied",
   FABRICATED_HUID: "contained a HUID that is not in this record",
   FABRICATED_SOURCE: "cited a source that is not in this record",
   AUTHENTICATION_CLAIM: "claimed an authentication MetrIQ cannot establish",

@@ -13,13 +13,16 @@ are untouched — the language of interaction changes, the source of truth does 
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 
 from app import boundary as boundary_module
+from app import clauses as clauses_module
 from app import language as lang
+from app.knowledge.schema import KnowledgeItem
 from app.llm import LLMError, LocalLLM
-from app.openrouter import OpenRouterLLM
+from app.openrouter import CopilotUnavailable, OpenRouterLLM
 from app.product import ProductStandardFinder
 from app.retrieval import RetrievalResult, SearchEngine
 from app.retrieval.text import tokenize
@@ -33,7 +36,12 @@ Rules:
 1. Answer ONLY using the BIS context supplied by the application.
 2. Do not use pretrained knowledge as evidence.
 3. Do not invent standards, clauses, requirements, dates, numbers, fees,
-   procedures, or legal claims.
+   procedures, or legal claims. Reproduce Indian Standard numbers, clause
+   numbers and page references (for example "Clause 9, PDF page 14") exactly as
+   supplied, and cite a clause only if it appears in the supplied context.
+   Clause text marked as OCR comes from a scanned document and may contain
+   character errors: never state a numeric limit from it as confirmed — say it
+   should be checked against the named PDF page.
 4. If the supplied context is insufficient, say so clearly.
 5. Do not make a final legal or enforcement decision.
 6. Do not claim to verify, authenticate, or state the status of a specific
@@ -90,6 +98,33 @@ class GroundedAnswer:
     # question, if any.
     context: ConversationContext | None = None
     inherited: str | None = None
+    # Phase 8: clause text of the retrieved standards, attached only to a confident
+    # answer (see app/clauses.py), and which path produced ``answer``.
+    clauses: list[KnowledgeItem] = field(default_factory=list)
+    fallback_reason: str = "MODEL"
+
+
+logger = logging.getLogger(__name__)
+
+
+class _Guard(Exception):
+    """A deterministic check rejected the model's text. ``rule`` names the check."""
+
+    def __init__(self, rule: str) -> None:
+        super().__init__(rule)
+        self.rule = rule
+
+
+def _fallback_reason(exc: Exception) -> str:
+    """MODEL | RATE_LIMITED | NOT_CONFIGURED | PROVIDER_ERROR | GUARD:<rule>."""
+    if isinstance(exc, _Guard):
+        return f"GUARD:{exc.rule}"
+    code = getattr(exc, "code", "") if isinstance(exc, CopilotUnavailable) else ""
+    if code in ("RATE_LIMITED", "DAILY_LIMIT"):
+        return "RATE_LIMITED"
+    if code == "NOT_CONFIGURED":
+        return "NOT_CONFIGURED"
+    return "PROVIDER_ERROR"
 
 
 # A Quality Control Order, a ministry or a year (an enforcement date) may appear
@@ -158,7 +193,30 @@ SOURCE URL: {item.source_url or "N/A"}
     return "\n---\n".join(blocks)
 
 
-def render_evidence(results: list[RetrievalResult], language: str) -> str:
+def _clause_context(attached: list[KnowledgeItem]) -> str:
+    """The attached clauses, each labelled as OCR text with its reference as stored."""
+    if not attached:
+        return ""
+    blocks = []
+    for index, item in enumerate(attached, start=1):
+        clause = clauses_module.view(item)
+        blocks.append(
+            f"""CLAUSE {index}
+STANDARD: {clause["standard_number"]}
+REFERENCE: {clause["reference"]}
+HEADING: {clause["heading"]}
+TEXT (OCR from a scanned BIS document, via the Public.Resource.Org / Internet Archive
+mirror, not verified by a person):
+{clause["text"]}
+{clause["note"]}
+SOURCE URL: {clause["source_url"]}
+""")
+    return ("\n\nCLAUSE TEXT OF THE RETRIEVED STANDARDS\n" + clauses_module.OCR_LABEL
+            + "\n\n" + "\n---\n".join(blocks))
+
+
+def render_evidence(results: list[RetrievalResult], language: str,
+                    attached: list[KnowledgeItem] | None = None) -> str:
     """The retrieved records as plain prose, written by MetrIQ's own code.
 
     Used when the explanation provider is unreachable. No model is involved, so
@@ -183,6 +241,16 @@ def render_evidence(results: list[RetrievalResult], language: str) -> str:
             ) if part
         )
         blocks.append("\n".join(part for part in (heading, item.content, trail) if part))
+
+    for item in attached or []:
+        clause = clauses_module.view(item)
+        blocks.append("\n".join([
+            f"{clause['standard_number']} — {clause['reference']}",
+            clauses_module.OCR_LABEL,
+            clause["text"],
+            clause["note"],
+            clause["source_url"],
+        ]))
 
     return "\n\n".join(blocks)
 
@@ -282,7 +350,9 @@ class BISQuestionAnswerer:
         # dead end, MetrIQ states its own boundary: what the verified data covers,
         # what the search did, and where to look next (app/boundary.py).
         if outcome.abstained or not outcome.results:
+            logger.info("/ask fallback_reason=ABSTAINED")
             return GroundedAnswer(
+                fallback_reason="ABSTAINED",
                 answer=lang.insufficient(answer_language),
                 results=[],
                 language=answer_language,
@@ -294,9 +364,19 @@ class BISQuestionAnswerer:
                 inherited=inherited,
             )
 
-        context = _build_context(outcome.results)
         # Resolved once, before generation: the guard below needs the product.
         resolved = self.resolve_context(retrieval_text)
+        # Phase 8: clause text is attached only to a confident answer, and only to
+        # standards retrieval already found — it never decides which standard. A
+        # standard qualifies when Product -> Standard confidently identified it, or
+        # when the question names it by number: a single shared word ("solar" ->
+        # solar water heaters, at medium confidence) is not enough to quote a clause.
+        eligible = [r for r in outcome.results
+                    if (resolved and r.item.standard_number in resolved.standard_numbers)
+                    or any(reason.field == "standard_number" for reason in r.reasons)]
+        attached = (clauses_module.attach(eligible, retrieval_text)
+                    if outcome.confidence in ("high", "medium") else [])
+        context = _build_context(outcome.results) + _clause_context(attached)
 
         # The model sees the question exactly as the user wrote it — the
         # rewritten form is for retrieval only.
@@ -319,21 +399,27 @@ Give a concise answer grounded in the supplied evidence.
                 user_prompt=user_prompt,
                 temperature=0.1,
             )
-            explained = True
+            explained, fallback_reason = True, "MODEL"
             if mentions_withdrawal(answer):
                 # MetrIQ has no withdrawal data: fall back to its own text.
-                raise LLMError("the explanation claimed a withdrawal")
+                raise _Guard("WITHDRAWAL_CLAIM")
             if unsupported_regulatory_claim(answer, context):
-                raise LLMError("the explanation named an order, ministry or date not in the evidence")
+                raise _Guard("UNSUPPORTED_REGULATORY_CLAIM")
             if untied_qco_claim(answer, outcome.results, resolved):
-                raise LLMError("the explanation tied a Quality Control Order to a product without evidence")
-        except LLMError:
+                raise _Guard("UNTIED_QCO_CLAIM")
+            if clauses_module.unsupported_citations(answer, context):
+                # Withheld like an invented IS number: a clause MetrIQ never supplied.
+                raise _Guard("UNSUPPORTED_CLAUSE")
+        except (LLMError, _Guard) as exc:
             # The provider is down, rate-limited or unconfigured. The retrieval
             # above already succeeded, so MetrIQ has the evidence and renders it
             # itself rather than failing the request. Deterministic, and
             # explicitly labelled as evidence without an AI explanation.
-            answer = render_evidence(outcome.results, answer_language)
-            explained = False
+            answer = render_evidence(outcome.results, answer_language, attached)
+            explained, fallback_reason = False, _fallback_reason(exc)
+        # Logged so a fallback is never a mystery (the Phase 6.1 re-run hit one).
+        logger.log(logging.INFO if fallback_reason == "MODEL" else logging.WARNING,
+                   "/ask fallback_reason=%s", fallback_reason)
 
         return GroundedAnswer(
             answer=answer,
@@ -343,4 +429,6 @@ Give a concise answer grounded in the supplied evidence.
             explained=explained,
             context=resolved,
             inherited=inherited,
+            clauses=attached,
+            fallback_reason=fallback_reason,
         )

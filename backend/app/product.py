@@ -6,7 +6,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from app import boundary as boundary_module
+from app import clauses as clauses_module
 from app import language as lang
+from app.knowledge.schema import KnowledgeItem
 from app.retrieval.engine import RetrievalResult, SearchEngine
 
 # ---------------------------------------------------------------------------
@@ -56,12 +58,35 @@ class WhyThisResult:
     strength: str
     signals: list[str]
     summary: str
+    # Phase 8: how much of the standard MetrIQ holds. "CLAUSE" = OCR'd clause text
+    # of the cited edition; "IDENTITY" = number, title and BIS listing only. The
+    # difference is shown, never hidden. ``scope`` is the scope clause(s), verbatim.
+    text_level: str = "IDENTITY"
+    text_note: str = ""
+    scope: tuple[KnowledgeItem, ...] = ()
+
+
+def text_held(standard_number: str) -> tuple[str, str, tuple[KnowledgeItem, ...]]:
+    """(text_level, text_note, scope clauses) for one standard, as stored."""
+    if not clauses_module.clauses_for(standard_number):
+        return ("IDENTITY",
+                "MetrIQ holds this standard's identity — its number, title and BIS listing — "
+                "but not its text.", ())
+    scope = tuple(clauses_module.scope_of(standard_number))
+    if not scope:
+        return ("CLAUSE",
+                "MetrIQ holds clause text of this standard (OCR from a scanned copy), but not "
+                "its scope clause.", ())
+    return ("CLAUSE",
+            "MetrIQ holds clause text of this standard (OCR from a scanned copy). Its scope "
+            "clause is quoted below, verbatim.", scope)
 
 
 def explain_candidate(result: RetrievalResult) -> WhyThisResult:
     """Turn a RetrievalResult's deterministic MatchReasons into an explanation.
 
-    Pure function: same input -> same output, no I/O, no LLM.
+    Deterministic: same input -> same output, no LLM. Reads the (cached) clause
+    records only to say how much of the standard MetrIQ holds.
     """
     # Group the match reasons by field, keeping the distinct terms in order.
     terms_by_field: dict[str, list[str]] = {}
@@ -96,11 +121,15 @@ def explain_candidate(result: RetrievalResult) -> WhyThisResult:
         f"Retrieved as a candidate standard ({strength} match) because {joined}."
     )
 
+    text_level, text_note, scope = text_held(result.item.standard_number or "")
     return WhyThisResult(
         standard_number=result.item.standard_number or "",
         strength=strength,
         signals=signals,
         summary=summary,
+        text_level=text_level,
+        text_note=text_note,
+        scope=scope,
     )
 
 

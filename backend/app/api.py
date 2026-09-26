@@ -19,6 +19,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from app import clauses as clauses_module
 from app import lab_registry
 from app import language as lang
 from app.boundary import Boundary
@@ -346,6 +347,11 @@ class AskResponse(BaseModel):
     # inherited from the previous one (null when nothing was inherited).
     context: ConversationContextOut | None = None
     inherited: str | None = None
+    # Phase 8: clause text attached to a confident answer (empty otherwise), and
+    # which path produced ``answer``: MODEL | ABSTAINED | EMPTY_QUESTION |
+    # RATE_LIMITED | NOT_CONFIGURED | PROVIDER_ERROR | GUARD:<rule>.
+    clauses: list[ClauseOut] = Field(default_factory=list)
+    fallback_reason: str = "MODEL"
 
 
 # ---------------------------------------------------------------------
@@ -369,6 +375,29 @@ class ProductStandardRequest(BaseModel):
     )
 
 
+class ClauseOut(BaseModel):
+    """Phase 8: one clause of a standard, OCR text from the Public.Resource.Org mirror.
+
+    ``text`` and ``note`` are verbatim from the record; ``ocr_label`` is MetrIQ's fixed
+    label and must be shown wherever the text is.
+    """
+
+    id: str
+    standard_number: str
+    clause: str
+    heading: str
+    text: str
+    note: str
+    reference: str = Field(description='As stored, e.g. "Clause 9, page 12 (PDF page 14)".')
+    source_url: str
+    pdf_page: int | None = None
+    ocr_label: str = clauses_module.OCR_LABEL
+
+
+def clause_out(item) -> ClauseOut:
+    return ClauseOut(**clauses_module.view(item))
+
+
 class WhyOut(BaseModel):
     """Deterministic 'Why this result?' explanation (Phase 9).
 
@@ -379,6 +408,17 @@ class WhyOut(BaseModel):
     strength: str
     signals: list[str]
     summary: str
+    # Phase 8: "CLAUSE" (MetrIQ holds OCR'd clause text) or "IDENTITY" (number,
+    # title and listing only), MetrIQ's sentence saying so, and the scope clause(s).
+    text_level: str = "IDENTITY"
+    text_note: str = ""
+    scope: list[ClauseOut] = Field(default_factory=list)
+
+
+def why_out(why) -> WhyOut:
+    return WhyOut(standard_number=why.standard_number, strength=why.strength,
+                  signals=list(why.signals), summary=why.summary, text_level=why.text_level,
+                  text_note=why.text_note, scope=[clause_out(c) for c in why.scope])
 
 
 class ProductStandardResultOut(BaseModel):
@@ -716,6 +756,7 @@ def ask_post(
             source_count=0,
             sources=[],
             language=empty_language,
+            fallback_reason="EMPTY_QUESTION",
         )
 
     # No 503 path: if the explanation provider is unreachable, the answerer
@@ -741,6 +782,8 @@ def ask_post(
         boundary=_boundary_out(result.boundary),
         context=ConversationContextOut(**vars(result.context)) if result.context else None,
         inherited=result.inherited,
+        clauses=[clause_out(c) for c in result.clauses],
+        fallback_reason=result.fallback_reason,
     )
 
 
@@ -789,12 +832,7 @@ def product_standard_post(
                 )
                 for reason in result.reasons
             ],
-            why=WhyOut(
-                standard_number=why.standard_number,
-                strength=why.strength,
-                signals=why.signals,
-                summary=why.summary,
-            ),
+            why=why_out(why),
             catalogue=_catalogue_out(result.item.content),
             currency=currency_for(result.item.standard_number),
             source_organization=result.item.source_organization,

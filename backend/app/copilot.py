@@ -33,6 +33,7 @@ import re
 from dataclasses import dataclass, field
 
 from app import language as lang
+from app.clauses import unsupported_citations as unsupported_clause_citations
 from app.lab_registry import CURRENTNESS_NOTE, NOT_AVAILABLE, SNAPSHOT_NOTE
 from app.openrouter import CopilotUnavailable, OpenRouterLLM
 from app.standard_currency import mentions_withdrawal
@@ -1143,6 +1144,8 @@ _AMOUNT = re.compile(r"(?:₹|\bRs\.?|\bINR)\s*([\d][\d,]*(?:\.\d+)?)", re.IGNOR
 WITHHELD_MESSAGES = {
     "FABRICATED_STANDARD": "the generated text cited an Indian Standard number that is not in the "
                            "inspection record",
+    "FABRICATED_CLAUSE": "the generated text cited a clause of a standard that is not in the "
+                         "evidence MetrIQ supplied",
     "FABRICATED_HUID": "the generated text contained a HUID that is not in the inspection record",
     "FABRICATED_SOURCE": "the generated text cited a source URL that is not in the inspection record",
     "AUTHENTICATION_CLAIM": "the generated text claimed a hallmark, HUID or item was authenticated, "
@@ -1199,6 +1202,8 @@ def guard(answer: CopilotAnswer, context_text: str, language: str = lang.EN) -> 
     reason = ""
     if _standard_numbers(text) - _standard_numbers(context_text):
         reason = "FABRICATED_STANDARD"
+    elif unsupported_clause_citations(text, context_text):
+        reason = "FABRICATED_CLAUSE"
     elif _huids(text) - _huids(context_text):
         reason = "FABRICATED_HUID"
     elif {u.rstrip(".,);") for u in _URL.findall(text)} - set(_URL.findall(context_text)):

@@ -33,7 +33,7 @@ import numpy as np
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
-from app.api import ReasonOut, WhyOut
+from app.api import ReasonOut, WhyOut, why_out
 from app.declarations import extract_declarations, has_reliable_text
 from app.escalation import assess as assess_escalation
 from app.hallmark import HallmarkOut, evaluate_hallmark
@@ -1200,12 +1200,7 @@ def _candidate_out(candidate) -> StandardCandidateOut:
             ReasonOut(field=r.field, term=r.term, weight=r.weight, detail=r.detail)
             for r in result.reasons
         ],
-        why=WhyOut(
-            standard_number=why.standard_number,
-            strength=why.strength,
-            signals=list(why.signals),
-            summary=why.summary,
-        ),
+        why=why_out(why),
         evidence=[_evidence_out(ev) for ev in candidate.evidence],
         source_organization=item.source_organization,
         source_url=item.source_url,

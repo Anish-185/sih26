@@ -14,11 +14,16 @@ standard has been retrieved by the normal path:
                                 SearchEngine scoring (no new scoring code)
 
 Exact string match only: an edition's clauses never attach to another edition's number.
-Nothing calls this yet except tests; Phase 8 wires it into answers.
+
+Phase 8 uses it in three places, always AFTER retrieval has chosen the standard:
+``attach`` (clauses for a confident /ask answer), ``scope_of`` ("why this result?")
+and ``unsupported_citations`` (the guard that withholds an answer citing a clause
+MetrIQ did not supply).
 """
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 
 from app.knowledge.loader import load_knowledge_base
@@ -55,3 +60,92 @@ def rank_within(standard_number: str, query: str, limit: int | None = None) -> l
     engine._items = clauses
     engine._index = [SearchEngine._index_item(item) for item in clauses]
     return engine.search(query, limit=limit).results
+
+
+# Shown with every clause, everywhere: values such as "1.0 1 to 1.1 1" (litres read
+# as "1") survive by design, because MetrIQ never corrects OCR. This label is what
+# makes that honest.
+OCR_LABEL = ("OCR text from a scanned BIS document, via the Public.Resource.Org / Internet "
+             "Archive mirror. Not verified by a person; it may contain character errors. "
+             "Check any value against the named PDF page.")
+
+_NOTE = "\n\nMetrIQ note:"
+_PDF_PAGE = re.compile(r"PDF pages? (\d+)")
+
+
+def label_of(item: KnowledgeItem) -> str:
+    """"5.2.3" / "B-5.1" — read from the stored reference ("Clause 5.2.3, …")."""
+    return (item.reference or "").split(",")[0].removeprefix("Clause ").strip()
+
+
+def view(item: KnowledgeItem) -> dict:
+    """One clause for display: its own text and MetrIQ's note kept apart, verbatim."""
+    text, _, note = item.content.partition(_NOTE)
+    page = _PDF_PAGE.search(item.reference or "")
+    return {
+        "id": item.id,
+        "standard_number": item.standard_number or "",
+        "clause": label_of(item),
+        "heading": item.title.split(" — ", 1)[-1],
+        "text": text.strip(),
+        "note": ("MetrIQ note:" + note).strip() if note else "",
+        "reference": item.reference or "",
+        "source_url": item.source_url or "",
+        "pdf_page": int(page.group(1)) if page else None,
+    }
+
+
+def attach(results: list[RetrievalResult], query: str,
+           per_standard: int = 3, total: int = 6) -> list[KnowledgeItem]:
+    """Clauses of the standards retrieval already found, ranked against the query.
+
+    The caller decides WHEN (only a confident answer); this only decides which of
+    that standard's clauses match. Capped so the model's context stays small.
+    """
+    attached: list[KnowledgeItem] = []
+    for result in results:
+        item = result.item
+        if item.category != "indian_standards" or not item.standard_number:
+            continue
+        ranked = [r.item for r in rank_within(item.standard_number, query) if r.score > 0]
+        attached += ranked[:per_standard][: total - len(attached)]
+        if len(attached) >= total:
+            break
+    return attached
+
+
+def scope_of(standard_number: str) -> list[KnowledgeItem]:
+    """The scope clause (1) and its sub-clauses (1.1, 1.2 …) that MetrIQ holds."""
+    return [c for c in clauses_for(standard_number)
+            if label_of(c) == "1" or label_of(c).startswith("1.")]
+
+
+# A clause is cited only with a marker: "clause 5.2.3", "cl. 9", "Annex B" or an
+# annex-style number "F-1.4". A bare dotted number is a quantity ("1.5 litres",
+# "9.1 kg"), never checked, or every amount would trip the guard.
+_CITED = re.compile(r"\b(?:clauses?|cl\.)\s*((?:[A-Z]-)?\d+(?:\.\d+)*)", re.IGNORECASE)
+_ANNEX_STYLE = re.compile(r"(?<![\w-])([A-Z]-\d+(?:\.\d+)*)(?![\w-])")
+_ANNEX = re.compile(r"\bAnnex\s+([A-Z])\b")
+
+
+def cited(text: str) -> set[str]:
+    return ({m.group(1).upper() for m in _CITED.finditer(text)}
+            | {m.group(1) for m in _ANNEX_STYLE.finditer(text)}
+            | {f"Annex {m.group(1)}" for m in _ANNEX.finditer(text)})
+
+
+def unsupported_citations(answer: str, context: str) -> set[str]:
+    """Clauses the answer cites that appear nowhere in the context MetrIQ supplied."""
+    held = cited(context)            # "Clause 9, PDF page 14", "Annex B" … as supplied
+
+    def supplied(label: str) -> bool:
+        if label in held:
+            return True
+        if re.search(rf"(?m)^{re.escape(label)}\.?\s", context):
+            return True                      # a clause heading line: "9 SAMPLING"
+        # A dotted or annex-style number is specific enough to accept as a cross-reference
+        # inside supplied clause text ("given in 5.2.1 to 5.2.9"). A bare "9" is not: it
+        # appears everywhere as a quantity, so it counts only through the two checks above.
+        return ("." in label or "-" in label) and re.search(
+            rf"(?<![\w.-]){re.escape(label)}(?![\w-]|\.\d)", context) is not None
+    return {label for label in cited(answer) if not supplied(label)}

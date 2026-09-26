@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { ArrowUpRight, ExternalLink, FileText } from "lucide-react";
-import type { CoverageBoundary, EvidenceSource } from "@/lib/api";
+import type { ClauseEvidence, CoverageBoundary, EvidenceSource } from "@/lib/api";
 import { CoverageBoundaryPanel } from "@/components/CoverageBoundary";
+import { ClauseList } from "@/components/ClauseText";
 import { categoryLabel, confidenceLabel } from "@/lib/format";
 import { Callout, Chip, ConfidenceMeter, Mono, Panel } from "@/components/ui";
 import { Annotation, Bracket } from "@/components/decor";
@@ -24,6 +25,8 @@ export function GroundedAnswer({
   abstentionMessage,
   explained = true,
   boundary = null,
+  clauses = [],
+  fallbackReason,
 }: {
   question: string;
   answer: string;
@@ -39,6 +42,10 @@ export function GroundedAnswer({
   /** Present only when MetrIQ abstained: its own account of the coverage
       boundary, rendered in place of a bare "nothing found". */
   boundary?: CoverageBoundary | null;
+  /** Phase 8: clause text attached to a confident /ask answer. */
+  clauses?: ClauseEvidence[];
+  /** Phase 8: which path produced the answer (MODEL, PROVIDER_ERROR, GUARD:<rule> …). */
+  fallbackReason?: string;
 }) {
   return (
     <div className="relative border border-line bg-raised">
@@ -71,9 +78,9 @@ export function GroundedAnswer({
                       No AI explanation
                     </Mono>
                     <p className="mt-1.5 text-[12px] leading-relaxed text-ink-soft">
-                      The explanation service is unavailable. MetrIQ retrieved the
-                      verified BIS records below and rendered them itself — the
-                      evidence and its sources are unchanged.
+                      No AI explanation is shown. MetrIQ retrieved the records
+                      below and rendered them itself — the evidence and its
+                      sources are unchanged.
                     </p>
                   </div>
                 )}
@@ -126,12 +133,26 @@ export function GroundedAnswer({
             <SpecRow label="Sources">
               <Mono>{String(sources.length).padStart(2, "0")}</Mono>
             </SpecRow>
+            {fallbackReason && (
+              <SpecRow label="Path">
+                <Mono muted className="text-[10px] tracking-[0.05em]">
+                  {fallbackReason}
+                </Mono>
+              </SpecRow>
+            )}
           </dl>
           <div className="mt-4">
             <ConfidenceMeter confidence={confidence} />
           </div>
         </aside>
       </div>
+
+      {/* clause text of the retrieved standards (Phase 8) — always OCR-labelled */}
+      {clauses.length > 0 && (
+        <div className="border-t border-line px-5 py-5 sm:px-6">
+          <ClauseList title="Clause text of the retrieved standards" clauses={clauses} />
+        </div>
+      )}
 
       {/* evidence exhibits */}
       {sources.length > 0 && (

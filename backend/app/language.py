@@ -294,7 +294,8 @@ LANGUAGE OF THE ANSWER: {name}.
 Write the whole answer in {name}, in natural {name} prose.
 Reproduce these EXACTLY as they appear in the evidence, never translated,
 transliterated or reformatted: Indian Standard numbers (for example
-IS 367:1993), scheme names, rule and requirement ids, record ids, HUIDs,
+IS 367:1993), clause numbers and page references (for example "Clause 9,
+PDF page 14"), scheme names, rule and requirement ids, record ids, HUIDs,
 document names and source URLs. You may give a short gloss of a document title
 in {name} beside the original title, never instead of it.
 Translating the evidence does not make it stronger: the same limits apply in
@@ -361,13 +362,19 @@ WITHHELD = {
 # knowledge base is never translated.
 EVIDENCE_ONLY = {
     EN: ("An AI explanation is not available right now, so MetrIQ is showing the "
-         "verified BIS records it retrieved for this question, exactly as they are "
-         "stored. Nothing below was written by a language model."),
-    HI: ("इस समय AI व्याख्या उपलब्ध नहीं है, इसलिए MetrIQ ने इस प्रश्न के लिए जो सत्यापित "
-         "BIS रिकॉर्ड प्राप्त किए, उन्हें जैसा संग्रहीत है वैसा ही दिखाया जा रहा है। नीचे दिया गया "
-         "कुछ भी किसी भाषा मॉडल द्वारा नहीं लिखा गया है।"),
-    TE: ("ప్రస్తుతం AI వివరణ అందుబాటులో లేదు, అందువల్ల ఈ ప్రశ్నకు MetrIQ పొందిన ధృవీకరించిన "
-         "BIS రికార్డులను నిల్వ ఉన్న రూపంలోనే చూపిస్తోంది. కింద ఉన్నది ఏదీ భాషా నమూనా "
+         "records it retrieved for this question, exactly as they are stored. Records "
+         "marked verified were checked against an official source. Clause text, where "
+         "shown, is OCR text from a scanned document and has not been verified by a "
+         "person. Nothing below was written by a language model."),
+    HI: ("इस समय AI व्याख्या उपलब्ध नहीं है, इसलिए MetrIQ इस प्रश्न के लिए प्राप्त रिकॉर्ड "
+         "ठीक वैसे ही दिखा रहा है जैसे वे संग्रहीत हैं। 'सत्यापित' चिह्नित रिकॉर्ड किसी आधिकारिक "
+         "स्रोत से जाँचे गए हैं। जहाँ खंड (clause) का पाठ दिखाया गया है, वह स्कैन किए गए "
+         "दस्तावेज़ से OCR द्वारा पढ़ा गया पाठ है और किसी व्यक्ति ने उसे सत्यापित नहीं किया है। "
+         "नीचे दिया गया कुछ भी किसी भाषा मॉडल द्वारा नहीं लिखा गया है।"),
+    TE: ("ప్రస్తుతం AI వివరణ అందుబాటులో లేదు, అందువల్ల ఈ ప్రశ్నకు MetrIQ పొందిన రికార్డులను "
+         "నిల్వ ఉన్న రూపంలోనే చూపిస్తోంది. 'ధృవీకరించబడింది' అని గుర్తించిన రికార్డులు అధికారిక "
+         "మూలంతో సరిచూడబడ్డాయి. క్లాజ్ (clause) పాఠం చూపిన చోట, అది స్కాన్ చేసిన పత్రం నుండి "
+         "OCR ద్వారా చదివిన పాఠం; దానిని ఏ వ్యక్తీ ధృవీకరించలేదు. కింద ఉన్నది ఏదీ భాషా నమూనా "
          "(language model) రాసినది కాదు."),
 }
 

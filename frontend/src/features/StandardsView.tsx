@@ -1,3 +1,4 @@
+import { ClauseList } from "@/components/ClauseText";
 import { type FormEvent, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ArrowUpRight, Search } from "lucide-react";
@@ -331,6 +332,19 @@ function StandardResult({
           <p className="max-w-2xl text-[13px] leading-relaxed text-ink">
             {result.why.summary}
           </p>
+        )}
+        {result.why?.text_note && (
+          <p className="mt-2 max-w-2xl text-[12px] leading-relaxed text-ink-soft">
+            <Mono muted className="mr-2 text-[10px] uppercase tracking-[0.1em]">
+              {result.why.text_level === "CLAUSE" ? "Clause text held" : "Identity only"}
+            </Mono>
+            {result.why.text_note}
+          </p>
+        )}
+        {(result.why?.scope?.length ?? 0) > 0 && (
+          <div className="mt-4">
+            <ClauseList title="Scope" clauses={result.why.scope ?? []} />
+          </div>
         )}
         {topReasons.length > 0 && (
           <>

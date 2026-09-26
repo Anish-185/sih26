@@ -403,6 +403,17 @@ def _requirements_and_items():
     return load_requirements(items), {item.id: item for item in items}
 
 
+def _text_held(why: dict) -> list[tuple[str, str]]:
+    """Phase 8: how much of the standard MetrIQ holds, and its scope clause as OCR text.
+    Every clause quote carries MetrIQ's fixed OCR label; absent on older records."""
+    rows = [("Standard text held", _t(why["text_note"]))] if why.get("text_note") else []
+    for clause in why.get("scope") or []:
+        rows.append((f"Scope, {_t(clause['reference'])}",
+                     f"<i>{_t(clause['ocr_label'])}</i><br/>“{_t(clause['text'])}”<br/>"
+                     f"<font name='Mono' color='#8b8e94'>{_t(clause['source_url'])}</font>"))
+    return rows
+
+
 def _requirement_table(d: _Doc, reqs: list, items_by_id: dict) -> Table:
     """Requirements a standard (or the Legal Metrology packaged-commodity rules)
     specifies — verified knowledge, quoted from a verified record. Never a
@@ -512,6 +523,7 @@ def _bis(d: _Doc, rec: dict, an: dict) -> list:
                      ("Retrieval strength", f"{_t(c['confidence'])} (score {c['score']:.1f}, match tier {_t(c['tier'])})"
                                             + (" · IS number printed on the label" if c["printed_on_label"] else "")),
                      ("Why this result", _t(why.get("summary") or "—")),
+                     *_text_held(why),
                      *_edition(c.get("currency")),
                      ("Evidence from the package", "<br/>".join(
                          f"{_t(e['clue']['kind'].replace('_', ' '))}: “{_t(e['clue']['text'])}” "
