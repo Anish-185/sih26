@@ -180,7 +180,7 @@ REFERRING_NATIVE: frozenset[str] = frozenset({
 # FILLER and referring words) remains — any other word might be a product of
 # its own, and a wrong inherited product is worse than none.
 FOLLOW_UP_WORDS: frozenset[str] = frozenset({
-    "mandatory", "compulsory", "required", "requirement", "need", "needed", "needs",
+    "mandatory", "compulsory", "required", "requirement", "requirements", "need", "needed", "needs",
     "test", "tested", "testing", "tests", "lab", "labs", "laboratory", "laboratories",
     "certification", "certificate", "certified", "licence", "license", "mark",
     "marking", "isi", "registration", "register", "registered", "scheme", "apply",

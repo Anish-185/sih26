@@ -28,8 +28,10 @@ from functools import lru_cache
 
 from app.knowledge.loader import load_knowledge_base
 from app.knowledge.schema import KnowledgeItem
+from app.language import FILLER, FOLLOW_UP_WORDS
 from app.retrieval import RetrievalResult, SearchEngine
 from app.retrieval.engine import RetrievalConfig
+from app.retrieval.text import tokenize
 
 
 @lru_cache(maxsize=1)
@@ -95,19 +97,46 @@ def view(item: KnowledgeItem) -> dict:
     }
 
 
+def residual_query(standard: KnowledgeItem, query: str) -> str:
+    """The part of the query that says WHICH clause, once the standard is chosen.
+
+    The words that identified the standard ("packaged drinking water") appear in nearly
+    every one of its clauses, so ranked on the whole query they outweigh the word that
+    names a clause ("sampling"). Dropped: stopwords (``tokenize``), FILLER, the Phase 6
+    process words, and every word of the standard's own record — title, keywords,
+    document name, number. One exception, read from the data rather than a new list: a
+    process word that is a word of one of this standard's main-body section headings
+    ("8 MARKING", "21 TESTS") names a clause here, so it stays. Annex headings do not
+    count ("F-1 GENERAL REQUIREMENTS OF" would keep "requirements" everywhere).
+    """
+    number = standard.standard_number or ""
+    identifying = set(tokenize(" ".join([standard.title, *standard.keywords,
+                                         standard.document_name or "", number])))
+    headings = {word for clause in clauses_for(number) if label_of(clause).isdigit()
+                for word in tokenize(clause.title.split(" — ", 1)[-1])}
+    return " ".join(t for t in tokenize(query)
+                    if t not in identifying and t not in FILLER
+                    and (t not in FOLLOW_UP_WORDS or t in headings))
+
+
 def attach(results: list[RetrievalResult], query: str,
            per_standard: int = 3, total: int = 6) -> list[KnowledgeItem]:
     """Clauses of the standards retrieval already found, ranked against the query.
 
     The caller decides WHEN (only a confident answer); this only decides which of
-    that standard's clauses match. Capped so the model's context stays small.
+    that standard's clauses match, ranked on ``residual_query``. When nothing is
+    left of the query but the standard itself — or what is left names no clause
+    ("tell me about …") — only its scope clause is attached.
+    Capped so the model's context stays small.
     """
     attached: list[KnowledgeItem] = []
     for result in results:
         item = result.item
         if item.category != "indian_standards" or not item.standard_number:
             continue
-        ranked = [r.item for r in rank_within(item.standard_number, query) if r.score > 0]
+        residual = residual_query(item, query)
+        ranked = ([r.item for r in rank_within(item.standard_number, residual) if r.score > 0]
+                  if residual else []) or scope_of(item.standard_number)[:1]
         attached += ranked[:per_standard][: total - len(attached)]
         if len(attached) >= total:
             break
@@ -121,17 +150,29 @@ def scope_of(standard_number: str) -> list[KnowledgeItem]:
 
 
 # A clause is cited only with a marker: "clause 5.2.3", "cl. 9", "Annex B" or an
-# annex-style number "F-1.4". A bare dotted number is a quantity ("1.5 litres",
-# "9.1 kg"), never checked, or every amount would trip the guard.
-_CITED = re.compile(r"\b(?:clauses?|cl\.)\s*((?:[A-Z]-)?\d+(?:\.\d+)*)", re.IGNORECASE)
-_ANNEX_STYLE = re.compile(r"(?<![\w-])([A-Z]-\d+(?:\.\d+)*)(?![\w-])")
-_ANNEX = re.compile(r"\bAnnex\s+([A-Z])\b")
+# annex-style number with a dot, "F-1.4". A bare dotted number is a quantity ("1.5
+# litres", "9.1 kg"), never checked, or every amount would trip the guard. Without the
+# dot, "M-20" (concrete grade), "Class B-1" and "Type A-2" are names, not clauses; an
+# explicit "Annex F-1" still counts. A range ("clauses 5.2.1 to 5.2.9") cites both ends.
+# Hindi / Telugu: in live hi/te answers the model wrote "Clause 9" in English every time
+# and used no native word for "clause"; the one native marker seen was Hindi "अनुबंध F"
+# (Annex F). अनुबंध also means "contract / agreement", so it counts only when followed
+# by an annex letter.
+_LABEL = r"(?:[A-Z]-)?\d+(?:\.\d+)*"
+_CITED = re.compile(rf"\b(?:clauses?|cl\.)\s*({_LABEL})(?:\s*(?:to|-|–|—)\s*({_LABEL}))?", re.IGNORECASE)
+_ANNEX_STYLE = re.compile(r"(?<![\w-])([A-Z]-\d+(?:\.\d+)+)(?![\w-])")
+_ANNEX = re.compile(r"(?:\bAnnex|(?<!\S)अनुबंध)\s+([A-Z])(?:-(\d+(?:\.\d+)*))?\b")
 
 
 def cited(text: str) -> set[str]:
-    return ({m.group(1).upper() for m in _CITED.finditer(text)}
-            | {m.group(1) for m in _ANNEX_STYLE.finditer(text)}
-            | {f"Annex {m.group(1)}" for m in _ANNEX.finditer(text)})
+    labels = {m.group(1) for m in _ANNEX_STYLE.finditer(text)}
+    for m in _CITED.finditer(text):
+        labels |= {g.upper() for g in m.groups() if g}
+    for m in _ANNEX.finditer(text):
+        labels.add(f"Annex {m.group(1)}")
+        if m.group(2):
+            labels.add(f"{m.group(1)}-{m.group(2)}")
+    return labels
 
 
 def unsupported_citations(answer: str, context: str) -> set[str]:

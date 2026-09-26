@@ -183,6 +183,67 @@ def test_guard_both_directions() -> None:
           clauses.unsupported_citations("clause 7", "Price Group 7") == {"7"})
 
 
+def _standard(number: str):
+    return next(i for i in ENGINE._items if i.category == "indian_standards" and i.standard_number == number)
+
+
+def test_residual_ranking() -> None:
+    water = _standard("IS 14543:2016")
+    residual = clauses.residual_query(water, "sampling for packaged drinking water")
+    check("residual: the words that identified the standard are removed", residual == "sampling", residual)
+    got = clauses.attach([r for r in ENGINE.search("sampling for packaged drinking water").results
+                          if r.item.standard_number == "IS 14543:2016"], "sampling for packaged drinking water")
+    check("residual: 'sampling' ranks clause 9 SAMPLING first on IS 14543:2016",
+          got and clauses.label_of(got[0]) == "9", [clauses.label_of(c) for c in got])
+    for query in ["packaged drinking water", "IS 14543:2016", "tell me about IS 14543:2016"]:
+        got = clauses.attach([r for r in ENGINE.search(query).results
+                              if r.item.standard_number == "IS 14543:2016"], query)
+        check(f"residual: {query!r} attaches the SCOPE clause only",
+              [clauses.label_of(c) for c in got] == ["1"], [clauses.label_of(c) for c in got])
+    marking = "what are the marking requirements under IS 14543:2016"
+    check("residual: process words drop, a word naming this standard's own section heading stays",
+          clauses.residual_query(water, marking) == "marking", clauses.residual_query(water, marking))
+    got = clauses.attach([r for r in ENGINE.search(marking).results
+                          if r.item.standard_number == "IS 14543:2016"], marking)
+    check("residual: the IS 14543 marking question attaches only marking clauses",
+          [clauses.label_of(c) for c in got] == ["7.3", "8"], [clauses.label_of(c) for c in got])
+    kettle = answerer(ReplyLLM()).ask("marking on an electric kettle")
+    check("residual: 'marking on an electric kettle' ranks clause 8 MARKING first",
+          kettle.clauses and clauses.label_of(kettle.clauses[0]) == "8",
+          [clauses.label_of(c) for c in kettle.clauses])
+    check("residual: 'mandatory' is a process word, not a clause", clauses.residual_query(water, "is it mandatory") == "")
+    check("rank_within is still a plain ranker over the whole query",
+          clauses.label_of(clauses.rank_within("IS 14543:2016", "sampling for packaged drinking water")[0].item) != "9")
+
+
+def test_guard_edges() -> None:
+    context = ("REFERENCE: Clause 9, PDF page 14\n9 SAMPLING\nsee 5.2.1 to 5.2.9 and Annex F, F-1.4 applies\n"
+               "REFERENCE: Clause F-1, PDF page 19")
+    for text in ["Use M-20 concrete.", "Class B-1 insulation is required.", "A Type A-2 plug.",
+                 "See F-1.4.", "clauses 5.2.1 to 5.2.9", "clause 5.2.1-5.2.9", "Annex F-1 describes it."]:
+        check(f"guard: {text!r} passes", not clauses.unsupported_citations(text, context),
+              str(clauses.unsupported_citations(text, context)))
+    check("guard: an invented 'F-9.9' is withheld", clauses.unsupported_citations("See F-9.9.", context) == {"F-9.9"})
+    for text in ["clauses 5.2.1 to 5.2.99", "clause 5.2.1-5.2.77", "clauses 5.2.77 to 5.2.9"]:
+        check(f"guard: a range with an invented end is withheld: {text!r}",
+              len(clauses.unsupported_citations(text, context)) == 1)
+    check("guard: Hindi 'अनुबंध D' (Annex D, not supplied) is withheld",
+          clauses.unsupported_citations("अनुबंध D देखें", context) == {"Annex D"})
+    check("guard: Hindi 'अनुबंध F' (supplied) passes", not clauses.unsupported_citations("अनुबंध F में", context))
+    check("guard: अनुबंध meaning 'contract' is not a citation",
+          not clauses.unsupported_citations("यह अनुबंध दोनों पक्षों के बीच है", context))
+    q = "sampling for packaged drinking water"
+    check("/ask: 'M-20 concrete' reaches the user",
+          answerer(ReplyLLM("Use M-20 concrete for the plinth.")).ask(q).fallback_reason == "MODEL")
+    check("/ask: an invented 'F-9.9' is withheld",
+          answerer(ReplyLLM("F-9.9 sets the method.")).ask(q).fallback_reason == "GUARD:UNSUPPORTED_CLAUSE")
+    check("/ask: a range with an invented end is withheld",
+          answerer(ReplyLLM("See clauses 9 to 9.7.")).ask(q).fallback_reason == "GUARD:UNSUPPORTED_CLAUSE")
+    check("copilot: 'Class B-1' passes, 'F-9.9' is withheld",
+          not guard(CopilotAnswer(answer="Class B-1 insulation."), context).withheld
+          and guard(CopilotAnswer(answer="F-9.9 applies."), context).withheld)
+
+
 def test_fallback_reason_values() -> None:
     q = "sampling for packaged drinking water"
     cases = {
@@ -266,6 +327,8 @@ def main() -> int:
     test_no_attachment_on_abstention_or_boundary()
     test_inherited_context_attaches_clauses()
     test_guard_both_directions()
+    test_residual_ranking()
+    test_guard_edges()
     test_fallback_reason_values()
     test_evidence_only_wording()
     test_why_this_result()
