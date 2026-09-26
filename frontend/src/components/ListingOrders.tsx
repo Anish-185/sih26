@@ -1,6 +1,24 @@
 import { Mono } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import type { ListingOrders as Listing } from "@/lib/api";
+import type { ListingGroup, ListingOrders as Listing } from "@/lib/api";
+
+/**
+ * Phase 11: which kind of order the cell names — the same rule the /ask guard uses
+ * (app/qco.py QCO_NAMED / CRO_NAMED). A Compulsory Registration Order is not a
+ * Quality Control Order, and the two are never shown as one.
+ */
+export function OrderKind({ group }: { group: ListingGroup }) {
+  const kinds = [
+    group.names_qco && "Names a Quality Control Order",
+    group.names_cro && "Names a Compulsory Registration Order",
+  ].filter(Boolean) as string[];
+  if (kinds.length === 0) return null;
+  return (
+    <Mono muted className="block text-[10px] uppercase tracking-[0.12em]">
+      {kinds.join(" · ")}
+    </Mono>
+  );
+}
 
 /**
  * Phase 9.1 — the orders BIS's compulsory-certification listing names for this
@@ -25,6 +43,7 @@ export function ListingOrders({ listing, className }: { listing?: Listing | null
         <summary className="cursor-pointer select-none">The listing&rsquo;s Notification cell, as printed</summary>
         {listing.groups.map((g) => (
           <div key={`${g.scheme}-${g.notification}`} className="mt-1">
+            <OrderKind group={g} />
             <p>{g.notification}</p>
             <p className="mt-0.5">
               {g.orders

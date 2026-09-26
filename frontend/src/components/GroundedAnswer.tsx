@@ -1,9 +1,10 @@
+import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
 import { ArrowUpRight, ExternalLink, FileText } from "lucide-react";
 import type { ClauseEvidence, CoverageBoundary, EvidenceSource } from "@/lib/api";
 import { CoverageBoundaryPanel } from "@/components/CoverageBoundary";
 import { ClauseList } from "@/components/ClauseText";
-import { categoryLabel, confidenceLabel } from "@/lib/format";
+import { categoryLabel, confidenceLabel, passportPath } from "@/lib/format";
 import { Callout, Chip, ConfidenceMeter, Mono, Panel } from "@/components/ui";
 import { Annotation, Bracket } from "@/components/decor";
 
@@ -241,11 +242,14 @@ export function SourceRow({
           )}
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              {source.standard_number && (
-                <Mono className="text-[13px] font-medium">
-                  {source.standard_number}
-                </Mono>
-              )}
+              {source.standard_number &&
+                (source.category === "indian_standards" ? (
+                  <Link to={passportPath(source.id)} className="hover:underline">
+                    <Mono className="text-[13px] font-medium">{source.standard_number}</Mono>
+                  </Link>
+                ) : (
+                  <Mono className="text-[13px] font-medium">{source.standard_number}</Mono>
+                ))}
               <Chip>{categoryLabel(source.category)}</Chip>
               <Chip
                 tone={

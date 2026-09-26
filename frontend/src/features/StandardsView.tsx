@@ -1,7 +1,5 @@
-import { ClauseGroups } from "@/components/ClauseGroups";
-import { ClauseList } from "@/components/ClauseText";
 import { type FormEvent, useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { ArrowUpRight, Search } from "lucide-react";
 import {
   ApiError,
@@ -11,7 +9,7 @@ import {
   type StandardCoverage,
 } from "@/lib/api";
 import { useAsyncTask, useOnMount } from "@/lib/hooks";
-import { standardTitle } from "@/lib/format";
+import { passportPath, standardTitle } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import {
   ArrowLink,
@@ -34,9 +32,7 @@ import {
 import { CopilotPanel } from "@/features/CopilotPanel";
 import { ProductIntelligence } from "@/components/ProductIntelligence";
 import { CoverageBoundaryPanel } from "@/components/CoverageBoundary";
-import { EvidenceGraphSection } from "@/components/EvidenceGraphSection";
 import { EditionCurrency } from "@/components/EditionCurrency";
-import { ListingOrders } from "@/components/ListingOrders";
 import { QcoStatus } from "@/components/QcoStatus";
 
 const EXAMPLES = [
@@ -182,10 +178,6 @@ export function StandardsView() {
 
           {contextTask.data && <ProductIntelligence context={contextTask.data} />}
 
-          {contextTask.data && (
-            <EvidenceGraphSection source={{ product_context: contextTask.data }} />
-          )}
-
           {res.results.length > 0 && (
             <CopilotPanel
               context={
@@ -246,9 +238,11 @@ function StandardResult({
             <Mono muted className="text-[11px] tabular-nums">
               {String(rank).padStart(2, "0")}
             </Mono>
-            <Mono className="text-[15px] font-semibold text-accent">
-              {result.standard_number}
-            </Mono>
+            <Link to={passportPath(result.id)} className="hover:underline">
+              <Mono className="text-[15px] font-semibold text-accent">
+                {result.standard_number}
+              </Mono>
+            </Link>
           </div>
           <h3 className="display mt-2 text-[1.35rem] leading-tight">
             {standardTitle(result.title)}
@@ -259,39 +253,16 @@ function StandardResult({
             {result.last_verified ? ` · verified ${result.last_verified}` : ""}
           </p>
 
-          {/* The catalogue title names the STANDARD; the heading above names the
-              product BIS notified. Both are true and they differ, so both are
-              shown — with the route the title's text came from, because BIS sells
-              these standards and a mirror must never read as a BIS publication. */}
-          {result.catalogue && (
-            <div className="mt-3 border-l-2 border-line-strong pl-3">
-              <span className="kicker block">Catalogue title</span>
-              <p className="mt-1 text-[13px] leading-snug text-ink">
-                “{result.catalogue.title}”
-              </p>
-              <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-ink-faint">
-                <Mono
-                  muted
-                  className={cn(
-                    "text-[10px] uppercase tracking-[0.12em]",
-                    result.catalogue.official ? "text-accent" : "text-review",
-                  )}
-                >
-                  {result.catalogue.official ? "BIS catalogue" : "third-party mirror"}
-                </Mono>
-                {result.catalogue.source_label}
-              </p>
-              {result.catalogue.title_suspect && (
-                <p className="mt-1 text-[11px] leading-relaxed text-review">
-                  The source returned this title damaged. It is shown exactly as
-                  recorded and has not been corrected.
-                </p>
-              )}
-            </div>
-          )}
-          <EditionCurrency currency={result.currency} className="mt-3" />
-          <QcoStatus qco={result.qco} className="mt-3" />
-          <ListingOrders listing={result.listing_orders} className="mt-3" />
+          {/* Phase 11: the standard's detail — catalogue identity, edition evidence,
+              legal status, scope, clauses, sampling & testing — lives on its Passport.
+              The card keeps the query-specific summary and compact labels. */}
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+            <EditionCurrency currency={result.currency} compact />
+            <QcoStatus qco={result.qco} compact />
+            <Mono muted className="text-[10px] uppercase tracking-[0.12em]">
+              {result.why?.text_level === "CLAUSE" ? "Clause text held" : "Identity only"}
+            </Mono>
+          </div>
           {coverage && (
             <p className="mt-1.5 text-[12px] leading-relaxed text-ink-soft">
               <Mono
@@ -338,25 +309,9 @@ function StandardResult({
             {result.why.summary}
           </p>
         )}
-        {result.why?.text_note && (
-          <p className="mt-2 max-w-2xl text-[12px] leading-relaxed text-ink-soft">
-            <Mono muted className="mr-2 text-[10px] uppercase tracking-[0.1em]">
-              {result.why.text_level === "CLAUSE" ? "Clause text held" : "Identity only"}
-            </Mono>
-            {result.why.text_note}
-          </p>
-        )}
-        {(result.why?.scope?.length ?? 0) > 0 && (
-          <div className="mt-4">
-            <ClauseList title="Scope" clauses={result.why.scope ?? []} />
-          </div>
-        )}
-        {result.why?.text_level === "CLAUSE" && (
-          <ClauseGroups standardNumber={result.standard_number} className="mt-4" />
-        )}
         {topReasons.length > 0 && (
-          <>
-            <div className="kicker mb-2 mt-4">Retrieval signals</div>
+          <details className="mt-4">
+            <summary className="kicker cursor-pointer select-none">Retrieval signals</summary>
             <ul className="divide-y divide-line border-y border-line">
               {topReasons.map((reason, i) => (
                 <li
@@ -376,7 +331,7 @@ function StandardResult({
                 </li>
               ))}
             </ul>
-          </>
+          </details>
         )}
         <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2">
           {result.source_url && (
@@ -390,13 +345,7 @@ function StandardResult({
               <ArrowUpRight className="h-3.5 w-3.5 transition-transform group-hover/src:translate-x-0.5" />
             </a>
           )}
-          {result.standard_number && (
-            <ArrowLink
-              to={`/certification?standard=${encodeURIComponent(result.standard_number)}`}
-            >
-              Certification journey
-            </ArrowLink>
-          )}
+          <ArrowLink to={passportPath(result.id)}>Open the standard passport</ArrowLink>
         </div>
       </div>
     </li>

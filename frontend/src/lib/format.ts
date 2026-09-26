@@ -76,3 +76,13 @@ export function formatDateTime(iso: string): string {
     minute: "2-digit",
   });
 }
+
+/** Phase 11 — the ONE place a standard's detail lives: /standard/:id (the record's stable id). */
+export function passportPath(id: string) {
+  return `/standard/${encodeURIComponent(id)}`;
+}
+
+/** Phase 11 — a standard by number as stored; /standard?number= resolves it, or lists editions. */
+export function passportByNumber(number: string) {
+  return `/standard?number=${encodeURIComponent(number)}`;
+}

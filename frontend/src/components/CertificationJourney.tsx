@@ -1,3 +1,5 @@
+import { Link } from "react-router-dom";
+import { passportByNumber, passportPath } from "@/lib/format";
 import type { CertificationJourney as Journey } from "@/lib/api";
 import { Callout, Chip, Mono, Panel, PanelHeader } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -94,7 +96,9 @@ export function CertificationJourney({ journey }: { journey: Journey }) {
             <dd className="text-[13px]">
               {journey.standard_number ? (
                 <>
-                  <Mono className="font-semibold text-accent">{journey.standard_number}</Mono>
+                  <Link to={passportByNumber(journey.standard_number)} className="hover:underline">
+                    <Mono className="font-semibold text-accent">{journey.standard_number}</Mono>
+                  </Link>
                   {journey.standard_title && (
                     <span className="ml-2 text-ink-soft">{journey.standard_title}</span>
                   )}
@@ -152,7 +156,9 @@ export function CertificationJourney({ journey }: { journey: Journey }) {
             {journey.candidates.map((c) => (
               <li key={c.knowledge_id}>
                 <div className="flex flex-wrap items-baseline gap-2">
-                  <Mono className="text-[12px] font-semibold text-accent">{c.standard_number}</Mono>
+                  <Link to={passportPath(c.knowledge_id)} className="hover:underline">
+                    <Mono className="text-[12px] font-semibold text-accent">{c.standard_number}</Mono>
+                  </Link>
                   <span className="text-[12px] text-ink-soft">{c.title}</span>
                   <Chip>{c.confidence}</Chip>
                   <EditionCurrency currency={c.currency} compact />

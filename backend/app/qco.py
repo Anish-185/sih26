@@ -211,6 +211,15 @@ def orders_named_by_listing(standard_number: str | None) -> list[dict]:
     return [r for r in _listing()["rows"] if r["kb_standard_number"] == standard_number]
 
 
+# Which KIND of order a listing cell names. One rule, shared by the /ask guard
+# (rag.untied_qco_claim) and the Passport, so a Quality Control Order and a
+# Compulsory Registration Order are never confused: LED lamps' cell names the
+# latter, and it is not a QCO (Phase 10 Step 0).
+QCO_NAMED = re.compile(r"\(?quality control\)?\s*(?:amendment\s+|second amendment\s+)?orders?\b|\bqcos?\b",
+                       re.IGNORECASE)
+CRO_NAMED = re.compile(r"compulsory registration", re.IGNORECASE)
+
+
 class ListingOrderOut(BaseModel):
     number: str | None = Field(default=None, description='"S.O. 191(E)" — parsed; null when none printed.')
     date: str | None = Field(default=None, description="As printed; null when none printed.")
@@ -225,6 +234,8 @@ class ListingGroupOut(BaseModel):
     orders: list[ListingOrderOut]
     flags: list[str] = Field(default_factory=list,
                              description="RESCISSION | WITHDRAWAL | SUSPENSION | SUPERSESSION — quoted, not interpreted.")
+    names_qco: bool = Field(default=False, description="The cell names a Quality Control Order.")
+    names_cro: bool = Field(default=False, description="The cell names a Compulsory Registration Order.")
     source_url: str
 
 
@@ -245,6 +256,8 @@ def _group(rows: list[dict]) -> list[ListingGroupOut]:
             groups[key] = ListingGroupOut(
                 scheme=row["scheme"], products=[], notification=row["notification"] or "",
                 orders=[ListingOrderOut(**o) for o in row["orders"]], flags=row["flags"],
+                names_qco=bool(QCO_NAMED.search(row["notification"] or "")),
+                names_cro=bool(CRO_NAMED.search(row["notification"] or "")),
                 source_url=row["source_url"])
         groups[key].products.append(row["product"])
     return list(groups.values())

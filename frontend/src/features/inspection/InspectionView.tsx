@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ArrowUpRight, RotateCcw, Save, ScanSearch, X } from "lucide-react";
 import {
   ApiError,
@@ -18,7 +18,7 @@ import {
   type StandardCandidate,
   type VisionObservation,
 } from "@/lib/api";
-import { standardTitle } from "@/lib/format";
+import { passportPath, standardTitle } from "@/lib/format";
 import { useAsyncTask } from "@/lib/hooks";
 import { cn } from "@/lib/cn";
 import {
@@ -1485,9 +1485,11 @@ function StandardCandidatesPanel({
                       <Mono muted className="text-[11px] tabular-nums">
                         {String(i + 1).padStart(2, "0")}
                       </Mono>
-                      <Mono className="text-[14px] font-semibold text-accent">
-                        {c.standard_number}
-                      </Mono>
+                      <Link to={passportPath(c.id)} className="hover:underline">
+                        <Mono className="text-[14px] font-semibold text-accent">
+                          {c.standard_number}
+                        </Mono>
+                      </Link>
                       <Mono
                         className={cn(
                           "text-[10px] uppercase tracking-[0.1em]",

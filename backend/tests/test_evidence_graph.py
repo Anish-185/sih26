@@ -553,9 +553,12 @@ def test_frontend_graph_view() -> None:
     section = (FRONTEND / "components" / "EvidenceGraphSection.tsx").read_text()
     check("a failed graph request never removes a result from the page",
           "unaffected" in section)
-    check("the graph appears in the inspection workspace and on the Standards page",
+    # Phase 11: a standard's graph moved from the Standards page to its Passport,
+    # the one canonical destination for a standard.
+    check("the graph appears in the inspection workspace and on the Standard Passport (not the search page)",
           "EvidenceGraphSection" in (FRONTEND / "features" / "inspection" / "InspectionView.tsx").read_text()
-          and "EvidenceGraphSection" in (FRONTEND / "features" / "StandardsView.tsx").read_text())
+          and "EvidenceGraphSection" in (FRONTEND / "features" / "StandardPassportView.tsx").read_text()
+          and "EvidenceGraphSection" not in (FRONTEND / "features" / "StandardsView.tsx").read_text())
 
 
 def main() -> int:

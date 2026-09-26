@@ -266,7 +266,59 @@ export interface ListingGroup {
   notification: string;
   orders: ListingOrder[];
   flags: ("RESCISSION" | "WITHDRAWAL" | "SUSPENSION" | "SUPERSESSION")[];
+  /** The cell names a Quality Control Order / a Compulsory Registration Order. */
+  names_qco?: boolean;
+  names_cro?: boolean;
   source_url: string;
+}
+
+/**
+ * Phase 11 — the Standard Passport. Composed server-side from evidence MetrIQ
+ * already holds (app/standard_passport.py); every empty section carries MetrIQ's
+ * own sentence saying so, and the page shows it rather than hiding the section.
+ */
+export interface PassportMatch {
+  id: string;
+  standard_number: string;
+  title: string;
+}
+
+export interface PassportLookup {
+  number: string;
+  matches: PassportMatch[];
+  message: string;
+}
+
+export interface StandardPassport {
+  id: string;
+  standard_number: string;
+  identity: {
+    title: string;
+    standard_number: string;
+    cited_edition: string | null;
+    editions_known: string[];
+    catalogue: CatalogueIdentity | null;
+    catalogue_note: string;
+    listing_description: string | null;
+    listing_note: string;
+    listing_document: string | null;
+    listing_url: string | null;
+    ics_committee_note: string;
+    last_verified: string | null;
+  };
+  coverage: {
+    level: "CLAUSE" | "IDENTITY";
+    note: string;
+    clause_count: number;
+    withheld: number | null;
+    completeness: string;
+  };
+  currency: EditionCurrency | null;
+  currency_note: string;
+  legal: { qco: QcoStatus; listing_orders: ListingOrders | null; listing_note: string };
+  scope: { clauses: ClauseEvidence[]; note: string };
+  requirements: { clauses: ClauseEvidence[]; note: string };
+  sources: { label: string; url: string }[];
 }
 
 export interface ListingOrders {
@@ -1245,6 +1297,13 @@ function packageForm(
 
 export const api = {
   health: () => request<Health>("/health"),
+
+  /** Phase 11 — which records a number names (one -> redirect, several -> list, none -> say so). */
+  standardPassportLookup: (number: string) =>
+    request<PassportLookup>(`/standard-passport/lookup?number=${encodeURIComponent(number)}`),
+
+  /** Phase 11 — the Standard Passport for one indian_standards record, by its stable id. */
+  standardPassport: (id: string) => request<StandardPassport>(`/standard-passport/${encodeURIComponent(id)}`),
 
   /** Phase 10 — a standard's sampling / conformity / test-method clauses, by number as stored. */
   standardClauses: (standardNumber: string, language: AnswerLanguage = "en") =>

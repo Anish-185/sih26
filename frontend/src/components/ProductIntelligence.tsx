@@ -13,6 +13,7 @@
 */
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { passportByNumber } from "@/lib/format";
 import {
   BadgeCheck,
   FlaskConical,
@@ -63,7 +64,7 @@ function link(feature: ContextFeature, context: ProductContext): ReactNode {
   const standard = (context.sections.find((s) => s.feature === "STANDARD")?.detail
     ?.standard_number ?? "") as string;
   if (feature === "STANDARD" && standard) {
-    return <To to={`/standards?q=${encodeURIComponent(standard)}`}>Standard search</To>;
+    return <To to={passportByNumber(standard)}>Standard passport</To>;
   }
   if (feature === "CERTIFICATION" && standard) {
     return <To to={`/certification?standard=${encodeURIComponent(standard)}`}>Certification journey</To>;

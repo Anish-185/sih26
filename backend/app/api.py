@@ -764,6 +764,45 @@ def _result_to_source(
 # Search routes
 # ---------------------------------------------------------------------
 
+class PassportLookupOut(BaseModel):
+    number: str
+    matches: list = Field(default_factory=list, description="Each {id, standard_number, title}; never ranked.")
+    message: str = ""
+
+
+@router.get("/standard-passport/lookup", response_model=PassportLookupOut)
+def standard_passport_lookup(
+    number: Annotated[str, Query(max_length=200, description="A standard number, exactly as stored")],
+) -> PassportLookupOut:
+    """Phase 11: which records a number names. One -> the page redirects; several (a
+    number without a year where several editions are held) -> listed, never picked;
+    none -> MetrIQ says it holds no verified record."""
+    from app.standard_passport import lookup
+    matches = lookup(number)
+    return PassportLookupOut(
+        number=number, matches=[m.model_dump() for m in matches],
+        message="" if matches else (f"MetrIQ holds no verified record for “{number}”. "
+                                    "It does not guess a nearby standard."),
+    )
+
+
+@router.get("/standard-passport/{record_id}")
+def standard_passport_get(record_id: str):
+    """Phase 11: the Standard Passport for one indian_standards record, by its stable id.
+
+    A read-only COMPOSER (app/standard_passport.py): no model, no retrieval, no write.
+    No existing endpoint serves it — /product-standard and /search need a query and
+    rank candidates, /certification-guidance carries currency, QCO and listing orders
+    but not the standard's identity, coverage, scope or requirement clauses, and
+    /standard-clauses returns only the three Phase 10 groups.
+    """
+    from app.standard_passport import StandardPassportOut, build
+    passport = build(record_id)
+    if passport is None:
+        raise HTTPException(status_code=404, detail="No indian_standards record has this id.")
+    return StandardPassportOut.model_validate(passport)
+
+
 @router.get(
     "/standard-clauses",
     response_model=ClauseGroupsOut,

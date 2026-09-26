@@ -6,6 +6,7 @@ import { AppLayout } from "@/components/layout";
 import { DashboardView } from "@/features/DashboardView";
 import { InspectionView } from "@/features/inspection/InspectionView";
 import { StandardsView } from "@/features/StandardsView";
+import { StandardLookupView, StandardPassportView } from "@/features/StandardPassportView";
 import { AskView } from "@/features/AskView";
 import { CertificationView } from "@/features/CertificationView";
 import { LaboratoriesView } from "@/features/LaboratoriesView";
@@ -23,6 +24,8 @@ const router = createBrowserRouter([
       { path: "ask", element: <AskView /> },
       { path: "inspection", element: <InspectionView /> },
       { path: "standards", element: <StandardsView /> },
+      { path: "standard", element: <StandardLookupView /> },
+      { path: "standard/:id", element: <StandardPassportView /> },
       { path: "certification", element: <CertificationView /> },
       { path: "laboratories", element: <LaboratoriesView /> },
       { path: "hallmarking", element: <HallmarkingView /> },

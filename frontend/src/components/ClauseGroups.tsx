@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, type AnswerLanguage, type ClauseGroups as Groups } from "@/lib/api";
 import { ClauseText } from "@/components/ClauseText";
 import { Callout, Mono, Spinner } from "@/components/ui";
@@ -17,10 +17,13 @@ export function ClauseGroups({
   standardNumber,
   language = "en",
   className,
+  defaultOpen = false,
 }: {
   standardNumber: string;
   language?: AnswerLanguage;
   className?: string;
+  /** Open (and loaded) on arrival — the Passport shows it expanded. */
+  defaultOpen?: boolean;
 }) {
   const [data, setData] = useState<Groups | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -36,9 +39,15 @@ export function ClauseGroups({
       .finally(() => setLoading(false));
   };
 
+  useEffect(() => {
+    if (defaultOpen) load();
+    // Once, on arrival; load() itself refuses to run twice.
+  }, [defaultOpen, standardNumber]);
+
   return (
     <details
       className={className}
+      open={defaultOpen || undefined}
       onToggle={(e) => {
         if ((e.currentTarget as HTMLDetailsElement).open) load();
       }}

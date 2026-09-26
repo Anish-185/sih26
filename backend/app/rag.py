@@ -166,9 +166,6 @@ def unsupported_regulatory_claim(answer: str, evidence: str) -> bool:
 
 
 _QCO = re.compile(r"\bquality control orders?\b|\bqcos?\b", re.IGNORECASE)
-# BIS names an order "… (Quality Control) Order, 2020" or "… Quality Control Order".
-_QCO_NAMED = re.compile(r"\(?quality control\)?\s*(?:amendment\s+|second amendment\s+)?orders?\b|\bqcos?\b",
-                        re.IGNORECASE)
 
 
 def untied_qco_claim(answer: str, results: list[RetrievalResult],
@@ -188,8 +185,7 @@ def untied_qco_claim(answer: str, results: list[RetrievalResult],
     """
     if context is None or not _QCO.search(answer) or qco_rows:
         return False
-    if any(_QCO_NAMED.search(group.notification)
-           for _, out in listing_orders or [] for group in out.groups):
+    if any(group.names_qco for _, out in listing_orders or [] for group in out.groups):
         return False
     names = [context.product.lower(), *(n.lower() for n in context.standard_numbers)]
     for result in results:
