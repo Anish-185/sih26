@@ -30,6 +30,7 @@ class Category(str, Enum):
     CONSUMER_INFORMATION = "consumer_information"
     FAQS = "faqs"
     LEGAL_METROLOGY = "legal_metrology"
+    STANDARD_CLAUSES = "standard_clauses"
 
 
 class SourceAuthority(str, Enum):

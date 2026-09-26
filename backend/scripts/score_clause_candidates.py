@@ -257,7 +257,9 @@ def fetch_item(number: str, index: dict) -> dict:
         leaves = len((pages or {}).get("pages", []))
         return {"identifier": identifier, "year": year, "text": text, "amendment_docs": len(amendments),
                 "extra_texts": len(texts) - 1, "mapped": mapped, "leaves": leaves,
-                "digits": entry["parsed"]["number"]}
+                "digits": entry["parsed"]["number"], "base": base, "names": names,
+                "page_numbers": {p["leafNum"]: p["pageNumber"] for p in (pages or {}).get("pages", [])
+                                 if p.get("pageNumber")}}
     return {"not_found": f"no mirror item for the cited edition ({year})"}
 
 
@@ -280,18 +282,26 @@ def decide(m: dict) -> tuple[str, str]:
     return "SHIP", f"{m['clean']} clean clauses, scope parsed, {ratio:.1%} clause lines unreadable{dot}"
 
 
-def main() -> int:
-    kb = [r for f in sorted(KNOWLEDGE_DIR.glob("*.json")) for r in json.loads(f.read_text())]
-    kb_numbers = {r["standard_number"] for r in kb if r.get("category") == "indian_standards"}
-    chosen, missing = candidates(kb_numbers)
-    index = json.loads(ft.INDEX.read_text())["standards"]
-    items = {n: fetch_item(n, index) for n in chosen}
+def knowledge() -> list[dict]:
+    """The knowledge base WITHOUT clause records: their OCR text must never vouch for itself."""
+    return [r for f in sorted(KNOWLEDGE_DIR.glob("*.json")) if f.stem != "standard_clauses"
+            for r in json.loads(f.read_text())]
 
-    # Vocabulary: every word in the knowledge base, plus words that recur across documents.
+
+def vocabulary(kb: list[dict], items: dict) -> set[str]:
+    """Every word in the knowledge base, plus words that recur across the candidate documents."""
     known = {w for r in kb for w in tokens(r.get("title", "") + " " + r.get("content", ""))}
     df = collections.Counter(w for it in items.values() if it.get("text")
                              for w in set(tokens(it["text"])))
-    known |= {w for w, c in df.items() if c >= 3}
+    return known | {w for w, c in df.items() if c >= 3}
+
+
+def main() -> int:
+    kb = knowledge()
+    chosen, missing = candidates({r["standard_number"] for r in kb if r.get("category") == "indian_standards"})
+    index = json.loads(ft.INDEX.read_text())["standards"]
+    items = {n: fetch_item(n, index) for n in chosen}
+    known = vocabulary(kb, items)
 
     rows = []
     for n in chosen:
