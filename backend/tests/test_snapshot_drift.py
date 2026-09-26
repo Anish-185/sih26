@@ -29,6 +29,7 @@ BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 sys.path.insert(0, str(BACKEND / "scripts"))
 
+import fetch_compulsory_certification as cc  # noqa: E402
 import verify_snapshot as vs  # noqa: E402
 
 PASS = 0
@@ -135,11 +136,30 @@ def test_the_recorded_baseline_is_usable() -> None:
               len(lims["standards_checked"]) <= lims["standards_in_snapshot"])
 
 
+def test_a_notification_cell_change_alone_is_drift() -> None:
+    print("\n[5] a change to a Notification cell alone is drift (Phase 10)")
+    page = ("<table><tr><th>Sr No.</th><th>IS No.</th><th>Product</th><th>Notification</th></tr>"
+            "<tr><td>1.</td><td>IS 1660</td><td>Wrought Aluminium Utensils</td>"
+            "<td>Utensils (Quality Control) Order, 2023 S.O. 3583(E) dated 9th August 2023</td></tr></table>")
+    changed_cell = page.replace("dated 9th August 2023</td>",
+                                "dated 9th August 2023 Rescind Order S.O. 9(E)</td>")
+    before = vs.scheme_items(cc.parse_scheme_i(page))
+    after = vs.scheme_items(cc.parse_scheme_i(changed_cell))
+    check("the number and product are the same on both pages",
+          [i.split(" | ")[:2] for i in before] == [i.split(" | ")[:2] for i in after])
+    stored = {**current(before), "recorded_on": "2026-09-26"}
+    changed, text = run(stored, current(after))
+    check("…yet the drift check reports CHANGED and names the row", changed and "CHANGED" in text
+          and "Rescind Order" in text, text[-300:])
+    check("an identical page is UNCHANGED", not run(stored, current(vs.scheme_items(cc.parse_scheme_i(page))))[0])
+
+
 def main() -> int:
     test_hashing()
     test_reporting()
     test_it_never_writes_the_knowledge_base()
     test_the_recorded_baseline_is_usable()
+    test_a_notification_cell_change_alone_is_drift()
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
 

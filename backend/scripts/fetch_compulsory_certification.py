@@ -390,6 +390,20 @@ def orders_in(cell: str, links: list[tuple[str, str]]) -> list[dict]:
 _DESCRIBED = re.compile(r'The BIS list describes the product as: "(.+?)"')
 _DESCRIPTION = re.compile(r'BIS product description: "(.+?)"')
 _QUOTED_NUMBER = re.compile(r'against the standard "([^"]+)"')
+# Milestone 14's hand-transcribed records quote their rows in a third wording.
+_LISTS_AS = re.compile(r'BIS lists the standard as "([^"]+)"')
+_LISTED_PRODUCTS = re.compile(r"BIS lists the following products against this standard in the [^:]*list: "
+                              r"(.+?)\.(?= Catalogue title:| The |$)", re.S)
+
+
+def number_structure(number: str) -> tuple:
+    """(prefix, number, parts, year) from Phase 4's parser. Two numbers are the same
+    standard only when all four are EQUAL — still an exact match, on structure rather
+    than spelling: "IS/IEC 62368: Part 1: 2023" == "IS/IEC 62368 (Part 1) : 2023", but
+    "IS 269" != "IS 269:2015" (one side lacks the year) and parts must agree."""
+    from fetch_standard_titles import parse_number
+    parsed = parse_number(number)
+    return (parsed["prefix"], parsed["number"], tuple(parsed["parts"]), parsed["year"])
 
 
 def _record_keys(item: dict) -> list[tuple[str, str, str]]:
@@ -399,28 +413,32 @@ def _record_keys(item: dict) -> list[tuple[str, str, str]]:
     scheme = "II" if "(Scheme II)" in doc else "I" if "(Scheme I)" in doc else None
     if scheme is None:
         return []
-    quoted = _QUOTED_NUMBER.search(item["content"])
+    quoted = _QUOTED_NUMBER.search(item["content"]) or _LISTS_AS.search(item["content"])
     number = quoted.group(1) if quoted else item["standard_number"]
     described = _DESCRIBED.search(item["content"]) or _DESCRIPTION.search(item["content"])
-    if not described:
+    listed = _LISTED_PRODUCTS.search(item["content"])
+    if described:
+        products = described.group(1).split("; ") if scheme == "II" else [described.group(1)]
+    elif listed:
+        products = listed.group(1).split("; ")
+    else:
         return []
-    products = described.group(1).split("; ") if scheme == "II" else [described.group(1)]
     return [(scheme, number, product) for product in products]
 
 
 def build_notifications() -> int:
     items = json.loads(TARGET.read_text(encoding="utf-8"))
-    index: dict[tuple[str, str, str], dict] = {}
+    index: dict[tuple, dict] = {}
     for item in items:
-        for key in _record_keys(item):
-            index.setdefault(key, item)
+        for scheme, number, product in _record_keys(item):
+            index.setdefault((scheme, number_structure(number), product), item)
     read_on = dt.date.today().isoformat()
     rows_out = []
     for scheme, url, rows in (("I", SCHEME_I, parse_scheme_i(fetch(SCHEME_I))),
                               ("II", SCHEME_II, parse_scheme_ii(fetch(SCHEME_II)))):
         for row in rows:
             cell = row["notification"] or ""
-            record = index.get((scheme, clean_number(row["number"]), row["product"]))
+            record = index.get((scheme, number_structure(clean_number(row["number"])), row["product"]))
             rows_out.append({
                 "scheme": scheme, "source_url": url,
                 "number_as_printed": row["number"], "product": row["product"],

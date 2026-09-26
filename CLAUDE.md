@@ -1864,3 +1864,28 @@ finds nothing (only "mattresses" reaches IS 16014), as before the fix. Affected
 record words: latches, punches, switches, wrenches, boxes, mattresses, processes. Eval: identical to
 `eval_baseline.json` on every metric and row (baseline not rewritten). "pipe wrench" now retrieves
 IS 4003 (Part 1) and (Part 2) at high confidence. Tests: `test_listing_orders.py`.
+
+## Phase 10 — Step 0: listing join on structure, drift on the Notification cell (2026-09-26)
+
+**Join.** A listing row now joins a record when Phase 4's `parse_number` gives EQUAL (prefix, number,
+parts, year) for the two numbers — exact on structure, not spelling — AND the product wording is
+identical. The join also reads the third provenance wording Milestone 14's hand-transcribed records use
+(`BIS lists the standard as "N"` + `BIS lists the following products against this standard in the …
+list: A; B; …`). 469 of 496 rows join (was 435): 34 new — 32 IS/IEC 62368 (Part 1) products, IS 16046,
+IS 16102 (Part 1), IS 302-2-25 (Microwave Ovens), IS 8828. IS 16102 (Part 1) joins because NEITHER side
+carries a year, the parts agree and the wording is identical. 27 stay unjoined: 6 because the listing
+gives no year where the record has one (IS 269 / 455 / 12330 / 1489 (Part 1) / 3854 / 694); 19 because
+the product wording differs (11 IS/IEC 62368 products absent from, or spelt differently in, the record's
+list — e.g. 32″ vs 32"; IS 16415 trailing "."; IS 12640 (Part 2), IS 302 (Part 2/Sec 3, 201, 202),
+IS 16242 (Part 1) "Invertors of rating≤5kVA"); 2 because the record quotes no listed product
+(IS 17803, IS 17526 — built from an advisory and a product manual). 439 standards now have a listing order.
+
+**Guard regression fixed.** With IS 16102 (Part 1) now joined, LED lamps carry a listing order — whose
+cell names the Electronics & IT Goods (Requirements for Compulsory Registration) Order, not a QCO. The
+9.1 rule "any attached listing order ties a QCO" let "LED lamps are covered by a Quality Control Order"
+through (`test_conversation_context.py` caught it). A listing order now ties a QCO claim only when its
+own cell names a Quality Control Order.
+
+**Drift.** `verify_snapshot.scheme_items` hashes number + product + Notification cell, so a cell change
+alone is reported (tested on a synthetic page). The Scheme I / II baselines were re-recorded after
+confirming number + product were identical to the previous baseline on all 421 + 75 rows.

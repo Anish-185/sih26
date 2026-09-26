@@ -152,7 +152,8 @@ def test_the_join_is_exact() -> None:
     for row in JOINED:
         item = items[row["record_id"]]
         keys = cc._record_keys(item.model_dump(mode="json"))
-        if (row["scheme"], cc.clean_number(row["number_as_printed"]), row["product"]) not in keys \
+        structure = cc.number_structure(cc.clean_number(row["number_as_printed"]))
+        if (row["scheme"], structure, row["product"]) not in {(sc, cc.number_structure(n), pr) for sc, n, pr in keys} \
                 or row["kb_standard_number"] != item.standard_number:
             wrong.append(row["number_as_printed"])
     check(f"all {len(JOINED)} joined rows match the number and product wording their record quotes",
@@ -164,6 +165,14 @@ def test_the_join_is_exact() -> None:
     check("a near miss is not forced: listing 'IS 269' does not join the record 'IS 269:2015'",
           any(r["number_as_printed"] == "IS 269" and not r["record_id"] for r in ROWS)
           and qco.orders_named_by_listing("IS 269:2015") == [])
+    check("formatting alone does not block a join: 'IS/IEC 62368: Part 1: 2023' joins "
+          "'IS/IEC 62368 (Part 1) : 2023' (same prefix, number, parts and year)",
+          any(r["number_as_printed"] == "IS/IEC 62368: Part 1: 2023"
+              and r["kb_standard_number"] == "IS/IEC 62368 (Part 1) : 2023" for r in JOINED))
+    check("structure must be EQUAL: a missing year or different parts never joins",
+          cc.number_structure("IS 269") != cc.number_structure("IS 269:2015")
+          and cc.number_structure("IS 302 (Part 2/Sec 3)") != cc.number_structure("IS 302 (Part 2/Sec 201)")
+          and cc.number_structure("IS/IEC 62368: Part 1: 2023") == cc.number_structure("IS/IEC 62368 (Part 1) : 2023"))
     check("lookup is exact on the number as stored", qco.orders_named_by_listing("IS 1660") == []
           and qco.orders_named_by_listing("IS 1660:2024"))
     check("orders parse the S.O. number and the date as printed",
@@ -209,8 +218,11 @@ def test_a_listing_order_ties_an_order_to_the_product() -> None:
           and not untied_qco_claim("It is under a QCO.", ans.results, ans.context, [], ans.listing_orders))
     led = BISQuestionAnswerer(ENGINE, ReplyLLM("LED bulbs are covered by a Quality Control Order.")).ask(
         "which standard applies to an LED bulb?")
-    check("LED bulb (its listing row did not join): the same claim is still withheld",
-          led.fallback_reason.startswith("GUARD:"), led.fallback_reason)
+    check("LED bulb: a listing order IS attached (it joins since Phase 10), but its cell names the "
+          "Compulsory Registration Order, not a QCO — so the QCO claim is still withheld",
+          led.listing_orders and led.fallback_reason.startswith("GUARD:"), led.fallback_reason)
+    check("untied_qco_claim: a listing cell that names no QCO does not tie one",
+          untied_qco_claim("It is under a QCO.", led.results, led.context, [], led.listing_orders))
 
 
 def test_surfaces() -> None:

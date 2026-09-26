@@ -52,9 +52,15 @@ def digest(items: list[str]) -> str:
 # ------------------------------------------------------------------ probing
 
 
+def scheme_items(rows: list[dict]) -> list[str]:
+    """One line per listed row: number, product AND its Notification cell (Phase 10),
+    so a change to the cell alone — a new amendment order, a rescission — is drift."""
+    return sorted(f"{cc.clean_number(r['number'])} | {r['product']} | {r.get('notification') or ''}"
+                  for r in rows)
+
+
 def probe_scheme(name: str, url: str, parse) -> dict:
-    rows = parse(cc.fetch(url))
-    items = sorted(f"{cc.clean_number(r['number'])} | {r['product']}" for r in rows)
+    items = scheme_items(parse(cc.fetch(url)))
     return {"url": url, "items": items, "sha256": digest(items)}
 
 
