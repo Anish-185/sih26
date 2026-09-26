@@ -37,6 +37,8 @@ from app.product import ProductStandardFinder
 from app.product_context import ProductContextOut, build_from_query, context_out
 from app.rag import BISQuestionAnswerer
 from app.retrieval import RetrievalResult, SearchEngine, SearchOutcome
+from app.qco import QcoOut
+from app.qco import for_standard as qco_for_standard
 from app.standard_currency import CurrencyOut, currency_for
 
 router = APIRouter(tags=["search"])
@@ -434,6 +436,8 @@ class ProductStandardResultOut(BaseModel):
     catalogue: CatalogueOut | None = None
     # Phase 5: is the cited edition the newest one MetrIQ's evidence shows?
     currency: CurrencyOut | None = None
+    # Phase 9: Quality Control Order evidence for this standard, from quoted rows only.
+    qco: QcoOut | None = None
     source_organization: str
     source_url: str | None = None
     document_name: str | None = None
@@ -809,11 +813,8 @@ def product_standard_post(
             note="Please provide a product description.",
         )
 
-    outcome = get_product_finder().find(
-        product,
-        limit=request.limit,
-        language=lang.resolve(product, request.language),
-    )
+    language = lang.resolve(product, request.language)
+    outcome = get_product_finder().find(product, limit=request.limit, language=language)
 
     results = [
         ProductStandardResultOut(
@@ -835,6 +836,7 @@ def product_standard_post(
             why=why_out(why),
             catalogue=_catalogue_out(result.item.content),
             currency=currency_for(result.item.standard_number),
+            qco=qco_for_standard(result.item.standard_number, language),
             source_organization=result.item.source_organization,
             source_url=result.item.source_url,
             document_name=result.item.document_name,

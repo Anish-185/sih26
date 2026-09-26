@@ -2,6 +2,7 @@ import type { CertificationJourney as Journey } from "@/lib/api";
 import { Callout, Chip, Mono, Panel, PanelHeader } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { EditionCurrency } from "@/components/EditionCurrency";
+import { QcoStatus } from "@/components/QcoStatus";
 
 /** How much of this guidance the verified knowledge base actually supports. */
 const STATUS: Record<
@@ -117,6 +118,7 @@ export function CertificationJourney({ journey }: { journey: Journey }) {
         </dl>
 
         <EditionCurrency currency={journey.currency} />
+        <QcoStatus qco={journey.qco} />
 
         <p className="text-[12px] leading-relaxed text-ink-soft">{status.note}</p>
 
@@ -152,6 +154,7 @@ export function CertificationJourney({ journey }: { journey: Journey }) {
                   <span className="text-[12px] text-ink-soft">{c.title}</span>
                   <Chip>{c.confidence}</Chip>
                   <EditionCurrency currency={c.currency} compact />
+                  <QcoStatus qco={c.qco} compact />
                 </div>
                 <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">{c.why.summary}</p>
               </li>

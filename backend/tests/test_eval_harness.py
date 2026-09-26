@@ -188,7 +188,7 @@ def test_adversarial_queries_are_safe() -> None:
 def test_the_committed_baseline_is_the_real_one() -> None:
     print("\n[4] the committed baseline is honest")
     if not ev.BASELINE.exists():
-        check("baseline committed (run eval_retrieval.py to produce it)", False)
+        check("baseline committed (run eval_retrieval.py --write-baseline to produce it)", False)
         return
     stored = json.loads(ev.BASELINE.read_text())
     check("the committed baseline matches a fresh run of the same query set",
@@ -210,7 +210,10 @@ def test_the_harness_does_not_touch_the_engine() -> None:
               forbidden not in source)
     check("the harness writes only under tests/data/",
           source.count(".write_text(") == 2 and "QUERIES.write_text(" in source
-          and "BASELINE.write_text(" in source)
+          and "target.write_text(" in source)
+    check("a normal run writes eval_latest.json; only --write-baseline writes the baseline",
+          "target = BASELINE if args.write_baseline else LATEST" in source
+          and ev.LATEST.name == "eval_latest.json")
 
 
 def main() -> int:

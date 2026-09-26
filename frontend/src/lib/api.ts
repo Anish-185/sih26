@@ -162,6 +162,7 @@ export interface ProductStandardResult {
   catalogue: CatalogueIdentity | null;
   /** Phase 5 — absent on records saved before it. */
   currency?: EditionCurrency | null;
+  qco?: QcoStatus | null;
   source_organization: string;
   source_url: string | null;
   document_name: string | null;
@@ -192,6 +193,32 @@ export interface CatalogueIdentity {
   official: boolean;
   /** The source returned damaged text; it is shown as recorded, never repaired. */
   title_suspect: boolean;
+}
+
+/**
+ * Phase 9 — Quality Control Order evidence for one standard, from quoted rows of
+ * a BIS table only. UPCOMING never becomes "in force" by the passage of time;
+ * every sentence is MetrIQ's own (app/qco.py) and is about the order, never the
+ * user's item.
+ */
+export interface QcoRow {
+  sr_no: string;
+  ministry: string;
+  product: string;
+  standard_as_printed: string;
+  enforcement_date: string;
+  listed_products: string[];
+  link: string | null;
+  table: string;
+  source_url: string;
+  read_on: string | null;
+}
+
+export interface QcoStatus {
+  status: "NOTIFIED" | "UPCOMING" | "NOT_ESTABLISHED";
+  label: string;
+  statements: string[];
+  rows: QcoRow[];
 }
 
 /**
@@ -250,6 +277,7 @@ export interface CertificationCandidate {
   source_url: string | null;
   why: WhyThisResult;
   currency?: EditionCurrency | null;
+  qco?: QcoStatus | null;
 }
 
 /** The deterministic certification journey. Guidance about the route for a
@@ -261,6 +289,7 @@ export interface CertificationJourney {
   standard_number: string | null;
   standard_title: string | null;
   currency?: EditionCurrency | null;
+  qco?: QcoStatus | null;
   candidates: CertificationCandidate[];
   scheme: CertificationScheme | null;
   verification_status: "VERIFIED" | "PARTIAL" | "INSUFFICIENT";

@@ -55,6 +55,8 @@ from app.product import ProductStandardFinder
 from app.product_identification import RETRIEVAL_NOTE, product_name_of
 from app.ocr import OCR_ENGINE, OcrError, RawRegion, run_ocr
 from app.pipeline import run_downstream
+from app.qco import QcoOut
+from app.qco import for_standard as qco_for_standard
 from app.standard_currency import CurrencyOut, currency_for
 
 # Guard rails for a demo backend on a laptop.
@@ -367,6 +369,7 @@ class StandardCandidateOut(BaseModel):
     verification_status: str
     last_verified: str | None = None
     currency: CurrencyOut | None = None
+    qco: QcoOut | None = None
 
 
 class CoverageRowOut(BaseModel):
@@ -1209,6 +1212,7 @@ def _candidate_out(candidate) -> StandardCandidateOut:
         verification_status=item.verification_status,
         last_verified=item.last_verified.isoformat() if item.last_verified else None,
         currency=currency_for(item.standard_number),
+        qco=qco_for_standard(item.standard_number),
     )
 
 

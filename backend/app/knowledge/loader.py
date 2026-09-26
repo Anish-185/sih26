@@ -12,6 +12,8 @@ Layout (one file per category):
         consumer_information.json
         faqs.json
         legal_metrology.json   (Legal Metrology texts — source_authority LEGAL_METROLOGY)
+        standard_clauses.json  (OCR clause text — citation-only, see app/clauses.py)
+        quality_control_orders.json (BIS's QCO table — citation-only, see app/qco.py)
 
 Each file holds a JSON array of knowledge items. The filename must match the
 `category` field of every item inside it.

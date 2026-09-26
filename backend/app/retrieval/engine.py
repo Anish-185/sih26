@@ -191,9 +191,11 @@ class SearchEngine:
         self.config = config or RetrievalConfig()
         load = load_knowledge_base(knowledge_dir)
         self.load_errors = load.errors
-        # Clause records are citation-only (Phase 7): reached through app/clauses.py after
-        # a standard is retrieved, never through this index or ``items``.
-        self._items = [it for it in load.items if it.category != "standard_clauses"]
+        # Clause records (Phase 7) and Quality Control Order records (Phase 9) are
+        # citation-only: reached through app/clauses.py / app/qco.py after a standard is
+        # retrieved, never through this index or ``items``.
+        self._items = [it for it in load.items
+                       if it.category not in ("standard_clauses", "quality_control_orders")]
         # Only BIS items are searchable: every search feature (Q&A, Product ->
         # Standard, certification, laboratories) presents its results as BIS
         # sources. Legal Metrology items are loaded (see ``items``) for inspection

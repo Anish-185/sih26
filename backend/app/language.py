@@ -471,6 +471,87 @@ BOUNDARY = {
 }
 
 
+# Phase 9 — Quality Control Orders. The sixth hard-coded translated string set: MetrIQ
+# describing a row of BIS's QCO table, with no model running. Every sentence is about
+# the ORDER and the TABLE, never about the user's item; none computes "in force" from
+# today's date; ministry names, IS numbers and dates are kept exactly as BIS printed them.
+QCO = {
+    EN: {
+        "label": {"NOTIFIED": "QCO in force (per BIS table)", "UPCOMING": "QCO upcoming",
+                  "NOT_ESTABLISHED": "QCO not established"},
+        "upcoming": ("BIS's table of upcoming Quality Control Orders, read on {read_on}, lists "
+                     "\u201c{product}\u201d under a Quality Control Order (issuing ministry or "
+                     "department: {ministry}), naming {number} (as printed) with an enforcement "
+                     "date of {date}."),
+        "not_in_force": ("The table lists orders due for implementation; it does not state that "
+                         "this order is in force, and enforcement dates are often deferred."),
+        "passed": ("BIS's table, read on {read_on}, listed an enforcement date of {date}. That "
+                   "date has passed; MetrIQ cannot confirm whether the order took effect or was "
+                   "deferred."),
+        "not_established": ("MetrIQ holds no Quality Control Order evidence for this standard. "
+                            "That is a statement about MetrIQ's data, not a statement that no "
+                            "order exists; being listed under compulsory certification is a "
+                            "different fact, and MetrIQ does not infer one from the other."),
+        "edition": ("MetrIQ's edition evidence shows a later edition, {later}. The order's row "
+                    "names {number} as printed; MetrIQ quotes the row and does not say which "
+                    "edition the order requires."),
+        "boundary": ("BIS's table of upcoming Quality Control Orders, read on {read_on}, lists "
+                     "\u201c{wording}\u201d under a Quality Control Order (issuing ministry or "
+                     "department: {ministry}), naming {number} (as printed) with an enforcement "
+                     "date of {date}. MetrIQ quotes "
+                     "that row as printed; it does not say the order applies to your item."),
+    },
+    HI: {
+        "label": {"NOTIFIED": "QCO लागू (BIS तालिका के अनुसार)", "UPCOMING": "QCO आगामी",
+                  "NOT_ESTABLISHED": "QCO स्थापित नहीं"},
+        "upcoming": ("{read_on} को पढ़ी गई BIS की आगामी गुणवत्ता नियंत्रण आदेशों (QCO) की तालिका "
+                     "“{product}” को {ministry} के एक गुणवत्ता नियंत्रण आदेश के अंतर्गत सूचीबद्ध "
+                     "करती है, जिसमें {number} (जैसा छपा है) और प्रवर्तन तिथि {date} दी गई है।"),
+        "not_in_force": ("यह तालिका कार्यान्वयन के लिए नियत आदेशों की सूची है; यह नहीं कहती कि यह "
+                         "आदेश लागू है, और प्रवर्तन तिथियाँ अक्सर आगे बढ़ाई जाती हैं।"),
+        "passed": ("{read_on} को पढ़ी गई BIS की तालिका में प्रवर्तन तिथि {date} दी गई थी। वह तिथि "
+                   "बीत चुकी है; MetrIQ पुष्टि नहीं कर सकता कि आदेश लागू हुआ या आगे बढ़ाया गया।"),
+        "not_established": ("MetrIQ के पास इस मानक के लिए कोई गुणवत्ता नियंत्रण आदेश का साक्ष्य नहीं "
+                            "है। यह MetrIQ के डेटा के बारे में कथन है, यह नहीं कि कोई आदेश मौजूद नहीं "
+                            "है; अनिवार्य प्रमाणन सूची में होना एक अलग तथ्य है, और MetrIQ एक से दूसरे "
+                            "का अनुमान नहीं लगाता।"),
+        "edition": ("MetrIQ के संस्करण-साक्ष्य में एक बाद का संस्करण, {later}, दिखता है। आदेश की "
+                    "पंक्ति में {number} (जैसा छपा है) लिखा है; MetrIQ पंक्ति उद्धृत करता है और यह "
+                    "नहीं कहता कि आदेश किस संस्करण की अपेक्षा करता है।"),
+        "boundary": ("{read_on} को पढ़ी गई BIS की आगामी गुणवत्ता नियंत्रण आदेशों की तालिका "
+                     "“{wording}” को {ministry} के एक गुणवत्ता नियंत्रण आदेश के अंतर्गत सूचीबद्ध "
+                     "करती है, जिसमें {number} (जैसा छपा है) और प्रवर्तन तिथि {date} दी गई है। "
+                     "MetrIQ उस पंक्ति को जैसा छपा है वैसा ही उद्धृत करता है; वह यह नहीं कहता कि "
+                     "आदेश आपकी वस्तु पर लागू होता है।"),
+    },
+    TE: {
+        "label": {"NOTIFIED": "QCO అమలులో ఉంది (BIS పట్టిక ప్రకారం)", "UPCOMING": "QCO రాబోతోంది",
+                  "NOT_ESTABLISHED": "QCO నిర్ధారించబడలేదు"},
+        "upcoming": ("{read_on}న చదివిన BIS రాబోయే నాణ్యతా నియంత్రణ ఉత్తర్వుల (QCO) పట్టిక "
+                     "“{product}”ను {ministry} జారీ చేసే నాణ్యతా నియంత్రణ ఉత్తర్వు కింద జాబితా "
+                     "చేస్తుంది; అందులో {number} (ముద్రించినట్లు), అమలు తేదీ {date} ఇవ్వబడ్డాయి."),
+        "not_in_force": ("ఈ పట్టిక అమలుకు రానున్న ఉత్తర్వుల జాబితా మాత్రమే; ఈ ఉత్తర్వు అమలులో ఉందని "
+                         "అది చెప్పదు, అమలు తేదీలు తరచుగా వాయిదా పడతాయి."),
+        "passed": ("{read_on}న చదివిన BIS పట్టికలో అమలు తేదీ {date}. ఆ తేదీ గడిచిపోయింది; ఉత్తర్వు "
+                   "అమలులోకి వచ్చిందో వాయిదా పడిందో MetrIQ నిర్ధారించలేదు."),
+        "not_established": ("ఈ ప్రమాణానికి MetrIQ వద్ద నాణ్యతా నియంత్రణ ఉత్తర్వు ఆధారం ఏదీ లేదు. ఇది "
+                            "MetrIQ డేటా గురించిన వాక్యం, ఉత్తర్వు లేదని కాదు; తప్పనిసరి ధృవీకరణ "
+                            "జాబితాలో ఉండటం వేరే విషయం, MetrIQ ఒకదాని నుండి మరొకటి ఊహించదు."),
+        "edition": ("MetrIQ ఎడిషన్ ఆధారంలో తరువాతి ఎడిషన్ {later} కనిపిస్తోంది. ఉత్తర్వు వరుసలో "
+                    "{number} (ముద్రించినట్లు) ఉంది; MetrIQ ఆ వరుసను ఉటంకిస్తుంది, ఉత్తర్వుకు ఏ "
+                    "ఎడిషన్ అవసరమో చెప్పదు."),
+        "boundary": ("{read_on}న చదివిన BIS రాబోయే నాణ్యతా నియంత్రణ ఉత్తర్వుల పట్టిక “{wording}”ను "
+                     "{ministry} జారీ చేసే నాణ్యతా నియంత్రణ ఉత్తర్వు కింద జాబితా చేస్తుంది; అందులో "
+                     "{number} (ముద్రించినట్లు), అమలు తేదీ {date} ఇవ్వబడ్డాయి. MetrIQ ఆ వరుసను "
+                     "ముద్రించినట్లే ఉటంకిస్తుంది; ఉత్తర్వు మీ వస్తువుకు వర్తిస్తుందని చెప్పదు."),
+    },
+}
+
+
+def qco(language: str) -> dict:
+    return QCO.get(language, QCO[EN])
+
+
 def boundary(language: str) -> dict:
     """MetrIQ's own abstention sentences in the requested language."""
     return BOUNDARY.get(language, BOUNDARY[EN])

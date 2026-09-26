@@ -491,6 +491,16 @@ def _declarations(d: _Doc, an: dict) -> list:
     return out
 
 
+def _qco(qco: dict | None) -> list[tuple[str, str]]:
+    """Phase 9: the Quality Control Order row, only when the record stored one."""
+    if not qco:
+        return []
+    rows = "".join(f"<br/><font color='#8b8e94'>Source: {_t(r['table'])} (Sr. No. {_t(r['sr_no'])}, "
+                   f"read on {_t(r.get('read_on') or '—')}) · {_t(r['source_url'])}</font>"
+                   for r in qco.get("rows", []))
+    return [("Quality Control Order", f"{_t(qco['label'])} · {_t(' '.join(qco['statements']))}{rows}")]
+
+
 def _edition(currency: dict | None) -> list[tuple[str, str]]:
     """Phase 5: the edition-currency row, only when the record stored one."""
     if not currency:
@@ -525,6 +535,7 @@ def _bis(d: _Doc, rec: dict, an: dict) -> list:
                      ("Why this result", _t(why.get("summary") or "—")),
                      *_text_held(why),
                      *_edition(c.get("currency")),
+                     *_qco(c.get("qco")),
                      ("Evidence from the package", "<br/>".join(
                          f"{_t(e['clue']['kind'].replace('_', ' '))}: “{_t(e['clue']['text'])}” "
                          f"<font name='Mono' color='#8b8e94'>{_t(', '.join(e['clue']['source_regions']))} · "
@@ -566,6 +577,7 @@ def _certification(d: _Doc, an: dict) -> list:
         ("Standard", f"<font name='Mono'>{_t(j.get('standard_number') or '—')}</font>"
                      + (f" · {_t(j.get('standard_title'))}" if j.get("standard_title") else "")),
         *_edition(j.get("currency")),
+        *_qco(j.get("qco")),
         ("Standard selection", _t(j.get("standard_selection"))),
         ("Verification status", _t(j.get("verification_status"))),
         ("Certification scheme", _t(scheme.get("name") or "Not established from a verified record")),

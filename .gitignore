@@ -24,3 +24,6 @@ frontend/.vite/
 .vscode/
 .idea/
 .DS_Store
+
+# Phase 9: a normal eval_retrieval.py run writes here; the committed baseline moves only with --write-baseline.
+backend/tests/data/eval_latest.json

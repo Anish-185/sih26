@@ -109,6 +109,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 DATA = pathlib.Path(__file__).resolve().parents[1] / "tests" / "data"
 QUERIES = DATA / "eval_queries.json"
 BASELINE = DATA / "eval_baseline.json"
+# A normal run writes here (gitignored); only --write-baseline moves the committed baseline.
+LATEST = DATA / "eval_latest.json"
 
 KNOWLEDGE = ROOT / "data" / "knowledge"
 LISTING_PRODUCT = re.compile(r'The BIS list describes the product as: "(.+?)"')
@@ -572,7 +574,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     parser.add_argument("--derive", action="store_true",
                         help="rebuild tests/data/eval_queries.json from its sources")
-    parser.add_argument("--no-write", action="store_true", help="do not write the baseline file")
+    parser.add_argument("--no-write", action="store_true", help="write no file at all")
+    parser.add_argument("--write-baseline", action="store_true",
+                        help="write the committed eval_baseline.json instead of eval_latest.json")
     parser.add_argument("--limit", type=int, default=5)
     args = parser.parse_args(argv)
 
@@ -597,9 +601,10 @@ def main(argv: list[str] | None = None) -> int:
         print_table(report)
 
     if not args.no_write:
-        BASELINE.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+        target = BASELINE if args.write_baseline else LATEST
+        target.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
         if not args.json:
-            print(f"\n  baseline written: {BASELINE.relative_to(ROOT)}")
+            print(f"\n  written: {target.relative_to(ROOT)}")
     return 0
 
 

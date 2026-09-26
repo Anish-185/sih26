@@ -44,6 +44,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 
 from app import language as lang
+from app import qco as qco_module
 from app.knowledge.schema import KnowledgeItem
 
 # BIS's Know Your Standards search — the official place to look for a standard by
@@ -148,6 +149,9 @@ def explain(
         ),
         text["not_found"].format(product=product.strip()),
         text["two_reasons"],
+        # Phase 9: a row of BIS's QCO table whose product wording contains the user's
+        # WHOLE multi-word product phrase is quoted — never a single-word match.
+        *qco_module.boundary_sentences(qco_module.phrase_of(product), language),
         text["why_boundary"].format(
             notified=NOTIFIED_PRODUCTS,
             outside=PRODUCTS_OUTSIDE_THE_LISTINGS,

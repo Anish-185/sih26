@@ -31,6 +31,7 @@ class Category(str, Enum):
     FAQS = "faqs"
     LEGAL_METROLOGY = "legal_metrology"
     STANDARD_CLAUSES = "standard_clauses"
+    QUALITY_CONTROL_ORDERS = "quality_control_orders"
 
 
 class SourceAuthority(str, Enum):
@@ -39,10 +40,13 @@ class SourceAuthority(str, Enum):
     - BIS:             Bureau of Indian Standards.
     - LEGAL_METROLOGY: Legal Metrology, Department of Consumer Affairs (for example
                        the Legal Metrology (Packaged Commodities) Rules, 2011).
+    - QUALITY_CONTROL_ORDER: a Quality Control Order, issued by a ministry or
+                       department (named in the record) and listed in a BIS table.
     """
 
     BIS = "BIS"
     LEGAL_METROLOGY = "LEGAL_METROLOGY"
+    QUALITY_CONTROL_ORDER = "QUALITY_CONTROL_ORDER"
 
 
 class VerificationStatus(str, Enum):
@@ -91,7 +95,8 @@ class KnowledgeItem(BaseModel):
     # --- provenance / traceability ---
     source_authority: SourceAuthority = Field(
         default=SourceAuthority.BIS,
-        description="BIS or LEGAL_METROLOGY. Must be LEGAL_METROLOGY exactly for the legal_metrology category.",
+        description=("BIS, LEGAL_METROLOGY or QUALITY_CONTROL_ORDER. Must be LEGAL_METROLOGY exactly for "
+                     "the legal_metrology category and QUALITY_CONTROL_ORDER for quality_control_orders."),
     )
     source_organization: str = Field(
         default="Bureau of Indian Standards (BIS)",
@@ -181,12 +186,16 @@ class KnowledgeItem(BaseModel):
                 "(use verification_status 'sample' for development placeholders)"
             )
 
-        is_lm_category = category == Category.LEGAL_METROLOGY.value
-        is_lm_source = self.source_authority == SourceAuthority.LEGAL_METROLOGY.value
-        if is_lm_category != is_lm_source:
+        # Each non-BIS authority owns exactly one category, and that category holds
+        # nothing else: a Legal Metrology rule or a Quality Control Order is never
+        # presented as BIS information, and vice versa.
+        paired = {Category.LEGAL_METROLOGY.value: SourceAuthority.LEGAL_METROLOGY.value,
+                  Category.QUALITY_CONTROL_ORDERS.value: SourceAuthority.QUALITY_CONTROL_ORDER.value}
+        if self.source_authority != paired.get(category, SourceAuthority.BIS.value):
             raise ValueError(
                 "source_authority must be 'LEGAL_METROLOGY' for items in the 'legal_metrology' "
-                "category, and 'BIS' for every other category"
+                "category, 'QUALITY_CONTROL_ORDER' for 'quality_control_orders', and 'BIS' "
+                "for every other category"
             )
 
         if category == Category.INDIAN_STANDARDS.value and not self.standard_number:

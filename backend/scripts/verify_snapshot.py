@@ -18,7 +18,7 @@ report and decides what, if anything, to re-ingest. `--record` updates the
 stored baseline and nothing else.
 
     --record            store the current state as the new baseline
-    --source NAME       check one source only (scheme-i, scheme-ii, lims)
+    --source NAME       check one source only (scheme-i, scheme-ii, lims, qco-upcoming)
     --lims-standards N  how many standards to re-query on LIMS (default 5, 0 skips)
 """
 
@@ -36,6 +36,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import fetch_compulsory_certification as cc  # noqa: E402
 import fetch_lims_laboratories as lims  # noqa: E402
+import fetch_qco as qco  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 BASELINE = ROOT / "data" / "source_snapshots.json"
@@ -88,10 +89,20 @@ def probe_lims(count: int) -> dict:
     }
 
 
+def probe_qco() -> dict:
+    """Phase 9: BIS's upcoming-QCO table. Each row, with its enforcement date and the
+    products listed beneath it, so a deferred date or a removed product is drift."""
+    rows = qco.parse_upcoming(qco.fetch(qco.UPCOMING))
+    items = sorted(f"{r['sr']} | {r['number']} | {r['product']} | {r['date']} | "
+                   f"{'; '.join(r['listed_products'])}" for r in rows)
+    return {"url": qco.UPCOMING, "items": items, "sha256": digest(items)}
+
+
 PROBES = {
     "scheme-i": lambda a: probe_scheme("scheme-i", cc.SCHEME_I, cc.parse_scheme_i),
     "scheme-ii": lambda a: probe_scheme("scheme-ii", cc.SCHEME_II, cc.parse_scheme_ii),
     "lims": lambda a: probe_lims(a.lims_standards),
+    "qco-upcoming": lambda a: probe_qco(),
 }
 
 

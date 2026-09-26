@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from app import boundary as boundary_module
 from app import clauses as clauses_module
 from app import language as lang
+from app import qco as qco_module
 from app.knowledge.schema import KnowledgeItem
 from app.llm import LLMError, LocalLLM
 from app.openrouter import CopilotUnavailable, OpenRouterLLM
@@ -59,6 +60,12 @@ Rules:
 9. Describe what a source page or document contains only by using that
    source's supplied text. Do not say a page lists, includes or provides anything
    the supplied text does not show.
+10. Say a product or standard is under a Quality Control Order ONLY from a
+   supplied QUALITY CONTROL ORDER RECORD for it, quoting its ministry, product
+   wording, Indian Standard and enforcement date exactly as printed. That table
+   lists orders due for implementation: never say the order is in force, never
+   say whether an enforcement date took effect, and never say what the user's
+   own item must do.
 """
 
 
@@ -102,6 +109,9 @@ class GroundedAnswer:
     # answer (see app/clauses.py), and which path produced ``answer``.
     clauses: list[KnowledgeItem] = field(default_factory=list)
     fallback_reason: str = "MODEL"
+    # Phase 9: Quality Control Order rows for the same confidently retrieved
+    # standards clauses attach to (see app/qco.py).
+    qco: list[KnowledgeItem] = field(default_factory=list)
 
 
 logger = logging.getLogger(__name__)
@@ -146,15 +156,17 @@ _QCO = re.compile(r"\bquality control orders?\b|\bqcos?\b", re.IGNORECASE)
 
 
 def untied_qco_claim(answer: str, results: list[RetrievalResult],
-                     context: "ConversationContext | None") -> bool:
+                     context: "ConversationContext | None",
+                     qco_rows: list[KnowledgeItem] | None = None) -> bool:
     """A QCO named while discussing a specific product must be tied to it.
 
     A retrieved FAQ can hold the general QCO sentence, which the check above
     lets through; applied next to "LED bulb" it implies LED bulbs are under a
     QCO. That is allowed only when ONE retrieved record mentions a QCO AND names
-    the product or one of its standard numbers.
+    the product or one of its standard numbers — or (Phase 9) when a QCO record
+    was attached, which happens only for the standards this answer is about.
     """
-    if context is None or not _QCO.search(answer):
+    if context is None or not _QCO.search(answer) or qco_rows:
         return False
     names = [context.product.lower(), *(n.lower() for n in context.standard_numbers)]
     for result in results:
@@ -215,8 +227,28 @@ SOURCE URL: {clause["source_url"]}
             + "\n\n" + "\n---\n".join(blocks))
 
 
+def _qco_context(rows: list[KnowledgeItem]) -> str:
+    """The attached QCO rows, verbatim, with MetrIQ's own status sentences."""
+    if not rows:
+        return ""
+    blocks = []
+    for index, item in enumerate(rows, start=1):
+        status = qco_module.status_for(item.standard_number)
+        blocks.append(
+            f"""QUALITY CONTROL ORDER RECORD {index}
+TABLE: {item.document_name} (read on {item.last_verified})
+ROW, AS PRINTED:
+{item.content}
+METRIQ STATUS: {status.status} — {" ".join(status.statements)}
+SOURCE URL: {item.source_url}
+"""
+        )
+    return "\n---\n" + "\n---\n".join(blocks)
+
+
 def render_evidence(results: list[RetrievalResult], language: str,
-                    attached: list[KnowledgeItem] | None = None) -> str:
+                    attached: list[KnowledgeItem] | None = None,
+                    qco_rows: list[KnowledgeItem] | None = None) -> str:
     """The retrieved records as plain prose, written by MetrIQ's own code.
 
     Used when the explanation provider is unreachable. No model is involved, so
@@ -251,6 +283,11 @@ def render_evidence(results: list[RetrievalResult], language: str,
             clause["note"],
             clause["source_url"],
         ]))
+
+    for item in qco_rows or []:
+        status = qco_module.status_for(item.standard_number, language)
+        blocks.append("\n".join([status.label, *status.statements,
+                                 item.document_name or "", item.source_url or ""]))
 
     return "\n\n".join(blocks)
 
@@ -374,9 +411,13 @@ class BISQuestionAnswerer:
         eligible = [r for r in outcome.results
                     if (resolved and r.item.standard_number in resolved.standard_numbers)
                     or any(reason.field == "standard_number" for reason in r.reasons)]
-        attached = (clauses_module.attach(eligible, retrieval_text)
-                    if outcome.confidence in ("high", "medium") else [])
-        context = _build_context(outcome.results) + _clause_context(attached)
+        confident = outcome.confidence in ("high", "medium")
+        attached = clauses_module.attach(eligible, retrieval_text) if confident else []
+        # Phase 9: QCO rows attach by the same rule, to the same standards.
+        qco_rows = list({row.id: row for r in eligible if confident
+                         for row in qco_module.qco_for(r.item.standard_number)}.values())
+        context = (_build_context(outcome.results) + _clause_context(attached)
+                   + _qco_context(qco_rows))
 
         # The model sees the question exactly as the user wrote it — the
         # rewritten form is for retrieval only.
@@ -405,7 +446,7 @@ Give a concise answer grounded in the supplied evidence.
                 raise _Guard("WITHDRAWAL_CLAIM")
             if unsupported_regulatory_claim(answer, context):
                 raise _Guard("UNSUPPORTED_REGULATORY_CLAIM")
-            if untied_qco_claim(answer, outcome.results, resolved):
+            if untied_qco_claim(answer, outcome.results, resolved, qco_rows):
                 raise _Guard("UNTIED_QCO_CLAIM")
             if clauses_module.unsupported_citations(answer, context):
                 # Withheld like an invented IS number: a clause MetrIQ never supplied.
@@ -415,7 +456,7 @@ Give a concise answer grounded in the supplied evidence.
             # above already succeeded, so MetrIQ has the evidence and renders it
             # itself rather than failing the request. Deterministic, and
             # explicitly labelled as evidence without an AI explanation.
-            answer = render_evidence(outcome.results, answer_language, attached)
+            answer = render_evidence(outcome.results, answer_language, attached, qco_rows)
             explained, fallback_reason = False, _fallback_reason(exc)
         # Logged so a fallback is never a mystery (the Phase 6.1 re-run hit one).
         logger.log(logging.INFO if fallback_reason == "MODEL" else logging.WARNING,
@@ -431,4 +472,5 @@ Give a concise answer grounded in the supplied evidence.
             inherited=inherited,
             clauses=attached,
             fallback_reason=fallback_reason,
+            qco=qco_rows,
         )

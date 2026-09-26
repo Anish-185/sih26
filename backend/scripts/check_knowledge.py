@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.knowledge.loader import DEFAULT_KNOWLEDGE_DIR, load_knowledge_base, main  # noqa: E402
 from app.certification_journey import SCHEME_NAMES, certification_coverage
+from app import qco  # noqa: E402
 from app.standard_currency import distribution  # noqa: E402
 from app.requirements import (  # noqa: E402
     INSPECTION_SUPPORTED,
@@ -158,6 +160,18 @@ def check_requirements(argv: list[str]) -> int:
     print("\nEdition currency (is the cited edition the newest one MetrIQ's evidence shows?)")
     for status, count in distribution(numbers).items():
         print(f"  {status:<40} {count}")
+
+    # Phase 9 — Quality Control Orders: status per KB standard, and every QCO row's match.
+    statuses = Counter(qco.status_for(n).status for n in numbers)
+    print("\nQuality Control Order status (from quoted BIS table rows only)")
+    for status in qco.STATUSES:
+        print(f"  {status:<40} {statuses.get(status, 0)}")
+    report = qco.match_report(numbers)
+    print(f"  QCO rows: {len(report)} — attached {sum(r['result'] == 'ATTACHED' for r in report)}, "
+          f"mismatched {sum(r['result'] == 'MISMATCH' for r in report)} (never corrected)")
+    for r in report:
+        if r["result"] == "MISMATCH":
+            print(f"    Sr. {r['sr_no']:>3}  {r['printed']:<30} {r['reason']:<24} {r['product'][:40]}")
 
     if requirements.errors:
         print(f"\nRequirement errors: {len(requirements.errors)}")
