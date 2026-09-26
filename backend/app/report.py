@@ -29,6 +29,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 from xml.sax.saxutils import escape
 
+from app import clauses as clauses_module
+from app import language as lang
 from app.requirements import BIS as REQ_BIS, load_requirements
 
 from PIL import Image as PILImage, ImageDraw
@@ -567,6 +569,43 @@ def _bis(d: _Doc, rec: dict, an: dict) -> list:
     return out
 
 
+def _clause_groups(d: _Doc, rec: dict) -> list:
+    """Phase 10: the identified standard's sampling / conformity / test-method clauses,
+    QUOTED as OCR read them (never summarised), each with its reference as stored, the
+    OCR label and MetrIQ's note. A standard whose text MetrIQ does not hold gets one
+    honest sentence and nothing else. Knowledge looked up at render time, like the
+    requirement tables; no standard identified -> no section."""
+    number = rec.get("standard_number")
+    if not number:
+        return []
+    from app import clause_groups
+    result = clause_groups.groups_for(number)
+    if result.status == clause_groups.UNKNOWN_STANDARD:
+        return []
+    out = d.section(0, "Sampling, conformity and test methods", _t(result.message))
+    if result.status != clause_groups.CLAUSE_TEXT:
+        return out
+    titles = lang.clause_groups(lang.EN)["titles"]
+    out.append(d.p(_t(result.completeness), "soft"))
+    if result.withheld_clauses:
+        out.append(d.p("Withheld for OCR quality: " + _t(", ".join(
+            f"clause {c} ({r})" for c, r in result.withheld_clauses)), "soft"))
+    for group, members in result.groups.items():
+        out += d.h3(f"{titles[group]} ({len(members)})")
+        if not members:
+            out.append(d.p(_t(lang.clause_groups(lang.EN)["empty_group"]), "soft"))
+            continue
+        rows = []
+        for m in members:
+            view = clauses_module.view(m.item)
+            rows.append((f"Clause {view['clause']}",
+                         f"<font name='Mono' color='#8b8e94'>{_t(view['reference'])} · in this group by "
+                         f"{_t('; '.join(m.matched))}</font><br/><i>{_t(clauses_module.OCR_LABEL)}</i><br/>"
+                         f"“{_t(view['text'])}”<br/><font color='#8b8e94'>{_t(view['note'])}</font>"))
+        out.append(d.definitions(rows))
+    return out
+
+
 def _certification(d: _Doc, an: dict) -> list:
     """Milestone 16: the certification guidance stored with this inspection.
 
@@ -988,6 +1027,7 @@ def build_story(record: dict, images: dict[int, bytes], generated_at: datetime) 
     story += _ocr(d, an)
     story += _declarations(d, an)
     story += _bis(d, record, an)
+    story += _clause_groups(d, record)
     story += _certification(d, an)
     story += _laboratories(d, an)
     story += _legal_metrology(d, an)

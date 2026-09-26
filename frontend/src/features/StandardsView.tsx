@@ -1,3 +1,4 @@
+import { ClauseGroups } from "@/components/ClauseGroups";
 import { ClauseList } from "@/components/ClauseText";
 import { type FormEvent, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -349,6 +350,9 @@ function StandardResult({
           <div className="mt-4">
             <ClauseList title="Scope" clauses={result.why.scope ?? []} />
           </div>
+        )}
+        {result.why?.text_level === "CLAUSE" && (
+          <ClauseGroups standardNumber={result.standard_number} className="mt-4" />
         )}
         {topReasons.length > 0 && (
           <>

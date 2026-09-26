@@ -19,6 +19,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from app import clause_groups as clause_groups_module
 from app import clauses as clauses_module
 from app import lab_registry
 from app import language as lang
@@ -400,6 +401,65 @@ def clause_out(item) -> ClauseOut:
     return ClauseOut(**clauses_module.view(item))
 
 
+class GroupedClauseOut(BaseModel):
+    clause: ClauseOut
+    heading: str = Field(description="The clause's own heading line, or empty when it has none.")
+    matched: list[str] = Field(description='Why it is in the group: "heading: <word>" / "text: <phrase>".')
+
+
+class ClauseGroupOut(BaseModel):
+    group: str = Field(description='"SAMPLING" | "CRITERIA_FOR_CONFORMITY" | "TEST_METHODS"')
+    title: str
+    clauses: list[GroupedClauseOut]
+    empty_note: str = ""
+
+
+class WithheldClauseOut(BaseModel):
+    clause: str
+    reason: str
+
+
+class ClauseGroupsOut(BaseModel):
+    """Phase 10: a standard's sampling, conformity and test-method clauses, QUOTED.
+
+    status: CLAUSE_TEXT (grouped clauses follow) | IDENTITY_ONLY (MetrIQ holds the
+    standard's identity, not its text — no prose is ever substituted) |
+    UNKNOWN_STANDARD (not a standard number in the knowledge base, exactly as written).
+    """
+
+    standard_number: str
+    status: str
+    language: str
+    message: str
+    completeness: str = ""
+    withheld: int | None = Field(default=None, description="Clauses Phase 7 withheld for OCR quality; null when unknown.")
+    withheld_clauses: list[WithheldClauseOut] = Field(default_factory=list)
+    clause_count: int = 0
+    groups: list[ClauseGroupOut] = Field(default_factory=list)
+    ocr_label: str = clauses_module.OCR_LABEL
+
+
+def clause_groups_out(standard_number: str, language: str = lang.EN) -> ClauseGroupsOut:
+    language = language if language in lang.SUPPORTED else lang.EN
+    result = clause_groups_module.groups_for(standard_number, language)
+    text = lang.clause_groups(language)
+    groups = [
+        ClauseGroupOut(
+            group=group, title=text["titles"][group],
+            clauses=[GroupedClauseOut(clause=clause_out(c.item), heading=c.heading, matched=c.matched)
+                     for c in result.groups[group]],
+            empty_note="" if result.groups[group] else text["empty_group"],
+        )
+        for group in result.groups
+    ]
+    return ClauseGroupsOut(
+        standard_number=standard_number, status=result.status, language=language,
+        message=result.message, completeness=result.completeness, withheld=result.withheld,
+        withheld_clauses=[WithheldClauseOut(clause=c, reason=r) for c, r in result.withheld_clauses],
+        clause_count=result.clause_count, groups=groups,
+    )
+
+
 class WhyOut(BaseModel):
     """Deterministic 'Why this result?' explanation (Phase 9).
 
@@ -703,6 +763,25 @@ def _result_to_source(
 # ---------------------------------------------------------------------
 # Search routes
 # ---------------------------------------------------------------------
+
+@router.get(
+    "/standard-clauses",
+    response_model=ClauseGroupsOut,
+)
+def standard_clauses_get(
+    standard_number: Annotated[str, Query(max_length=200, description="Exactly as stored, e.g. 'IS 14543:2016'")],
+    language: Annotated[str, Query(max_length=8)] = lang.EN,
+) -> ClauseGroupsOut:
+    """Phase 10: sampling / conformity / test-method clauses of one standard, by number.
+
+    Read-only; no retrieval, no model. No existing endpoint serves this: /search and
+    /product-standard rank records against a query and never return clause records
+    (they are excluded from the index), and /ask attaches at most three clauses per
+    standard ranked against a question. This returns every clause of one standard that
+    its own words place in a group — the lookup the Standard Passport (Phase 11) reuses.
+    """
+    return clause_groups_out(standard_number, language)
+
 
 @router.get(
     "/search",

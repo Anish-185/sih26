@@ -613,6 +613,72 @@ def listing(language: str) -> dict:
     return LISTING.get(language, LISTING[EN])
 
 
+# Phase 10 — sampling / conformity / test-method clause groups. The eighth translated
+# string set. MetrIQ describing what it holds of a standard's text; the clauses
+# themselves are quoted in their stored English, never translated or summarised.
+CLAUSE_GROUPS = {
+    EN: {
+        "titles": {"SAMPLING": "Sampling", "CRITERIA_FOR_CONFORMITY": "Criteria for conformity",
+                   "TEST_METHODS": "Test methods"},
+        "clause_text": ("These are clauses of the standard's own text, quoted as OCR read them and "
+                        "grouped by the words in each clause's heading or text. MetrIQ does not "
+                        "summarise them and does not compute a sampling frequency or an acceptance "
+                        "number; read the clause, and check any value against the named PDF page."),
+        "incomplete_count": ("The groups show only the clauses MetrIQ could read reliably. {count} "
+                             "clause(s) of this standard were withheld because the OCR text was not "
+                             "reliable, so a group may be missing clauses."),
+        "incomplete_unknown": ("The groups show only the clauses MetrIQ could read reliably, and "
+                               "MetrIQ has no count of the clauses it withheld, so the groups may be "
+                               "incomplete."),
+        "identity_only": ("MetrIQ holds this standard's identity — its number, title and where BIS "
+                          "lists it — but not its text, so it cannot show its sampling, conformity "
+                          "or test-method clauses. The standard itself is sold by BIS."),
+        "unknown": "This is not a standard number in MetrIQ's knowledge base, exactly as written.",
+        "empty_group": "No clause MetrIQ holds for this standard matched this group's rule.",
+    },
+    HI: {
+        "titles": {"SAMPLING": "नमूना लेना (Sampling)", "CRITERIA_FOR_CONFORMITY": "अनुरूपता के मानदंड",
+                   "TEST_METHODS": "परीक्षण विधियाँ"},
+        "clause_text": ("ये मानक के अपने पाठ के खंड हैं, जैसे OCR ने पढ़े वैसे ही उद्धृत, और प्रत्येक खंड के "
+                        "शीर्षक या पाठ के शब्दों के आधार पर समूहित। MetrIQ इनका सारांश नहीं बनाता और न ही "
+                        "नमूना-आवृत्ति या स्वीकृति संख्या की गणना करता है; खंड पढ़ें, और किसी भी मान को "
+                        "बताए गए PDF पृष्ठ से मिलाएँ।"),
+        "incomplete_count": ("समूहों में केवल वे खंड हैं जिन्हें MetrIQ विश्वसनीय रूप से पढ़ सका। इस मानक के "
+                             "{count} खंड रोके गए क्योंकि उनका OCR पाठ विश्वसनीय नहीं था, इसलिए किसी समूह में "
+                             "खंड छूटे हो सकते हैं।"),
+        "incomplete_unknown": ("समूहों में केवल वे खंड हैं जिन्हें MetrIQ विश्वसनीय रूप से पढ़ सका, और MetrIQ के "
+                               "पास रोके गए खंडों की गिनती नहीं है, इसलिए समूह अधूरे हो सकते हैं।"),
+        "identity_only": ("MetrIQ के पास इस मानक की पहचान है — इसकी संख्या, शीर्षक और BIS इसे कहाँ सूचीबद्ध "
+                          "करता है — पर इसका पाठ नहीं, इसलिए वह इसके नमूना, अनुरूपता या परीक्षण-विधि खंड "
+                          "नहीं दिखा सकता। मानक स्वयं BIS द्वारा बेचा जाता है।"),
+        "unknown": "यह MetrIQ के ज्ञान-आधार में, ठीक इसी रूप में, कोई मानक संख्या नहीं है।",
+        "empty_group": "इस मानक के लिए MetrIQ के पास कोई ऐसा खंड नहीं जो इस समूह के नियम से मेल खाए।",
+    },
+    TE: {
+        "titles": {"SAMPLING": "నమూనా సేకరణ (Sampling)", "CRITERIA_FOR_CONFORMITY": "అనుగుణత ప్రమాణాలు",
+                   "TEST_METHODS": "పరీక్షా పద్ధతులు"},
+        "clause_text": ("ఇవి ప్రమాణం సొంత పాఠంలోని క్లాజ్‌లు, OCR చదివినట్లే ఉటంకించబడ్డాయి, ప్రతి క్లాజ్ "
+                        "శీర్షిక లేదా పాఠంలోని పదాల ఆధారంగా సమూహపరచబడ్డాయి. MetrIQ వీటిని సంగ్రహించదు, "
+                        "నమూనా తరచుదనం లేదా అంగీకార సంఖ్యను లెక్కించదు; క్లాజ్‌ను చదవండి, ఏ విలువనైనా పేర్కొన్న "
+                        "PDF పేజీతో సరిచూడండి."),
+        "incomplete_count": ("MetrIQ విశ్వసనీయంగా చదవగలిగిన క్లాజ్‌లు మాత్రమే సమూహాల్లో ఉన్నాయి. OCR పాఠం "
+                             "విశ్వసనీయం కానందున ఈ ప్రమాణంలోని {count} క్లాజ్‌లు నిలిపివేయబడ్డాయి, కాబట్టి ఏదైనా "
+                             "సమూహంలో క్లాజ్‌లు లేకపోవచ్చు."),
+        "incomplete_unknown": ("MetrIQ విశ్వసనీయంగా చదవగలిగిన క్లాజ్‌లు మాత్రమే సమూహాల్లో ఉన్నాయి, నిలిపివేసిన "
+                               "క్లాజ్‌ల సంఖ్య MetrIQ వద్ద లేదు, కాబట్టి సమూహాలు అసంపూర్ణంగా ఉండవచ్చు."),
+        "identity_only": ("ఈ ప్రమాణం గుర్తింపు — దాని సంఖ్య, శీర్షిక, BIS దానిని ఎక్కడ జాబితా చేసిందో — MetrIQ "
+                          "వద్ద ఉంది, కానీ దాని పాఠం లేదు, కాబట్టి దాని నమూనా, అనుగుణత లేదా పరీక్షా-పద్ధతి "
+                          "క్లాజ్‌లను చూపించలేదు. ప్రమాణాన్ని BIS విక్రయిస్తుంది."),
+        "unknown": "ఇది, సరిగ్గా ఇలాగే, MetrIQ జ్ఞాన-ఆధారంలో ఉన్న ప్రమాణ సంఖ్య కాదు.",
+        "empty_group": "ఈ సమూహ నియమానికి సరిపోయే క్లాజ్ ఏదీ ఈ ప్రమాణానికి MetrIQ వద్ద లేదు.",
+    },
+}
+
+
+def clause_groups(language: str) -> dict:
+    return CLAUSE_GROUPS.get(language, CLAUSE_GROUPS[EN])
+
+
 def boundary(language: str) -> dict:
     """MetrIQ's own abstention sentences in the requested language."""
     return BOUNDARY.get(language, BOUNDARY[EN])

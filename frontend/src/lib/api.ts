@@ -134,6 +134,38 @@ export interface WhyThisResult {
 }
 
 /** Phase 8: one clause, OCR text from the Public.Resource.Org / Internet Archive mirror. */
+/**
+ * Phase 10 — a standard's clauses grouped by their OWN words into sampling,
+ * criteria for conformity and test methods. Quoted, never summarised; every clause
+ * carries its stored reference and the OCR label. IDENTITY_ONLY means MetrIQ holds
+ * the standard's identity but not its text — no prose is substituted.
+ */
+export interface GroupedClause {
+  clause: ClauseEvidence;
+  heading: string;
+  matched: string[];
+}
+
+export interface ClauseGroup {
+  group: "SAMPLING" | "CRITERIA_FOR_CONFORMITY" | "TEST_METHODS";
+  title: string;
+  clauses: GroupedClause[];
+  empty_note: string;
+}
+
+export interface ClauseGroups {
+  standard_number: string;
+  status: "CLAUSE_TEXT" | "IDENTITY_ONLY" | "UNKNOWN_STANDARD";
+  language: AnswerLanguage;
+  message: string;
+  completeness: string;
+  withheld: number | null;
+  withheld_clauses: { clause: string; reason: string }[];
+  clause_count: number;
+  groups: ClauseGroup[];
+  ocr_label: string;
+}
+
 export interface ClauseEvidence {
   id: string;
   standard_number: string;
@@ -1213,6 +1245,12 @@ function packageForm(
 
 export const api = {
   health: () => request<Health>("/health"),
+
+  /** Phase 10 — a standard's sampling / conformity / test-method clauses, by number as stored. */
+  standardClauses: (standardNumber: string, language: AnswerLanguage = "en") =>
+    request<ClauseGroups>(
+      `/standard-clauses?standard_number=${encodeURIComponent(standardNumber)}&language=${language}`,
+    ),
 
   productStandard: (product: string, limit = 6, language: LanguageChoice = "auto") =>
     request<ProductStandardResponse>("/product-standard", {
