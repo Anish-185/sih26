@@ -324,7 +324,7 @@ Only implement the current milestone. Do not start a new phase without being ask
 
 - **Phase UI-1** — `docs/history/phase-ui-1.md`: `/chat` is the one place to ask (`/ask` redirects;
   Hallmarking keeps `AskPanel`); Phase 6 context round-trips in page state. UI-1.1: Passport prints to PDF;
-  OPEN: LED "is it mandatory?" still hits `GUARD:UNTIED_QCO_CLAIM` (general FAQ QCO sentence) — see file.
+  OPEN: LED "is it mandatory?" — fixed 3/3 in fdc106d; rule-12 rewording (cba79d1) awaits live check after 05:30 IST reset.
 
 ## Open notes for later phases and known weaknesses (verbatim)
 
