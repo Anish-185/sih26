@@ -25,6 +25,7 @@ Every model call is stubbed. Plain Python, no framework. Run:
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -241,6 +242,47 @@ def test_qco_must_be_tied_to_the_product() -> None:
           "only by using that source's supplied text" in " ".join(SYSTEM_PROMPT.split()))
 
 
+def test_cro_is_not_a_qco() -> None:
+    print("\n[9] Phase UI-1.1: LED lamps' Compulsory Registration Order is never a QCO")
+    from app.rag import SYSTEM_PROMPT
+
+    ctx = {"product": "LED bulb"}
+    cro = _Recorder("BIS's Scheme II listing names the Electronics & Information Technology Goods "
+                    "(Requirements for Compulsory Registration) Order, 2012 (S.O. 2905(E), dated 07 "
+                    "November 2014) for Self-Ballasted LED Lamps for General Lighting Services, against "
+                    "IS 16102 (Part 1). The listing does not state that the order is in force.")
+    r = ask("is it mandatory?", ctx, llm=cro)
+    check("a CRO-naming answer, attributed to BIS's listing, passes",
+          r["explained"] is True and r["fallback_reason"] == "MODEL", r["fallback_reason"])
+    as_qco = _Recorder("BIS's Scheme II listing names the Electronics & Information Technology Goods "
+                       "(Requirements for Compulsory Registration) Order, 2012, which is a Quality Control "
+                       "Order for LED lamps.")
+    r = ask("is it mandatory?", ctx, llm=as_qco)
+    check("an answer calling LED lamps' order a QCO is still withheld",
+          r["explained"] is False and r["fallback_reason"] == "GUARD:UNTIED_QCO_CLAIM", r["fallback_reason"])
+    r = ask("is it mandatory?", ctx, llm=_Recorder("LED lamps' listed order is a QCO."))
+    check("... and so is the abbreviation", r["fallback_reason"] == "GUARD:UNTIED_QCO_CLAIM", r["fallback_reason"])
+    rec = _Recorder("LED lamps are listed under the Compulsory Registration Scheme.")
+    r = ask("is it mandatory?", ctx, llm=rec)
+    evidence = rec.prompts[-1].split("BIS EVIDENCE:", 1)[1]
+    faq = [x for x in r["sources"] if "quality control order" in (x["title"] or "").lower()
+           or "mandatory" in (x["title"] or "").lower()]
+    check("the general FAQ record is still retrieved and returned as a source", bool(faq), str(r["sources"])[:200])
+    check("... but the model is not shown a record mentioning QCOs untied to LED bulb",
+          not re.search(r"quality control order|\bqco", evidence, re.IGNORECASE))
+    check("... while the LED listing order (the CRO) still is",
+          "Requirements for Compulsory Registration" in evidence)
+    rec = _Recorder("A QCO makes a standard compulsory.")
+    ask("What is a Quality Control Order?", llm=rec)
+    check("with no product in play the QCO records reach the model as before",
+          re.search(r"quality control order", rec.prompts[-1], re.IGNORECASE) is not None)
+    prompt = " ".join(SYSTEM_PROMPT.split())
+    check("the prompt forbids raising QCOs for a product no record ties to one",
+          "do not mention Quality Control Orders (QCOs) at all" in prompt)
+    check("the prompt says a Compulsory Registration Order is not a QCO",
+          "A Compulsory Registration Order is not a Quality Control Order; never call it one." in prompt)
+
+
 def test_word_lists() -> None:
     print("\n[7] the word lists")
     check("FILLER is unchanged in role: no native-script word was added to it",
@@ -259,6 +301,7 @@ def main() -> int:
     test_several_standards()
     test_fallback_and_guard()
     test_qco_must_be_tied_to_the_product()
+    test_cro_is_not_a_qco()
     test_word_lists()
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0

@@ -74,6 +74,15 @@ Rules:
    to the source it comes from ("BIS's table of upcoming QCOs lists …",
    "BIS's Scheme I listing names …"). Never state it as a bare fact about the
    product ("there is a QCO for …", "X is covered by …").
+12. When the question is about a specific product and no supplied QUALITY
+   CONTROL ORDER RECORD for it, and no supplied LISTING ORDER RECORD whose cell
+   names a Quality Control Order, is present, do not mention Quality Control
+   Orders (QCOs) at all: not the general FAQ statement about them, and not to
+   say whether one applies. If a supplied LISTING ORDER RECORD names a
+   Compulsory Registration Order, answer from it: name that order as printed
+   and attribute it to BIS's listing ("BIS's Scheme II listing names the …
+   (Requirements for Compulsory Registration) Order …"). A Compulsory
+   Registration Order is not a Quality Control Order; never call it one.
 """
 
 
@@ -183,18 +192,27 @@ def untied_qco_claim(answer: str, results: list[RetrievalResult],
     listing cell itself names a Quality Control Order. LED lamps' cell names the
     Compulsory Registration Order, which is not a QCO (Phase 10 regression).
     """
-    if context is None or not _QCO.search(answer) or qco_rows:
+    if context is None or not _QCO.search(answer):
         return False
+    return not qco_tied(results, context, qco_rows, listing_orders)
+
+
+def qco_tied(results: list[RetrievalResult], context: "ConversationContext",
+             qco_rows: list[KnowledgeItem] | None = None,
+             listing_orders: list | None = None) -> bool:
+    """Whether the supplied evidence ties a QCO to this product (see above)."""
+    if qco_rows:
+        return True
     if any(group.names_qco for _, out in listing_orders or [] for group in out.groups):
-        return False
+        return True
     names = [context.product.lower(), *(n.lower() for n in context.standard_numbers)]
     for result in results:
         item = result.item
         text = " ".join([item.title, item.content, " ".join(item.keywords),
                          item.standard_number or ""]).lower()
         if _QCO.search(text) and any(name in text for name in names):
-            return False
-    return True
+            return True
+    return False
 
 
 def _build_context(results: list[RetrievalResult]) -> str:
@@ -465,6 +483,21 @@ class BISQuestionAnswerer:
         context = (_build_context(outcome.results) + _clause_context(attached)
                    + _qco_context(qco_rows) + _listing_context(listings))
 
+        # Phase UI-1.1: with a product in play and NO supplied record tying a QCO to
+        # it, a record that mentions QCOs only in general (the "when is certification
+        # mandatory?" FAQ) is evidence the answer may not use for this product (rule
+        # 8, rule 12) — yet the model repeated its QCO sentence beside LED bulbs in
+        # most live runs, and saying "do not mention QCOs" in the request made it
+        # worse. So the MODEL is not shown those records here. Retrieval, the
+        # sources returned, the evidence-only fallback and every guard (which still
+        # read the full ``context`` above) are unchanged.
+        model_context = context
+        if resolved is not None and not qco_tied(outcome.results, resolved, qco_rows, listings):
+            kept = [r for r in outcome.results
+                    if not _QCO.search(f"{r.item.title} {r.item.content}")]
+            model_context = (_build_context(kept) + _clause_context(attached)
+                             + _qco_context(qco_rows) + _listing_context(listings))
+
         # The model sees the question exactly as the user wrote it — the
         # rewritten form is for retrieval only.
         user_prompt = f"""Answer the user's question using ONLY the BIS evidence
@@ -474,7 +507,7 @@ USER QUESTION:
 {question}
 {f"(The question refers to {inherited}, from the user's previous question.){chr(10)}" if inherited else ""}
 BIS EVIDENCE:
-{context}
+{model_context}
 
 Give a concise answer grounded in the supplied evidence.
 """

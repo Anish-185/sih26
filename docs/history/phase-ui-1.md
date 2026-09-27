@@ -32,7 +32,7 @@ Headless-Chrome print of IS 14543:2016 (68 pages: all 11 sections, 125 requireme
 OCR labels, 153 archive URLs) and IS 16102 (Part 1) (18 pages: every identity-only sentence, the
 Notification cell verbatim, 25 laboratories) checked by reading the PDF text.
 
-**NOT FIXED — the LED "is it mandatory?" fallback (case (c), awaiting a decision).** Three live runs of
+**The LED "is it mandatory?" fallback — diagnosed as case (c); CLOSED, see the resolution below.** Three live runs of
 the LED conversation: Q2 is `GUARD:UNTIED_QCO_CLAIM` every time. It is not the CRO being read as a QCO
 (the guard reads only the answer, and "(Requirements for Compulsory Registration) Order" does not match
 `_QCO`), and the model does not call the LED order a QCO: it repeats the general BIS FAQ sentence
@@ -41,3 +41,22 @@ evidence does not confirm a QCO for them. The guard is doing its Phase 6.1 job. 
 prompt rule — with a product in play and no supplied record tying a QCO to it, do not mention QCOs; if
 the listing names a Compulsory Registration Order, answer from that, attributed to BIS's listing — guard
 unchanged.
+
+**Resolution — LED fallback closed.** Three changes in `app/rag.py`, guard untouched:
+(1) SYSTEM_PROMPT rule 12 — with a product in play and no supplied QCO record or QCO-naming listing
+order for it, do not mention Quality Control Orders at all; if a listing order names a Compulsory
+Registration Order, name it as printed and attribute it to BIS's listing; a CRO is never a QCO.
+(2) `qco_tied()` factored out of `untied_qco_claim` (same rule, one place). (3) When a product is in play
+and `qco_tied` is false, the records that mention QCOs only in general (the "when is certification
+mandatory?" FAQ) are left out of the evidence shown to the MODEL — retrieval, the returned sources, the
+evidence-only fallback and every guard (which still read the full context) are unchanged. Measured live:
+rule 12 alone gave MODEL on 2 of 3 runs; adding a per-request "do not mention QCOs" line made it worse
+(1 of 3 — the model restated the instruction as a QCO sentence), so that line was dropped; with the
+context filter, 3 of 3 runs returned MODEL, each naming the Electronics & Information Technology Goods
+(Requirements for Compulsory Registration) Order, 2012, attributed to BIS's Scheme II listing, with no
+QCO mention. Three further runs hit OpenRouter's free per-minute limit (RATE_LIMITED — not a guard
+result); no raw answer since the change mentioned a QCO. Tests: `test_conversation_context.py` gains
+[9] — a CRO answer passes, calling LED lamps' order a QCO (written out or "QCO") is still withheld as
+`GUARD:UNTIED_QCO_CLAIM`, the FAQ record is still a returned source but not in the model's evidence, the
+CRO listing order still is, and with no product in play QCO records reach the model as before; every
+Phase 6.1 case unchanged. pytest 395 passed, eval identical to the baseline.
