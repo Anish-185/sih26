@@ -322,6 +322,9 @@ Only implement the current milestone. Do not start a new phase without being ask
   standard (`/standard/:id`, read-only, no model, no retrieval). A number without a year lists every
   held edition and never picks one.
 
+- **Phase UI-1** — `docs/history/phase-ui-1.md`: `/chat` is the one place to ask (`/ask` redirects;
+  Hallmarking keeps `AskPanel`). No backend change; the Phase 6 context round-trips in page state.
+
 ## Open notes for later phases and known weaknesses (verbatim)
 
 From Milestone 18 (`milestones-16-22.md`):

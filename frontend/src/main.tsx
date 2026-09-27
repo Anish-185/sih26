@@ -1,13 +1,13 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { RouterProvider, createBrowserRouter } from "react-router-dom";
+import { Navigate, RouterProvider, createBrowserRouter } from "react-router-dom";
 import "./index.css";
 import { AppLayout } from "@/components/layout";
 import { DashboardView } from "@/features/DashboardView";
 import { InspectionView } from "@/features/inspection/InspectionView";
 import { StandardsView } from "@/features/StandardsView";
 import { StandardLookupView, StandardPassportView } from "@/features/StandardPassportView";
-import { AskView } from "@/features/AskView";
+import { ChatView } from "@/features/ChatView";
 import { CertificationView } from "@/features/CertificationView";
 import { LaboratoriesView } from "@/features/LaboratoriesView";
 import { HallmarkingView } from "@/features/HallmarkingView";
@@ -21,7 +21,9 @@ const router = createBrowserRouter([
     element: <AppLayout />,
     children: [
       { index: true, element: <DashboardView /> },
-      { path: "ask", element: <AskView /> },
+      { path: "chat", element: <ChatView /> },
+      // Phase UI-1: one place to ask questions — the old Ask page now lives at /chat.
+      { path: "ask", element: <Navigate to="/chat" replace /> },
       { path: "inspection", element: <InspectionView /> },
       { path: "standards", element: <StandardsView /> },
       { path: "standard", element: <StandardLookupView /> },

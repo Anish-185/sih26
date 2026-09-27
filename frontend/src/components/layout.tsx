@@ -17,7 +17,7 @@ import { BrailleField } from "@/components/decor";
    The camera is one way into that story, not a seventh peer link, so it stays a
    button. */
 const NAV = [
-  { to: "/ask", label: "Ask" },
+  { to: "/chat", label: "Ask" },
   { to: "/standards", label: "Standards" },
   { to: "/inspection", label: "Inspection" },
   { to: "/certification", label: "Certification" },

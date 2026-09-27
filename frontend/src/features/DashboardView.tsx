@@ -57,7 +57,7 @@ function Hero() {
           className="ink-in mt-9 flex flex-wrap items-stretch gap-3"
           style={{ animationDelay: "320ms" }}
         >
-          <LinkButton to="/ask" size="lg">
+          <LinkButton to="/chat" size="lg">
             Ask a question
           </LinkButton>
           <LinkButton to="/standards" variant="secondary" size="lg">
@@ -338,7 +338,7 @@ function FinalCta() {
           fastest way into the standards that govern it.
         </p>
         <div className="mt-9 flex flex-wrap gap-3">
-          <LinkButton to="/ask" size="lg">
+          <LinkButton to="/chat" size="lg">
             Ask about BIS
           </LinkButton>
           <LinkButton to="/standards" variant="secondary" size="lg">

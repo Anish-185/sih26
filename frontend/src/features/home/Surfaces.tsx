@@ -20,7 +20,7 @@ interface Surface {
 
 const SURFACES: Surface[] = [
   {
-    to: "/ask",
+    to: "/chat",
     name: "Ask BIS",
     motif: "dome",
     lead: "Ask about Indian Standards, certification, testing or hallmarking in plain English, Hindi or Telugu. The answer is written from retrieved BIS records and nothing else.",
