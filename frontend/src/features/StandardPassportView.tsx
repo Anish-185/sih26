@@ -5,7 +5,7 @@ import { api, type StandardPassport } from "@/lib/api";
 import { useAsyncTask } from "@/lib/hooks";
 import { passportPath, standardTitle } from "@/lib/format";
 import { cn } from "@/lib/cn";
-import { ArrowLink, Callout, DefinitionRow, EmptyState, InlineLoading, Mono, PageHeader } from "@/components/ui";
+import { ArrowLink, Button, Callout, DefinitionRow, EmptyState, InlineLoading, Mono, PageHeader } from "@/components/ui";
 import { ClauseList } from "@/components/ClauseText";
 import { ClauseGroups } from "@/components/ClauseGroups";
 import { EditionCurrency } from "@/components/EditionCurrency";
@@ -80,8 +80,8 @@ export function StandardLookupView() {
 /** One numbered Passport section. An empty section still renders, with its sentence. */
 function Section({ n, title, children }: { n: number; title: string; children: ReactNode }) {
   return (
-    <section className="grid gap-4 border-t border-line pt-6 md:grid-cols-[180px_1fr]">
-      <div>
+    <section className="grid gap-4 border-t border-line pt-6 md:grid-cols-[180px_1fr] print:gap-2">
+      <div className="break-after-avoid break-inside-avoid">
         <Mono muted className="text-[11px] tabular-nums">
           {String(n).padStart(2, "0")}
         </Mono>
@@ -126,8 +126,35 @@ function Passport({ p }: { p: StandardPassport }) {
     runContext("", number).catch(() => {});
   }, [number, runCert, runLabs, runContext]);
 
+  // Printing (the Download PDF button, or the browser's own Print): every collapsed
+  // <details> is opened for the printout and closed again afterwards, so the PDF
+  // carries every section — Requirements, the Notification cells, the graph's limits.
+  useEffect(() => {
+    let opened: HTMLDetailsElement[] = [];
+    const before = () => {
+      opened = Array.from(document.querySelectorAll<HTMLDetailsElement>(".passport details:not([open])"));
+      opened.forEach((d) => (d.open = true));
+    };
+    const after = () => {
+      opened.forEach((d) => (d.open = false));
+      opened = [];
+    };
+    window.addEventListener("beforeprint", before);
+    window.addEventListener("afterprint", after);
+    return () => {
+      window.removeEventListener("beforeprint", before);
+      window.removeEventListener("afterprint", after);
+    };
+  }, []);
+  const printed = new Date().toISOString().slice(0, 10);
+
   return (
-    <div className="space-y-10">
+    <div className="passport space-y-10">
+      <div className="flex justify-end print:hidden">
+        <Button type="button" variant="secondary" size="sm" onClick={() => window.print()}>
+          Download PDF
+        </Button>
+      </div>
       <PageHeader
         eyebrow="Standard passport"
         title={<Mono className="text-accent">{number}</Mono>}
@@ -287,12 +314,19 @@ function Passport({ p }: { p: StandardPassport }) {
       </Section>
 
       <Section n={10} title="Evidence graph">
-        {context.error != null && <ErrorNote error={context.error} />}
-        {context.data ? (
-          <EvidenceGraphSection source={{ product_context: context.data }} />
-        ) : (
-          context.loading && <InlineLoading label="Composing the evidence graph" />
-        )}
+        {/* An interactive graph does not survive paper: the printout says where it lives. */}
+        <p className="hidden text-[13px] leading-relaxed text-ink-soft print:block">
+          The evidence graph for {number} is interactive and is available on the live page of this
+          standard passport in MetrIQ.
+        </p>
+        <div className="print:hidden">
+          {context.error != null && <ErrorNote error={context.error} />}
+          {context.data ? (
+            <EvidenceGraphSection source={{ product_context: context.data }} />
+          ) : (
+            context.loading && <InlineLoading label="Composing the evidence graph" />
+          )}
+        </div>
       </Section>
 
       <Section n={11} title="Sources">
@@ -303,7 +337,7 @@ function Passport({ p }: { p: StandardPassport }) {
                 href={s.url}
                 target="_blank"
                 rel="noreferrer"
-                className="group inline-flex items-start gap-1.5 text-[12px] text-ink-soft hover:text-ink"
+                className="no-print-url group inline-flex items-start gap-1.5 text-[12px] text-ink-soft hover:text-ink"
               >
                 <ArrowUpRight className="mt-0.5 h-3 w-3 shrink-0 text-accent" />
                 <span>
@@ -318,11 +352,16 @@ function Passport({ p }: { p: StandardPassport }) {
         </ul>
         <p className="text-[11px] text-ink-faint">
           Only the sources stored with the evidence above.{" "}
-          <Link to="/standards" className="text-accent hover:underline">
+          <Link to="/standards" className="text-accent hover:underline print:hidden">
             Back to standard search
           </Link>
         </p>
       </Section>
+
+      <p className="hidden border-t border-line pt-3 text-[11px] text-ink-faint print:block">
+        MetrIQ standard passport · {number} · printed {printed} · composed from MetrIQ's stored
+        evidence; see each section for its source and its limits.
+      </p>
     </div>
   );
 }

@@ -323,7 +323,8 @@ Only implement the current milestone. Do not start a new phase without being ask
   held edition and never picks one.
 
 - **Phase UI-1** — `docs/history/phase-ui-1.md`: `/chat` is the one place to ask (`/ask` redirects;
-  Hallmarking keeps `AskPanel`). No backend change; the Phase 6 context round-trips in page state.
+  Hallmarking keeps `AskPanel`); Phase 6 context round-trips in page state. UI-1.1: Passport prints to PDF;
+  OPEN: LED "is it mandatory?" still hits `GUARD:UNTIED_QCO_CLAIM` (general FAQ QCO sentence) — see file.
 
 ## Open notes for later phases and known weaknesses (verbatim)
 

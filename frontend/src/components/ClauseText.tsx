@@ -12,7 +12,7 @@ import { Mono } from "@/components/ui";
  */
 export function ClauseText({ clause }: { clause: ClauseEvidence }) {
   return (
-    <div className="border-l-2 border-line-strong pl-4">
+    <div className="break-inside-avoid border-l-2 border-line-strong pl-4">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <Mono className="text-[12px] font-medium">{clause.standard_number}</Mono>
         <Mono muted className="text-[11px]">

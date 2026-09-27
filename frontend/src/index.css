@@ -371,3 +371,38 @@
     stroke-dashoffset: 0;
   }
 }
+
+/* Phase UI-1.1 — the Standard Passport as a printable / savable PDF (window.print).
+   Every <details> is opened by the page's beforeprint handler; this rule is the
+   fallback for browsers that support ::details-content. */
+@media print {
+  @page {
+    margin: 14mm 12mm;
+  }
+  body {
+    background: #fff;
+  }
+  .passport details::details-content {
+    content-visibility: visible;
+    display: block;
+  }
+  .passport button {
+    display: none;
+  }
+  /* External links are sources: print where they point. */
+  .passport a[href^="http"]:not(.no-print-url)::after {
+    content: " (" attr(href) ")";
+    font-size: 10px;
+    word-break: break-all;
+    color: var(--color-ink-faint);
+  }
+  .passport h1,
+  .passport h2,
+  .passport h3,
+  .passport summary {
+    break-after: avoid;
+  }
+  .passport li {
+    break-inside: avoid;
+  }
+}

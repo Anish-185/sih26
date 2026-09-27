@@ -137,7 +137,7 @@ function TopNav() {
   }, [location.pathname]);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-line bg-paper/85 backdrop-blur-md">
+    <header className="sticky top-0 z-40 print:hidden border-b border-line bg-paper/85 backdrop-blur-md">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-accent/30" aria-hidden />
       <div className="mx-auto flex h-[68px] max-w-[1240px] items-center justify-between gap-6 px-5 sm:px-8">
         <div className="flex items-center gap-10">
@@ -199,7 +199,7 @@ function TopNav() {
 
 export function SystemLayerFooter() {
   return (
-    <footer className="mt-24 bg-accent text-white">
+    <footer className="mt-24 bg-accent text-white print:hidden">
       <div className="relative overflow-hidden">
         {/* engineered grid + measurement ticks */}
         <div className="metriq-grid absolute inset-0" aria-hidden />
