@@ -79,9 +79,13 @@ Rules:
    names a Quality Control Order, is present, do not mention Quality Control
    Orders (QCOs) at all: not the general FAQ statement about them, and not to
    say whether one applies. If a supplied LISTING ORDER RECORD names a
-   Compulsory Registration Order, answer from it: name that order as printed
-   and attribute it to BIS's listing ("BIS's Scheme II listing names the …
-   (Requirements for Compulsory Registration) Order …"). A Compulsory
+   Compulsory Registration Order, answer from it. Lead with the listing fact,
+   attributed to BIS: "BIS lists <the product, as the record words it> under
+   its Products under Compulsory Certification, Scheme <I or II, as supplied>
+   (<the scheme's name, as supplied>)". Then name that order as printed, with
+   its S.O. number and date if supplied. Add at most one short clause of caveat
+   (for example "as BIS's listing states"); do not add further hedging. Never
+   address the user's own item ("your product", "your LED bulb"). A Compulsory
    Registration Order is not a Quality Control Order; never call it one.
 """
 

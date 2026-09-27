@@ -279,6 +279,11 @@ def test_cro_is_not_a_qco() -> None:
     prompt = " ".join(SYSTEM_PROMPT.split())
     check("the prompt forbids raising QCOs for a product no record ties to one",
           "do not mention Quality Control Orders (QCOs) at all" in prompt)
+    check("the prompt leads a CRO answer with BIS's listing fact",
+          "Lead with the listing fact, attributed to BIS" in prompt
+          and "Products under Compulsory Certification" in prompt)
+    check("the prompt allows one short caveat and forbids addressing the user's item",
+          "at most one short clause of caveat" in prompt and '"your product"' in prompt)
     check("the prompt says a Compulsory Registration Order is not a QCO",
           "A Compulsory Registration Order is not a Quality Control Order; never call it one." in prompt)
 
