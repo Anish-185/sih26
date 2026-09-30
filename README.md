@@ -1,21 +1,51 @@
 <div align="center">
 
+<img src="frontend/public/hero-lion.png" alt="" width="120" />
+
 # MetrIQ
 
-### Evidence-Backed Assistant for Indian Standards & BIS Services
+<code>INDIAN STANDARDS · BIS SERVICES · EVIDENCE-BACKED</code>
 
-**Ask about Indian Standards and BIS services in plain English, Hindi or Telugu — or photograph a product and let MetrIQ start from the label. Either way it answers only from verified BIS records, and shows you the official page every answer came from.**
+### Which Indian Standard governs this product?
 
-![Python 3.14](https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.11x-009688?logo=fastapi&logoColor=white)
-![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
-![OCR local](https://img.shields.io/badge/OCR-local%20only%20(ONNX)-111)
-![Grounded explanations](https://img.shields.io/badge/explanations-OpenRouter%20%2B%20LM%20Studio-4c1)
-![tests](https://img.shields.io/badge/tests-304%20passing-4c1)
+Ask in plain English, Hindi or Telugu — or photograph the label.<br/>
+MetrIQ answers **only from verified BIS records**, shows **why** each result matched,<br/>
+and links the **official BIS page** behind every answer.
 
-![MetrIQ home](docs/images/hero.png)
+<br/>
+
+![SIH26107](https://img.shields.io/badge/SIH-26107-2246ef?style=flat-square)
+![Python](https://img.shields.io/badge/Python-3.14-17181b?style=flat-square&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-17181b?style=flat-square&logo=fastapi&logoColor=white)
+![React 19](https://img.shields.io/badge/React-19-17181b?style=flat-square&logo=react&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17181b?style=flat-square&logo=postgresql&logoColor=white)
+![OCR](https://img.shields.io/badge/OCR-local%20·%20ONNX-17181b?style=flat-square)
+![tests](https://img.shields.io/badge/tests-395%20passing-1c7a4b?style=flat-square)
+
+<br/>
+
+<a href="docs/media/metriq-demo.mp4">
+  <img src="docs/media/demo-poster.jpg" alt="Watch the 40-second MetrIQ demo" width="880" />
+</a>
+
+<sub>▶ Click to play the 40-second demo — every scene is the real app doing its job.</sub>
 
 </div>
+
+<br/>
+
+<table>
+<tr>
+<td align="center" width="25%"><h2>505</h2><sub>VERIFIED INDIAN STANDARDS</sub></td>
+<td align="center" width="25%"><h2>98.1%</h2><sub>RIGHT STANDARD IN TOP 5</sub></td>
+<td align="center" width="25%"><h2>0</h2><sub>INVENTED STANDARD NUMBERS</sub></td>
+<td align="center" width="25%"><h2>3</h2><sub>LANGUAGES · EN · हिन्दी · తెలుగు</sub></td>
+</tr>
+</table>
+
+<sub>Recall@5 over 149 queries derived from BIS's own product ↔ standard pairings
+(<code>backend/tests/data/eval_baseline.json</code>). "0 invented" = zero standard numbers outside the
+knowledge base across every adversarial and prompt-injection query.</sub>
 
 ---
 
@@ -24,439 +54,140 @@
 > **Retrieved BIS information is the source of truth — not the language model.**
 
 ```
-PRODUCT → EVIDENCE → OCR / DECLARATIONS / PRODUCT IDENTIFICATION
-        → VERIFIED STANDARD + REQUIREMENT KNOWLEDGE → EVIDENCE GRAPH
-        → OPTIONAL GROUNDED EXPLANATION
+natural language  →  query understanding  →  BIS knowledge retrieval
+                  →  evidence ranking     →  grounded explanation
+                  →  answer + evidence + official source + next steps
 ```
 
-Every result is produced by deterministic code. The evidence graph *shows* how it
-was produced; the grounded explanations *explain* it in words. Neither can change
-it, and MetrIQ produces no automatic legal or compliance verdict of its own —
-where the evidence does not settle a point, it says so and shows what it holds.
-
-MetrIQ never invents an Indian Standard number, a clause, a fee, a test, or a
-compliance outcome. When the evidence is not strong enough, it abstains and shows
-nothing rather than guess. Every screen and every endpoint follows this.
+Every result is produced by deterministic code. A language model only *explains* what
+retrieval already found — it never picks a standard. MetrIQ never invents an Indian
+Standard number, a clause, a fee, a test or a compliance outcome, and it gives **no
+PASS/FAIL verdict anywhere**. When the evidence is not strong enough, it says so and
+abstains.
 
 ---
 
-## Two halves of one system
+## A tour of the app
 
-| | |
-|---|---|
-| **① The inspection pipeline** | An uploaded label image → local OCR → deterministic declaration extraction → product identification → verified Indian Standard candidates from the BIS knowledge base. |
-| **② The BIS knowledge surfaces** | Natural-language Product → Standard discovery, certification guidance, recognised-lab directories, and hallmarking / HUID information — deterministic retrieval, with a local model that only *explains* what retrieval already found. |
+<table>
+<tr>
+<td width="50%" valign="top">
+<sub><code>01 · PRODUCT → STANDARD</code></sub><br/>
+<b>Describe a product, get its Indian Standard</b><br/>
+<sub>"LED bulb" → IS 16102 (Part 1) at HIGH confidence, with the matched words and a plain
+"Why this result?" built from the retrieval signals themselves.</sub><br/><br/>
+<img src="docs/images/standard-search.jpg" alt="Product to Standard search for LED bulb" />
+</td>
+<td width="50%" valign="top">
+<sub><code>02 · HONEST ABSTENTION</code></sub><br/>
+<b>No evidence, no answer</b><br/>
+<sub>"shampoo" is not on BIS's compulsory-certification lists, so MetrIQ says what its data
+covers — and that this does <i>not</i> mean no Indian Standard exists.</sub><br/><br/>
+<img src="docs/images/abstention.jpg" alt="Abstention for shampoo" />
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<sub><code>03 · STANDARD PASSPORT</code></sub><br/>
+<b>One canonical page per standard</b><br/>
+<sub>Identity, edition, currency, legal status, clauses and the certification route —
+each line quoting its BIS source. Prints to PDF.</sub><br/><br/>
+<img src="docs/images/passport.jpg" alt="Standard Passport for IS 16102 (Part 1)" />
+</td>
+<td width="50%" valign="top">
+<sub><code>04 · LABEL INSPECTION</code></sub><br/>
+<b>Photograph the label instead</b><br/>
+<sub>Fully local OCR reads the package; every declared value links back to the exact
+box it came from, with its confidence and extraction method.</sub><br/><br/>
+<img src="docs/images/inspection.jpg" alt="Label inspection with OCR declarations" />
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<sub><code>05 · TESTING LABORATORIES</code></sub><br/>
+<b>Labs BIS itself lists for the standard</b><br/>
+<sub>From a dated snapshot of BIS LIMS. Alphabetical, never ranked; validity is stated
+"at snapshot", never as current accreditation.</sub><br/><br/>
+<img src="docs/images/laboratories.jpg" alt="BIS-recognised laboratory search" />
+</td>
+<td width="50%" valign="top">
+<sub><code>06 · HALLMARKING / HUID</code></sub><br/>
+<b>Observed, never authenticated</b><br/>
+<sub>Reads a potential HUID and purity mark from a photo and points to the BIS Care App
+for real verification. No "verified" state exists in the code.</sub><br/><br/>
+<img src="docs/images/hallmark.jpg" alt="Hallmark evidence" />
+</td>
+</tr>
+</table>
+
+<p align="center">
+<sub><code>07 · ASK IN YOUR LANGUAGE</code></sub><br/>
+<b>Hindi and Telugu in, the same verified evidence out</b><br/>
+<sub>The knowledge base is never translated — standard numbers, schemes and URLs stay exactly as BIS publishes them.</sub><br/><br/>
+<img src="docs/images/chat-hindi.jpg" alt="Asking in Hindi on the chat page" width="880" />
+</p>
 
 ---
 
-## ① The inspection pipeline
+## How it works
 
 ```mermaid
 flowchart LR
-    IMG[Package image] --> OCR[Local OCR<br/>PP-OCRv3 / ONNX]
-    OCR --> DECL[Declaration extraction<br/>deterministic regex + keywords]
-    DECL --> CLS[Product identification<br/>BIS knowledge base + retrieval engine]
-    CLS --> STD[Standard candidates<br/>verified records + Why this result]
-    STD --> LM[Requirement knowledge<br/>verified BIS / Legal Metrology text, never a check]
-    LM --> RPT[Evidence graph & report]
+    Q["Question<br/>EN · HI · TE"] --> L[Language layer<br/>deterministic]
+    P["Label photo"] --> O[Local OCR<br/>PP-OCRv3 · ONNX]
+    O --> D[Declarations<br/>regex + keywords]
+    L --> R[Retrieval engine<br/>weighted lexical · MatchReasons]
+    D --> R
+    R --> S[Verified BIS records<br/>505 standards · QCOs · certification · labs]
+    S --> W[Why this result?<br/>no model]
+    S --> E[Grounded explanation<br/>OpenRouter · guarded]
+    W --> A[Answer + evidence<br/>+ official source]
+    E --> A
 
-    style RPT stroke-dasharray: 4 4
+    style S fill:#eceffe,stroke:#2246ef,color:#17181b
+    style E stroke-dasharray: 4 4
 ```
 
-Both endpoints take one package: a single photo (`image`, optional `side`) or several
-photos of the same package (`images` with `sides` = FRONT / BACK / LEFT / RIGHT / TOP /
-BOTTOM / UNKNOWN). Each photo is OCR'd separately and every value keeps the photo and
-OCR region it came from; a photo that cannot be read is reported as failed, and sides
-that were not photographed are reported as not uploaded — never as missing.
-`POST /inspection/ocr` returns the OCR regions and declarations only.
-`completeness` lists each declaration as detected, uncertain or not detected in the uploaded photos
-(never "legally missing"), and names the verified requirement that covers it when one exists — MetrIQ
-produces no automatic compliance verdict, so this is reported as **knowledge**, never a check result.
-`POST /inspection/analyze` (multipart, field `image`) runs OCR → declarations → product identification
-→ verified standard retrieval → requirement knowledge → completeness. A standard match is retrieval
-evidence, not a compliance or certification decision. Requirement text is quoted word for word from
-verified knowledge records (`data/inspection_requirements.json`); MetrIQ never runs a rule over it.
-
-### Resolution — could MetrIQ establish everything from the photos?
-
-```
-image → OCR → declarations → product → BIS + Legal Metrology evidence
-      → could MetrIQ establish every part of the evidence chain?
-            yes → nothing further is outstanding
-            no  → MetrIQ states every point it could not establish, and why
-```
-
-`app/escalation.py` decides this deterministically from the finished analysis — no model, and it
-changes no result and produces no legal or compliance verdict. Every inspection that could not be
-fully established lists why, each reason with its evidence system and the OCR regions behind it:
-pipeline error, unreadable photos, low image quality, product not identified, several plausible
-products or standards, product not confirmed, no verified BIS standard, hallmark / HUID information
-(MetrIQ never verifies a HUID), conflicting declarations (including across sides), and uncertain OCR
-evidence. With today's verified data most real inspections leave at least one point unestablished —
-and that is shown, not hidden. MetrIQ never converts an unestablished point into a verdict.
-
-### Hallmark / HUID evidence — observed, never authenticated
-
-The Hallmarking page can inspect a hallmark photo (a **hallmark inspection**): OCR → hallmark evidence
-(`app/hallmark.py`) → resolution → report. MetrIQ extracts a *potential* HUID (a labelled
-six-character alphanumeric code), the purity / fineness mark and any "BIS" text, each linked to its OCR region,
-and runs only checks the verified BIS Hallmarking FAQ supports: a HUID is readable (observed, not verified),
-the purity mark is a permitted grade (IS 1417 gold / IS 2112 silver), the BIS logo (not supported — a graphic),
-and HUID authenticity (not supported — external authoritative verification required, e.g. BIS Care App).
-`verification_status` is `NOT_VERIFIED` or `NOT_DETECTED`; there is no VERIFIED state, no check can FAIL, and
-the hallmark result is always REVIEW, and the article is reported as needing external authoritative
-verification. Low-confidence, multiple or
-unlabelled HUID candidates are never selected. Printed text such as "HUID VERIFIED" is recorded as an
-untrusted claim and changes nothing. Legal Metrology package-label rules are not applied to a hallmark
-inspection. An optional HUID reference field only compares text with what OCR read.
-
-### Saved inspections and history
-
-**Save inspection** sends the same photos to `POST /inspections`: the backend runs
-its own analysis and stores it in PostgreSQL with the photos, so a saved result can never
-come from the browser. A saved record is immutable — MetrIQ records what its deterministic
-pipeline established, and nothing else can overwrite it:
-
-| | Written by | Changes later? |
+| Layer | What it does | Model? |
 |---|---|---|
-| **Evidence** — product identification, standards, requirement knowledge, declarations, OCR regions, full analysis | the deterministic pipeline, once | never — a database trigger rejects any update |
-| **Resolution** — `escalation_required`, `escalation_reasons` | the resolution assessment, once | never |
-
-MetrIQ produces no combined pass/fail/review verdict. "Not fully established" is expected and not
-hidden: a label can carry every declaration MetrIQ looks for while other requirement areas still
-cannot be confirmed from a photo. MetrIQ says so and lists the evidence; it never turns an
-unestablished point into a pass or a failure.
-
-- **History** (`/history`) — every saved inspection: date, product, BIS standard, whether
-  everything was established from the photos, and what was not. `/history/:id` reopens it with the
-  stored photos, OCR boxes, declarations, requirement knowledge and the evidence graph.
-- **Report** — "View report" on a saved inspection opens a PDF built from the stored record (ReportLab,
-  bundled Noto Sans fonts): summary, stored photos with OCR boxes, OCR evidence, declarations with their
-  stored statuses, BIS standard evidence (or an explicit "no verified standard"), Legal Metrology and BIS
-  requirement knowledge (quoted verified text, never a check table), and what MetrIQ could establish from
-  the evidence, with only the sources stored with the evidence. Every statement in it is the deterministic
-  system's own; nothing is recomputed.
-- **Dashboard** — counts from the database: total saved inspections, how many were fully resolved by
-  MetrIQ from the photos, and how many still need further verification.
-
-| Endpoint | |
-|---|---|
-| `POST /inspections` | multipart photos (`image` or `images` + `sides`), optional `inspection_type` `PACKAGE` / `HALLMARK`; other fields → 422 |
-| `GET /inspections` | newest first; `?escalated=true` / `false` filters on the resolution |
-| `GET /inspections/stats` | database counts |
-| `GET /inspections/{id}` · `GET /inspections/{id}/images/{index}` | saved record · stored photo |
-| `GET /inspections/{id}/report.pdf` | evidence-backed PDF report of the saved record — read-only, nothing recomputed, no model |
-
-### What the inspection shows
-
-<table>
-<tr>
-<td width="50%"><b>Declared fields</b><br/>Each of the 14 legal-metrology fields, with the exact OCR region, bounding box, OCR confidence and extraction method behind it. Click a field → its box lights up on the image.</td>
-<td width="50%"><b>Applicable Indian Standard</b><br/>The matched standard, its title, the official BIS source, a real match score, and a plain "why this match" — or an honest <code>REVIEW</code> state.</td>
-</tr>
-<tr>
-<td><img src="docs/images/inspection-declared-fields.png" alt="Declared fields panel"></td>
-<td><img src="docs/images/inspection-standard-matched.png" alt="Applicable Indian Standard panel"></td>
-</tr>
-</table>
-
-![Downstream pipeline](docs/images/inspection-pipeline.png)
-
-### Evidence traceability
-
-```
-IMAGE → OCR REGION → DECLARATION → PRODUCT CLUE → PRODUCT     → STANDARD CANDIDATE → BIS SOURCE
-       (id, bbox,    (field, value, (text + its   (KB product   (IS 18140:2023,       (verified
-        confidence)   status)        OCR regions)  description)  why this result)      record)
-```
-
-Products and standards come only from `data/knowledge/` through the same
-deterministic retrieval engine as Product → Standard. A result counts as a product
-match only when the label text contains a product phrase of that record; an IS
-number printed on the label is one more signal, checked against the knowledge
-base — never proof on its own. Anything weaker is `REVIEW`, with the reason.
-
-### Try it
-
-Sample label images live in [`samples/ocr-labels/`](samples/ocr-labels/):
-
-| Image | Identified as | → Standard candidate |
-|---|---|---|
-| `synth_clean-declaration.png` | Roasted Bengal Gram | **IS 18140:2023** |
-| `synth_led-lamp.png` | Self-ballasted LED lamps | **IS 16102 (Part 1)** |
-| `synth_electric-kettle.png` | Electric Kettles and Jugs | **IS 367:1993** |
-| `synth_low-light-blurry.jpg` | (same, quality flagged low) | still matched |
-| `real_*` (Wikimedia Commons) | real-world label photos, incl. hard cases | OCR stress tests |
-
-```bash
-# one photo; for several sides use: -F images=@front.jpg -F sides=FRONT -F images=@back.jpg -F sides=BACK
-curl -s -F "image=@samples/ocr-labels/synth_led-lamp.png" \
-  http://127.0.0.1:8000/inspection/analyze | jq '.product, [.standards[].standard_number]'
-```
-
----
-
-## ② BIS knowledge surfaces
-
-Describe a product in plain words; deterministic retrieval returns candidate
-Indian Standards **only when the retrieved BIS evidence actually describes that
-product**, each with a "Why this result?" built from real matching signals.
-
-<table>
-<tr>
-<td width="50%"><img src="docs/images/product-standard.png" alt="Product to Standard search"></td>
-<td width="50%"><img src="docs/images/why-this-result.png" alt="Why this result explanation"></td>
-</tr>
-</table>
-
-| Endpoint | What it does | Grounded model |
-|---|---|---|
-| `GET /health` | liveness | — |
-| `GET`/`POST /search` | deterministic lexical retrieval over the BIS knowledge base | no |
-| `POST /product-standard` | Product → candidate Indian Standard + deterministic "Why this result?" | no |
-| `POST /inspection/analyze` | image → OCR → declarations → product → verified Indian Standard | LM Studio, only if rules miss |
-| `POST /ask` | grounded BIS Q&A, in English / Hindi / Telugu — also serves Hallmarking, which has no dedicated endpoint | OpenRouter, always |
-| `POST /certification-guidance` | certification journey (deterministic) + grounded explanation (`explain=false` skips the model) | OpenRouter, optional |
-| `POST /laboratory-search` | testing laboratories for a standard or product (`explain=false` skips the model) | LM Studio, optional |
-
-### Hallmarking & HUID
-
-**MetrIQ can identify and explain observable hallmark/HUID evidence, but it does
-not authenticate a physical jewellery item's hallmark, HUID, jeweller
-registration, or AHC status.**
-
-There is deliberately **no AUTHENTIC, VERIFIED or CERTIFIED state** for a
-physical item anywhere in the code. `verification_status` is only
-`NOT_VERIFIED` or `NOT_DETECTED`, the hallmark result is always `REVIEW`, and
-`official_verification_required` is always true — MetrIQ has no channel that
-could establish authenticity. An image is not proof; OCR is not proof; the
-vision model is not proof; an LLM is not proof.
-
-```
-photo -> OCR -----+
-                  +-- evidence fusion -> observable evidence -> REVIEW
-        vision ---+      (a conflict is stated, never resolved)
-```
-
-| Reported | Meaning |
-|---|---|
-| `outcome` | `OBSERVATIONS_FOUND` / `NO_OBSERVATIONS` / `UNCERTAIN` — what the photo showed |
-| `components` | The three marks BIS enumerates — BIS logo, purity/fineness, HUID — each `DETECTED` / `NOT_DETECTED` / `UNCERTAIN` / `NOT_SUPPORTED`, with a deterministic reason |
-| `vision` | The existing Milestone 15 observation, reused. It can only say whether the photo *looks like* a precious-metal article — it never reads a mark. Disagreement with OCR is a stated **conflict**; MetrIQ picks neither. |
-| `user_huid` | A HUID the user typed: preserved verbatim, labelled `USER_PROVIDED`, compared with the OCR text as a **string**. A match changes nothing. |
-| `official_verification` | Quoted from verified BIS records (BIS Care App). `performed_by_metriq` is always false. When the knowledge base states no mechanism, nothing is invented. |
-
-The BIS logo is always `NOT_SUPPORTED`: it is a graphic mark and OCR reads text,
-so reading the letters "BIS" is not the logo. **"Not detected" is about the
-photograph** — never a finding that the article lacks the mark. Text printed on
-the item claiming "VERIFIED" or "AUTHENTIC" is recorded as an untrusted claim
-and changes no status.
-
-Not built, and deliberately out of scope: the jeweller registration journey and
-the Assaying & Hallmarking Centre workflow. Hallmarking and package inspection
-stay separate — a hallmark inspection reports Legal Metrology as `NOT_APPLIED`.
-
-Multilingual (Milestone 17) applies: hallmarking questions work in English,
-Hindi and Telugu, and the evidence stays canonical.
-
-### Testing laboratories
-
-**MetrIQ identifies laboratories from verified laboratory evidence. It does not
-independently establish a laboratory's current accreditation, scope,
-availability, or operational status.**
-
-`POST /laboratory-search` finds laboratories three ways — by `standard_number`,
-by a question naming a standard, or by a product, which reuses the existing
-`ProductStandardFinder`:
-
-```
-"Where can I test an electric kettle?"
-   -> ProductStandardFinder  ->  IS 367:1993
-   -> laboratories BIS's own LIMS listing records against IS 367:1993
-```
-
-A laboratory is relevant to a standard **only because BIS itself lists it
-there**. Relevance is never inferred from a laboratory's name, its city, or the
-fact that it is a testing laboratory — those are separate, clearly-labelled
-search signals, never a capability claim. If the product → standard step is not
-confident, no standard is claimed and no laboratories are returned.
-
-Every result carries a deterministic **why**: `STANDARD_LISTED`,
-`PRODUCT_LISTED`, `NAME_MATCH` or `CITY_MATCH` — only the signals that actually
-occurred. Results are ordered **alphabetically, not ranked**: MetrIQ has no
-evidence that would justify calling one listed laboratory better, recommended or
-most suitable, so it does not.
-
-**The data** is a dated snapshot of BIS's own Laboratory Information Management
-System ("IS-wise test facilities in BIS / recognised / empanelled laboratories",
-`lims.bis.gov.in`), ingested by `backend/scripts/fetch_lims_laboratories.py`
-into `data/laboratories.json`. The application never calls LIMS at runtime.
-
-| | |
-|---|---|
-| Coverage | 1,205 records · 245 laboratories · 157 standards as listed · 83 cities. 78 of the 97 verified knowledge-base standards have at least one listed laboratory. |
-| Fields | Name, OSL code, city, standard as listed, product as listed, grade/type, recognition validity date, BIS remark — each only when the record holds it. A missing field reads "Not available in the verified MetrIQ record." |
-| Not held | Addresses, phone numbers, emails, accreditation numbers, NABL status, test scope beyond what LIMS prints. MetrIQ never supplies these. |
-| Currentness | Validity is reported as `VALID_AT_SNAPSHOT` / `EXPIRED_AT_SNAPSHOT` / `NOT_STATED` — never "currently valid". Confirm current scope, availability and contact details with the laboratory before arranging testing. |
-| Editions | A different edition is a different standard. BIS lists IS 14543 (2016) and IS 14543 (2024) separately, so their laboratories are never merged — the other edition is reported instead of silently dropped. |
-| No match | "No matching verified laboratory record was found" is a statement about MetrIQ's coverage, **not** about which laboratories exist. |
-
-The optional model explanation receives only the retrieved records and may name
-a laboratory **only** if it is in them. Retrieval happens before the model is
-called; the model never decides which laboratories are relevant.
-
-Laboratory discovery is **informational**. A saved inspection shows the
-laboratories listed for its identified standard, and the PDF report has a
-"Relevant testing laboratories" section — neither is a compliance verdict of any
-kind, and neither implies any laboratory tested the item.
-
-Multilingual (Milestone 17) works unchanged: Hindi and Telugu laboratory
-questions reach the same standard and the same laboratories as the English one.
-
-### Multilingual assistant (English · Hindi · Telugu)
-
-**MetrIQ's multilingual assistant changes the language of interaction, not the
-source of truth.** The knowledge base stays canonical English. It is never
-translated, never copied, never re-indexed — there is no second knowledge base
-and no translation service.
-
-```
-user query (any language)
-   -> deterministic script detection        (no model, no network)
-   -> known product / BIS terms rewritten to canonical English
-   -> the EXISTING deterministic SearchEngine, unchanged
-   -> the SAME verified BIS records
-   -> grounded answer, written in the user's language
-```
-
-`/ask`, `/certification-guidance` and `/laboratory-search` accept a `language`
-of `auto` (default), `en`, `hi` or `te`, and report the language they answered
-in. **A request without the field behaves exactly as it did before** — for
-English the system prompt is byte-for-byte unchanged.
-
-| | |
-|---|---|
-| Detection | Unicode script ranges (Devanagari, Telugu). A real run of an Indian script wins; a stray character does not. Never an LLM. |
-| Explicit choice | Always beats detection. An unknown code falls back to detection rather than erroring. |
-| Aliases | A small table (`app/language.py`) mapping Hindi/Telugu spellings of products and BIS terms **that exist in the verified knowledge base** to their canonical English. Not a dictionary, not a transliteration engine. |
-| Mixed language | Hinglish / Tanglish work: English product names already survive retrieval, and romanized question words are dropped so they stop diluting the match. |
-| Evidence | Identical in every language — same records, same standard numbers, same record ids, same source URLs, same stored English text. |
-
-The rewrite exists because `retrieval/text.normalize` is ASCII-only, so a pure
-Hindi or Telugu query would otherwise reach retrieval as an empty string. The
-layer sits *before* retrieval; the engine, its scoring and the records are
-untouched.
-
-The model is told to write in the chosen language while reproducing Indian
-Standard numbers, scheme names, rule ids, document names and source URLs
-**exactly as stored, never translated**. It may gloss a document title in the
-user's language beside the original, never instead of it.
-
-**Limits carry across languages unchanged.** If retrieval finds nothing, the
-assistant abstains in the user's language — it never invents a standard to fill
-the gap. Certification journeys, requirement knowledge, OCR text and declarations
-stay canonical: OCR output is raw evidence and is never translated, and product
-identification, the vision path and the inspection pipeline are untouched by
-this layer.
-
-Not covered: the application UI itself is English, and languages beyond these
-three are answered in English.
-
-### Certification journey
-
-`POST /certification-guidance` answers *"what certification process do I follow?"*
-Send a question, a product, or a `standard_number`; add `"explain": false` for the
-deterministic journey alone. The `journey` in the response carries the identified
-product and standard, the BIS scheme, the numbered steps, next steps, evidence,
-official sources, a verification status and its limitations.
-
-Nothing in it is written by MetrIQ. Each step's text is a **word-for-word quote**
-from a verified knowledge record with that record's official BIS URL, and the
-scheme itself is read out of verified text two independent ways — the BIS
-"Products under Compulsory Certification" listing the standard record was
-transcribed from, and any certification record that names that standard number.
-If they disagree the conflict is shown and MetrIQ picks neither. If neither says
-anything, the status is `INSUFFICIENT` rather than a guess.
-
-| Status | Meaning |
-|---|---|
-| `VERIFIED` | one standard identified, a route established, every documented step present |
-| `PARTIAL` | several candidate standards, a conflict, missing steps, or hallmarking |
-| `INSUFFICIENT` | no verified record states a route for this standard |
-
-It is **guidance about the route for a product type** — never a statement that a
-product, manufacturer or licence is certified, and never a legal determination.
-MetrIQ states no fee amount, processing time, required document or testing
-requirement: those live only in the BIS documents it links to.
-
-The grounded explanation (`explain=true`) calls OpenRouter, pinned to its own
-`OPENROUTER_GROUNDED_MODEL` (see "MetrIQ Copilot" below) — not LM Studio. If
-OpenRouter is unconfigured or down, the deterministic journey keeps working
-fully and the grounded explanation returns a clear `503` — never a fabricated
-answer.
-
----
-
-## Architecture
-
-```
-backend/                      Python 3.14 · FastAPI
-  app/
-    ocr.py                    local OCR wrapper (rapidocr-onnxruntime, PP-OCRv3 weights)
-    inspection.py             InspectionAnalyzer + response models
-    inspection_api.py         POST /inspection/ocr, POST /inspection/analyze
-    declarations.py           deterministic declarations (DETECTED / UNCERTAIN / NOT_DETECTED)
-    product_identification.py product + standard candidates over the knowledge base
-    requirements.py           verified inspection requirements: load, validate, coverage (knowledge only —
-                              no compliance engine; MetrIQ produces no PASS/FAIL/REVIEW verdict)
-    pipeline.py               OCR → declarations → product → standards → completeness
-    db.py, records.py         PostgreSQL session; saved inspections (SQLAlchemy)
-    records_api.py            /inspections: save, list, stats, detail, stored photos, PDF report
-    escalation.py             could the photos establish every applicable requirement? (deterministic)
-    evidence_graph.py         projects existing evidence onto nodes/edges — explains, never decides
-    graph_api.py              POST /evidence-graph (read-only)
-  migrations/                 Alembic schema migrations (alembic.ini in backend/)
-    retrieval/                deterministic lexical search (text.py, engine.py)
-    rag.py                    grounded Q&A (/ask)
-    product.py                Product → Standard + "Why this result?"
-    certification.py, laboratory.py
-    llm.py                    local LM Studio adapter (OpenAI-compatible) — used by inspection's
-                              product-identification fallback and Laboratory search only
-    openrouter.py             OpenRouter provider — /ask, Certification and the copilot
-    api.py / main.py          router / app
-  tests/                      plain-Python runners, bridged to pytest
-data/
-  knowledge/                  knowledge base — one JSON file per category (BIS; legal_metrology.json holds
-                              official Legal Metrology texts, source_authority LEGAL_METROLOGY)
-  inspection_requirements.json requirements quoted word for word from verified knowledge records
-samples/ocr-labels/           sample label images for the inspection pipeline
-frontend/                     React 19 · TypeScript · Vite · Tailwind v4
-```
-
-**Everything runs locally and free.** No OpenAI / Claude / cloud LLM, no paid OCR,
-no paid database (a local PostgreSQL stores saved inspections). OCR uses the PaddleOCR **PP-OCRv3** weights through ONNX Runtime
-(`rapidocr-onnxruntime`) because PaddlePaddle publishes no wheels for Python 3.14;
-the models ship in the wheel, so inference is fully offline.
+| **Retrieval** (`app/retrieval/`) | Transparent weighted scoring over title / keywords / standard number / content; every point recorded as a `MatchReason` | no |
+| **Why this result?** (`app/product.py`) | Built from retrieval's own reasons — never generated | no |
+| **Certification journey** (`app/certification_journey.py`) | Every step is a word-for-word quote from a verified record, with its URL | no |
+| **Standard Passport** (`/standard/:id`) | Composes identity, currency, QCO status, clauses, route, labs | no |
+| **Grounded answer** (`app/rag.py`) | Explains the retrieved records; a guard withholds any invented IS number, HUID, URL, fee or verdict | yes — replaceable |
 
 ---
 
 ## Quickstart
 
-### Backend — Python 3.11+
-
 ```bash
+# 1 · Backend  (Python 3.11+)
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt          # first OCR call also loads the ONNX models (~13 MB, bundled)
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+alembic upgrade head                      # needs PostgreSQL, DATABASE_URL default postgresql+psycopg:///metriq
+uvicorn app.main:app --port 8000          # http://127.0.0.1:8000/docs
 
-uvicorn app.main:app --reload            # http://127.0.0.1:8000
+# 2 · Frontend
+cd frontend
+npm install
+npm run dev                               # http://localhost:5173  (proxies /api → :8000)
 ```
 
-### Inspection database — PostgreSQL
+Grounded answers need an OpenRouter key in `backend/.env` (gitignored, server-side only):
 
-Saved inspections need a local PostgreSQL (everything else runs without it;
-the `/inspections` endpoints return 503 until it is available). On Arch Linux:
+```bash
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_MODEL=inclusionai/ling-3.0-flash-vl:free           # copilot
+OPENROUTER_GROUNDED_MODEL=inclusionai/ling-3.0-flash-vl:free  # /ask + certification
+```
+
+Without a key, everything deterministic still works — retrieval, Why this result,
+the certification journey, the Passport, labs and OCR — and `/ask` falls back to
+evidence-only text.
+
+<details>
+<summary><b>PostgreSQL setup (Arch Linux)</b></summary>
 
 ```bash
 sudo pacman -S --needed postgresql
@@ -464,406 +195,288 @@ sudo -iu postgres initdb -D /var/lib/postgres/data
 sudo systemctl enable --now postgresql
 sudo -iu postgres createuser -s "$USER"
 createdb metriq && createdb metriq_test          # app database + test database
-
-cd backend
-./.venv/bin/alembic upgrade head                 # create the schema (DATABASE_URL, default postgresql+psycopg:///metriq)
+cd backend && ./.venv/bin/alembic upgrade head
 ```
 
-- Health: <http://127.0.0.1:8000/health>
-- API docs: <http://127.0.0.1:8000/docs>
+Only saved inspections need the database; the `/inspections` endpoints return 503 until it is available.
+</details>
 
-### Frontend
+<details>
+<summary><b>Optional: local model (LM Studio) and vision key</b></summary>
+
+LM Studio is used in exactly two places: the inspection pipeline's product-identification
+fallback and Laboratory search's `explain=true` path. Load a small instruction model
+(default `qwen/qwen3-4b`) and start its server on port `1234`:
 
 ```bash
-cd frontend
-npm install
-npm run dev                              # http://localhost:5173  (proxies /api → :8000)
+export LM_STUDIO_BASE_URL=http://127.0.0.1:1234/v1
+export LM_STUDIO_MODEL=qwen/qwen3-4b
 ```
 
-### Local model (inspection fallback + Laboratory search only)
-
-`/ask`, Certification and the copilot are grounded through OpenRouter (see
-"MetrIQ Copilot" below) — LM Studio is **not** required for those. It remains
-in use in exactly two places: the inspection pipeline's product-identification
-fallback, and Laboratory search's optional `explain=true` path. Load a small
-instruction model in [LM Studio](https://lmstudio.ai) (default `qwen/qwen3-4b`)
-and start its server on port `1234` only if you want those two paths grounded;
-everything else in this Quickstart works without it. On a laptop, load it with
-`--parallel 1`. Override with env vars if needed:
+Visual product understanding uses its **own** key, so its quota and outages are independent:
 
 ```bash
-export LM_STUDIO_BASE_URL=http://127.0.0.1:1234/v1   # default (LLM_BASE_URL also works)
-export LM_STUDIO_MODEL=qwen/qwen3-4b                  # default (LLM_MODEL also works)
-```
-
-> **Demoing tip.** The fastest, model-free paths are **Product → Standard** and an
-> inspection of a known product (deterministic identification, ~3 s). When the
-> label names nothing in the knowledge base, the local model is asked for a search
-> term (never a verdict), which can take ~25 s on first call.
-
-
-### Product intelligence — one context across the features
-
-**MetrIQ connects evidence produced by its existing deterministic features into a
-unified product context. The context does not create new evidence and does not
-independently verify external facts.**
-
-For one product it connects what the features already established, and says
-explicitly which features apply:
-
-```
-OCR / declarations / vision ---+
-deterministic identification --+
-BIS retrieval -----------------+--> CANONICAL PRODUCT CONTEXT --> panel · copilot
-certification journey ---------+
-requirement knowledge ---------+
-BIS LIMS laboratory snapshot --+
-hallmark observations ---------+
-```
-
-Availability is four different facts, never collapsed:
-
-| State | Meaning |
-|---|---|
-| `AVAILABLE` | MetrIQ holds evidence for it |
-| `NOT_AVAILABLE` | the feature applies, but MetrIQ's verified data has nothing |
-| `NOT_APPLICABLE` | the feature does not apply to this product at all |
-| `UNCERTAIN` | evidence exists but does not settle the question |
-
-So an electric kettle shows a standard, a certification route and laboratory
-records with hallmarking `NOT_APPLICABLE`; a hallmark photo shows hallmarking
-evidence with package inspection `NOT_APPLICABLE`. Every section names the system
-that produced it (`DETERMINISTIC_RETRIEVAL`, `DETERMINISTIC_RULE_ENGINE`,
-`LABORATORY_SNAPSHOT`, `OCR_TEXT`, `HALLMARK_OBSERVATION`, …), and agreements and
-conflicts between sources are shown rather than resolved.
-
-**Two entry points, with different trust properties — stated plainly because the
-difference matters:**
-
-- `POST /product-context` is **server-derived**: the request carries only a
-  product description or a standard number, and MetrIQ runs its own retrieval,
-  journey builder and laboratory lookup. No client-supplied evidence is involved.
-- A finished inspection carries its context on the analysis itself
-  (`product_context`). On the live inspection screen that object is echoed back
-  by the browser exactly as `/inspection/analyze` produced it — the same trust
-  model the copilot's live path has always used. The request models whitelist
-  what may reach the model; nothing arbitrary from a client is treated as
-  evidence.
-
-The context is a composition: it contains no classifier, no ranking, no rule
-engine and no model call. The summary is written from structured data by MetrIQ
-itself — the copilot may explain it afterwards, never produce it. Saved
-inspections need no migration, and records saved before this milestone simply
-have no context.
-
-
-
-### Evidence graph — how MetrIQ arrived at this result
-
-**The MetrIQ evidence graph visualizes relationships already established by the
-deterministic evidence pipeline. It does not independently infer standards,
-compliance, authenticity, laboratory validity, or certification applicability.**
-
-It is a projection, not a reasoning engine: `app/evidence_graph.py` reads a
-finished analysis (or a finished product context) and turns the relationships
-those systems already recorded into nodes and edges. It calls no model, runs no
-retrieval, evaluates no rule, and nothing downstream reads it — deleting it
-changes no result. No graph database.
-
-```
-OCR region / visual observation --OBSERVED_IN-->  declaration
-product           --IDENTIFIED_FROM-->            declaration · OCR region
-product           --MATCHED_TO-->                 verified Indian Standard
-standard          --SOURCED_FROM-->               verified BIS record
-standard          --RELATED_TO-->                 certification route · laboratory listing
-standard          --REQUIRES-->                   verified requirement (knowledge, never a check)
-hallmark / HUID observation --SUPPORTED_BY-->     the evidence it read
-```
-
-**11 node types** — `PRODUCT`, `OCR_EVIDENCE`, `DECLARATION`, `VISION_OBSERVATION`,
-`STANDARD`, `CERTIFICATION`, `REQUIREMENT`, `LABORATORY`, `HALLMARK_OBSERVATION`,
-`HUID_OBSERVATION`, `SOURCE` — and **8 edge types**, each edge carrying a
-deterministic explanation taken from the evidence itself (the product → standard
-edge quotes the existing "Why this result?", not a new one). There is no `RULE`
-or `SYSTEM_RESULT` node and no `CHECKED_BY` or `RESULTED_IN` edge — that
-vocabulary was the compliance-verdict projection, removed along with the engine
-that used to produce it. Every node names the system that produced it and
-carries the limitations that belong to it.
-
-What the graph will not do:
-
-- **no verdict of its own, and no verdict vocabulary at all.** `REQUIREMENT`
-  nodes are verified knowledge — what a standard specifies — never a check
-  result. Hallmark observations project directly, with no rule wrapper.
-- **no inferred certification route.** No verified route → an explicit
-  `NOT_AVAILABLE` node with its own message.
-- **no laboratory status.** Validity is only `VALID_AT_SNAPSHOT` /
-  `EXPIRED_AT_SNAPSHOT` / `NOT_STATED`, ordering is alphabetical, and
-  accreditation, NABL status, current scope, availability and contacts are absent
-  because the snapshot does not hold them.
-- **no authentication.** A hallmark or HUID is an *observation* node; HUID
-  authenticity is permanently `NOT_SUPPORTED`; an uncertain purity stays
-  uncertain; the BIS logo can never be confirmed from OCR; a label that prints
-  "HUID VERIFIED" is kept as untrusted OCR evidence.
-- **no invented product.** On the text-query path the graph begins
-  `PRODUCT → NOT_IDENTIFIED` and says a typed description is not evidence about a
-  physical item — then shows the verified standard that was actually retrieved.
-- **only this case.** Never the whole knowledge base, laboratory snapshot or
-  inspection history.
-
-```http
-POST /evidence-graph     exactly one of:
-                           {"inspection_id": "INS-…"}     server-derived from the stored analysis
-                           {"analysis": {...}}            the analysis on screen, as /inspection/analyze made it
-                           {"product_context": {...}}     as POST /product-context returned it
-```
-
-The two client-echoed forms are the same trust model the copilot's live path has
-always had, and no more: the response models *are* the whitelist, the request
-carries no node, edge, label or status field at all, and a node smuggled inside an
-analysis never reaches the graph. Anything else is a 422. Reading a saved
-inspection is read-only — the session is rolled back and never committed.
-
-**In the UI** (`components/EvidenceGraph.tsx`) the graph is read-only and layered:
-OCR / visual evidence → declarations → product → standard → requirements /
-certification / laboratories / hallmark observations → sources. Click a node for
-its evidence, provenance, source link and its
-relationships with their explanations; click an OCR node and its box lights up on
-the photograph. "Focus on the path" collapses it to the chain, and "what this
-graph does not establish" lists the boundaries. The layers *are* the small-screen
-vertical chain, so there is no canvas and no separate mobile view. It appears in
-the inspection workspace (live and saved) and on the Standards page. The copilot
-can explain it (`EXPLAIN_EVIDENCE_GRAPH`) using only the relationships the graph
-actually holds. The PDF report is unchanged — it already carries the underlying
-evidence sections.
-
-### MetrIQ Copilot — grounded explanations (optional)
-
-An optional explanation layer. **MetrIQ's copilot explains evidence produced by the
-deterministic system; it does not independently establish standards, compliance,
-laboratory status, certification applicability, or hallmark/HUID authenticity.**
-
-It reads a **finished** result and puts it into plain language: it never retrieves a
-standard and never states a compliance verdict — MetrIQ produces none, so any
-PASS/FAIL/REVIEW or "compliant" claim in a generated answer is withheld as
-fabricated by definition, not weighed against a stored result. With no
-key configured, everything else works exactly as before; only the explanation is
-unavailable.
-
-**Where it can be asked** (each is its own small grounded context — MetrIQ never
-sends the whole knowledge base, and only the sections the question needs):
-
-| Page | Context | Example question |
-|---|---|---|
-| Inspection / saved record | the finished inspection | "Why this result?" · "What information is missing?" |
-| Standards | the product → standard retrieval | "Why was this standard retrieved?" |
-| Certification | the retrieved certification journey | "Explain these certification steps" |
-| Laboratories | the BIS LIMS snapshot lookup | "Why were these laboratories returned?" |
-| Standards (product intelligence) | the canonical product context | "Summarise everything MetrIQ found" |
-
-Five evidence states are kept apart and are never collapsed into "missing":
-`NOT_DETECTED` (the photographs did not show it — not a statement that it is legally
-missing), `UNCERTAIN` (found but unreadable; the value is withheld on purpose),
-`VERIFIED_REQUIREMENT` (a verified requirement mentions this field — a link to
-knowledge, not a pass or a failure), `NOT_ESTABLISHED` (MetrIQ holds no verified
-requirement linking this field — not a statement that nothing is required) and
-`NOT_AVAILABLE_IN_KNOWLEDGE_BASE` (a statement about MetrIQ's coverage, never
-about what exists).
-
-**Answers follow the user's language** (English / Hindi / Telugu, the Milestone 17
-selection). The *evidence* is never translated: standard numbers, rule ids, record
-ids, document names and source URLs are reproduced exactly.
-
-The API key stays on the server. The browser talks to MetrIQ, MetrIQ talks to
-OpenRouter — there is deliberately no `VITE_` variable for it.
-
-```bash
-# backend/.env  (gitignored — never commit it, never put it in the frontend)
-OPENROUTER_API_KEY=sk-or-v1-...
-OPENROUTER_MODEL=inclusionai/ling-3.0-flash-vl:free
-
-# /ask (also serves Hallmarking) and Certification's explain=true path — the
-# same key, but a model pinned INDEPENDENTLY of OPENROUTER_MODEL above, so the
-# two never silently move together:
-OPENROUTER_GROUNDED_MODEL=inclusionai/ling-3.0-flash-vl:free
-```
-
-The model id is configuration, not code — any OpenRouter chat model works.
-`inclusionai/ling-3.0-flash-vl:free` is the default for both and is verified end
-to end (2026-09-20). The previous copilot default, `deepseek/deepseek-v4-flash-0731:free`,
-is no longer served by OpenRouter and returns HTTP 404; if you see that, set
-`OPENROUTER_MODEL` (or `OPENROUTER_GROUNDED_MODEL`) to a model the provider currently lists.
-If a free model starts returning HTTP 429, check
-`curl https://openrouter.ai/api/v1/key -H "Authorization: Bearer $OPENROUTER_API_KEY"`
-before assuming your allowance is spent — a provider's shared free pool can refuse
-while your own quota is untouched. Reasoning models are handled: the provider
-sends `reasoning: {"enabled": false}`, so the budget goes to the explanation rather
-than to deliberation, and a reply cut short by the token limit is salvaged into
-plain text instead of raw JSON.
-
-`backend/.env` is read at startup; an exported variable always wins. Optional:
-`OPENROUTER_BASE_URL`, `OPENROUTER_TIMEOUT`, and the free-tier guards
-`OPENROUTER_DAILY_LIMIT` (45) / `OPENROUTER_MINUTE_LIMIT` (15), which refuse a
-request locally before it reaches the network. A request the provider never served
-does not consume the day's allowance.
-
-A request is sent only when you press a question — never on page load, never in the
-background, never from the pipeline. One user action is one model call; language
-detection, retrieval and every explanation MetrIQ writes itself stay deterministic.
-Automated tests stub the provider, so running the suite costs nothing.
-
-**What MetrIQ withholds.** After the model replies, MetrIQ re-reads the generated
-text deterministically and replaces it with its own sentence (in the user's
-language) when the text:
-
-- cites an Indian Standard number, a HUID or a URL that is not in the context;
-- claims a hallmark, HUID or item was authenticated;
-- states or implies any compliance verdict at all — a PASS/FAIL/REVIEW, or that an
-  item "is compliant"/"is non-compliant" — since MetrIQ produces none, any such
-  claim is fabricated by definition;
-- claims a laboratory is accredited, currently valid, operational or available, or
-  ranks one as best / nearest / recommended — a BIS LIMS record is a **dated
-  snapshot** (retrieved 2026-09-19), and it establishes only that the laboratory was
-  listed against that standard on that date;
-- states a fee or amount that is not in the evidence.
-
-The underlying evidence and the sources are
-unaffected either way. If the provider times out, is rate-limited, is unconfigured
-or returns unusable output, the endpoint returns 429 / 503 with a short sentence —
-no provider URL, no key, no raw exception — and every MetrIQ result stays exactly as
-it was. An LLM answer never replaces a deterministic one.
-
-Certification guidance describes the route that published BIS information states for
-a product type; the copilot may never say an item, a manufacturer or a licence *is*
-certified, nor state a fee, processing time, required document, testing requirement
-or validity period the evidence does not state.
-
-
-### Knowledge coverage
-
-97 verified Indian Standards, each transcribed from an official BIS "Products under
-Compulsory Certification" page (Scheme I / Scheme II / Scheme IV) with its source
-URL and verification date. The product ↔ standard relationship is the BIS listing
-itself — MetrIQ does not infer one.
-
-Three capabilities are deliberately distinct, and the Standards page labels each
-candidate with which one applies:
-
-| Status | What MetrIQ can do | Count |
-|---|---|---:|
-| `INSPECTION_SUPPORTED` | identify, explain **and** report image-observable requirement knowledge for it | 2 |
-| `STANDARD_ONLY` | identify and explain from official evidence; no image-observable requirement data | 91 |
-| `UNSUPPORTED` | outside package-label inspection (jewellery hallmarking) | 4 |
-
-A larger knowledge base did **not** grow this: requirements stay at 15 (7 classified
-as image-observable in principle) and the requirement data still specifies 7 rule
-types — but there is no compliance engine left to execute them. These are counts of
-what the verified data is annotated with, not of checks that run; MetrIQ reports
-that annotation as knowledge, never as a check result. A standard is only
-inspection-supported when official, image-observable requirement evidence exists.
-
-```bash
-cd backend
-./.venv/bin/python scripts/check_knowledge.py            # validation + coverage table
-./.venv/bin/python scripts/check_knowledge.py --json     # machine-readable matrix
-```
-
-**Known coverage gaps.** Common consumer products that are not on the BIS pages
-used here have no standard in the knowledge base, and MetrIQ returns nothing
-rather than guessing: toaster, ceiling fan, refrigerator, pressure cooker, helmet,
-school bag, cooking oil, biscuits, shampoo, paint, plywood, solar panel, gas stove,
-mixer grinder, bicycle.
-
-
-### Visual product understanding (optional)
-
-A second evidence source for one question only — **what product is this?** OCR
-reads the label; a vision model says what the package looks like. They are not
-equal, and the code enforces that rather than trusting the model:
-
-| | PaddleOCR | Vision model |
-|---|---|---|
-| Authority | **authoritative** for printed text | never authoritative |
-| Produces | text, boxes, confidence, declarations | a product impression |
-| May report MRP, quantity, IS number, licence, HUID | yes | **never** — deleted before the app sees it |
-| May name a BIS standard | via deterministic retrieval | **never** — it only supplies a product clue |
-| May decide compliance | **never** — MetrIQ produces no compliance verdict | **never** |
-
-Its key is deliberately **separate** from the copilot's, so the two quotas and
-outages are independent:
-
-```bash
-# backend/.env  (gitignored — never commit it, never put it in the frontend)
 OPENROUTER_VISION_API_KEY=sk-or-v1-...     # NOT the same as OPENROUTER_API_KEY
 VISION_MODEL=inclusionai/ling-3.0-flash-vl:free
 ```
 
-Optional: `VISION_BASE_URL`, `VISION_TIMEOUT`, and the free-tier guards
-`VISION_MAX_IMAGES` (2 images per inspection), `VISION_DAILY_LIMIT`,
-`VISION_MINUTE_LIMIT`. Identical images are answered from a cache, so saving an
-inspection does not spend the quota again.
-
-**Evidence fusion.** The two signals are compared deterministically, never merged
-into a prompt:
-
-| OCR | Vision | Result |
-|---|---|---|
-| names the product | agrees | identified; agreement stated, **confidence unchanged** |
-| names the product | disagrees | **REVIEW** — the conflict is quoted, MetrIQ does not choose |
-| unreadable | names a product | **REVIEW** — needs manual confirmation against the label |
-| names the product | unavailable / not configured | unchanged, OCR only |
-
-Without a key, MetrIQ behaves exactly as it did before this feature existed.
+Free-tier guards (`OPENROUTER_DAILY_LIMIT` 45, `OPENROUTER_MINUTE_LIMIT` 15,
+`VISION_MAX_IMAGES`, …) refuse a request locally before it reaches the network. A request is
+sent only when you press a question — never on page load.
+</details>
 
 ---
 
-## Tests
+## Tests & checks
 
 ```bash
 cd backend
-./.venv/bin/python -m pytest -q                 # all suites (needs the metriq_test database)
-./.venv/bin/python scripts/check_knowledge.py   # knowledge-base validation
+./.venv/bin/python -m pytest -q                  # 395 tests (needs the metriq_test database)
+./.venv/bin/python scripts/check_knowledge.py    # knowledge-base validation + coverage
+./.venv/bin/python scripts/eval_retrieval.py     # offline retrieval eval vs committed baseline
+./.venv/bin/python scripts/verify_snapshot.py    # source drift report (never writes the KB)
 
 cd ../frontend
-npx tsc -b --noEmit                             # type check
-npm run build                                   # production build
+npx tsc --noEmit && npm run build
 ```
 
-Backend suites are plain-Python runners (each exits non-zero on failure);
-`tests/test_plain_runners.py` runs them all under pytest, so `pytest -q` is an
-authoritative gate. Model-dependent tests use a stub — no LM Studio or
-OpenRouter call is made and no quota is spent. 304 tests pass.
+Model-dependent tests use stubs — no live model call is made and no quota is spent.
+
+| Retrieval baseline | |
+|---|---:|
+| recall@1 | 85.6% |
+| recall@5 | 98.1% |
+| correct abstention | 24.4% |
+| false match | 13.4% |
 
 ---
 
-## Roadmap
+## What's in the knowledge base
 
-Phases 1–14 are complete (see [`CLAUDE.md`](CLAUDE.md) for the full log). What remains:
+<table>
+<tr><td><b>505</b></td><td>verified Indian Standards, transcribed from BIS's "Products under Compulsory Certification" (Scheme I / II) with source URL and verification date</td></tr>
+<tr><td><b>1,537</b></td><td>OCR'd clause records from 31 standards — <i>citation-only</i>, labelled as unverified OCR text, never used for retrieval</td></tr>
+<tr><td><b>29</b></td><td>Quality Control Order rows — status comes from which BIS table a row is in, never from today's date</td></tr>
+<tr><td><b>1,205</b></td><td>BIS LIMS laboratory records (245 labs · 83 cities) — 86 of 505 standards have a listed lab</td></tr>
+<tr><td><b>70</b></td><td>certification, FAQ, hallmarking, Legal Metrology, consumer and general BIS records</td></tr>
+</table>
 
-- [x] **Requirement knowledge** — verified BIS and Legal Metrology package-label requirements (quoted word for word, source-linked); the deterministic PASS/FAIL/REVIEW compliance engine that used to run them was removed in the final hardening pass, so this is reported as knowledge, never a check result
-- [x] **Hallmark / HUID evidence** — potential HUID and purity extraction, observed vs not verified, external verification required, report section
-- [ ] **Requirement coverage** — more verified BIS requirements
-- [x] **Saved inspections & history** — saved inspections in PostgreSQL, immutable evidence, real History and Dashboard
-- [x] **Resolution** — deterministic decision on whether the photos established the evidence chain, with evidence-linked reasons for every point they did not, never a legal or compliance verdict
-- [x] **Inspection report** — evidence-backed PDF audit trail of any saved inspection
-- [x] **Evidence graph** — every relationship the deterministic pipeline established, as a read-only graph: product ← OCR / declarations / visual observation, product → standard → requirement, plus certification route, laboratory listings and hallmark observations, each with its provenance and its verified source
+This is a focused, curated dataset — **not** complete BIS coverage. About 273 of the ~769
+products notified under compulsory certification sit in Quality Control Orders outside
+the two BIS listing pages, and MetrIQ does not guess them.
 
 ---
 
-## Reference — retrieval scoring
+## Deep dive
+
+<details>
+<summary><b>API endpoints</b></summary>
+
+| Endpoint | What it does | Model |
+|---|---|---|
+| `GET /health` | liveness | — |
+| `GET`/`POST /search` | deterministic lexical retrieval over the BIS knowledge base | no |
+| `POST /product-standard` | Product → candidate Indian Standard + "Why this result?" | no |
+| `POST /ask` | grounded BIS Q&A in English / Hindi / Telugu (also serves Hallmarking) | OpenRouter |
+| `POST /certification-guidance` | certification journey + optional grounded explanation (`explain=false` skips it) | OpenRouter, optional |
+| `POST /laboratory-search` | laboratories for a standard or product | LM Studio, optional |
+| `GET /standard-passport/{record_id}` · `/standard-passport/lookup` | the Standard Passport for one standard (a number without a year lists every held edition) | no |
+| `POST /product-context` | one server-derived context across all features | no |
+| `POST /evidence-graph` | read-only graph of relationships already established | no |
+| `POST /inspection/ocr` · `/inspection/analyze` | label photo(s) → OCR → declarations → product → standard | LM Studio fallback only |
+| `POST /inspections` · `GET /inspections[/{id}]` | save / list / read immutable inspection records | no |
+| `GET /inspections/{id}/report.pdf` | evidence-backed PDF built from the stored record | no |
+| `POST /copilot/explain` | grounded explanation of a finished result | OpenRouter |
+
+</details>
+
+<details>
+<summary><b>Label inspection pipeline</b></summary>
+
+```
+IMAGE → OCR REGION → DECLARATION → PRODUCT CLUE → PRODUCT     → STANDARD CANDIDATE → BIS SOURCE
+       (id, bbox,    (field, value, (text + its   (KB product   (IS 16102 (Part 1),   (verified
+        confidence)   status)        OCR regions)  description)  why this result)      record)
+```
+
+One package is a single photo (`image`, optional `side`) or several photos of the same
+package (`images` + `sides` = FRONT / BACK / LEFT / RIGHT / TOP / BOTTOM / UNKNOWN). Each
+photo is OCR'd separately and every value keeps the photo and region it came from; a photo
+that cannot be read is reported as failed, and unphotographed sides as not uploaded — never
+as missing.
+
+Products and standards come only from `data/knowledge/` through the same retrieval engine as
+Product → Standard. A product match needs a product phrase of that record on the label; an
+IS number printed on the label is one more signal, never proof on its own. Anything weaker is
+`REVIEW`, with the reason. Declarations are `DETECTED` / `UNCERTAIN` / `NOT_DETECTED` in the
+uploaded photos — never "legally missing".
+
+`app/escalation.py` then states, deterministically, every point of the evidence chain the
+photos could not establish (unreadable photo, product not identified, several candidates, no
+verified standard, HUID, conflicting sides, …). It changes no result and produces no verdict.
+
+Saved inspections are stored in PostgreSQL with their photos and are **immutable** — a
+database trigger rejects any update. History, a dashboard and a PDF report all read the
+stored record; nothing is recomputed.
+
+```bash
+curl -s -F "image=@samples/ocr-labels/synth_led-lamp.png" \
+  http://127.0.0.1:8000/inspection/analyze | jq '.product, [.standards[].standard_number]'
+```
+
+| Sample (`samples/ocr-labels/`) | Identified as | Standard candidate |
+|---|---|---|
+| `synth_clean-declaration.png` | Roasted Bengal Gram | IS 18140:2023 |
+| `synth_led-lamp.png` | Self-ballasted LED lamps | IS 16102 (Part 1) |
+| `synth_electric-kettle.png` | Electric Kettles and Jugs | IS 367:1993 |
+| `real_*` (Wikimedia Commons) | real-world labels, incl. hard cases | OCR stress tests |
+
+</details>
+
+<details>
+<summary><b>Hallmarking & HUID — observed, never authenticated</b></summary>
+
+MetrIQ can identify and explain observable hallmark/HUID evidence, but it does not
+authenticate a physical jewellery item's hallmark, HUID, jeweller registration or AHC status.
+
+- `verification_status` is only `NOT_VERIFIED` or `NOT_DETECTED`; there is no AUTHENTIC,
+  VERIFIED or CERTIFIED state anywhere in the code.
+- The three BIS marks — BIS logo, purity/fineness, HUID — are each `DETECTED` /
+  `NOT_DETECTED` / `UNCERTAIN` / `NOT_SUPPORTED`. The BIS logo is always `NOT_SUPPORTED`: it
+  is a graphic and OCR reads text.
+- "Not detected" is about the photograph, never a finding that the article lacks the mark.
+- Printed text like "HUID VERIFIED" is recorded as an untrusted claim and changes nothing.
+- A HUID the user types is compared with the OCR text as a string only.
+- Real verification is pointed to the BIS Care App, quoted from verified BIS records.
+
+</details>
+
+<details>
+<summary><b>Testing laboratories</b></summary>
+
+MetrIQ identifies laboratories from verified laboratory evidence. It does not independently
+establish a laboratory's current accreditation, scope, availability or operational status.
+
+Search by standard, by a question naming a standard, or by product (which reuses
+Product → Standard: *"Where can I test an electric kettle?"* → IS 367:1993 → the labs BIS LIMS
+lists for it). A lab is relevant **only because BIS lists it** against that standard. Each
+result carries a deterministic why (`STANDARD_LISTED`, `PRODUCT_LISTED`, `NAME_MATCH`,
+`CITY_MATCH`), results are alphabetical, and validity is `VALID_AT_SNAPSHOT` /
+`EXPIRED_AT_SNAPSHOT` / `NOT_STATED`. A different edition is a different standard, so
+IS 14543 (2016) and (2024) labs are never merged. Addresses, phones, emails and NABL status
+are not held and never supplied.
+
+The snapshot (`data/laboratories.json`, retrieved 2026-09-19) is built by
+`backend/scripts/fetch_lims_laboratories.py`; the app never calls LIMS at runtime.
+
+</details>
+
+<details>
+<summary><b>Multilingual — English · Hindi · Telugu</b></summary>
+
+The language of interaction changes, the source of truth does not.
+
+```
+query (any language) → script detection (no model) → known terms rewritten to canonical English
+                     → the SAME retrieval engine → the SAME verified records
+                     → grounded answer written in the user's language
+```
+
+`/ask`, `/certification-guidance` and `/laboratory-search` take `language` = `auto` / `en` /
+`hi` / `te`. The alias table (`app/language.py`) only maps spellings of products and BIS terms
+that exist in the knowledge base. Standard numbers, scheme names, document names and URLs are
+reproduced exactly, never translated. If retrieval finds nothing, the assistant abstains in the
+user's language. Hinglish / Tanglish work.
+
+</details>
+
+<details>
+<summary><b>Certification journey</b></summary>
+
+`POST /certification-guidance` answers *"what certification process do I follow?"*. Nothing in
+the journey is written by MetrIQ — each step is a word-for-word quote from a verified record
+with its official URL. The scheme is read two independent ways (the BIS listing the standard
+was transcribed from, and any certification record naming it); if they disagree, the conflict
+is shown and MetrIQ picks neither.
+
+| Status | Meaning |
+|---|---|
+| `VERIFIED` | one standard, a route established, every documented step present |
+| `PARTIAL` | several candidates, a conflict, missing steps, or hallmarking |
+| `INSUFFICIENT` | no verified record states a route |
+
+It is guidance about the route for a product type — never a statement that a product or
+licence is certified. Fees, processing times and required documents are never stated; they
+live only in the BIS documents it links to.
+
+</details>
+
+<details>
+<summary><b>Copilot, product context & evidence graph</b></summary>
+
+**Copilot** — explains evidence the deterministic system produced; it never establishes
+standards, compliance, lab status, certification applicability or HUID authenticity. After the
+model replies, a deterministic guard replaces the text with MetrIQ's own sentence if it cites an
+IS number, HUID or URL not in the context, claims authentication, states any PASS/FAIL or
+"compliant" verdict, ranks or vouches for a laboratory, or states a fee not in the evidence. The
+key stays on the server — there is no `VITE_` variable for it.
+
+**Product context** (`app/product_context.py`) — connects what each feature already
+established into one view, with each feature `AVAILABLE` / `NOT_AVAILABLE` / `NOT_APPLICABLE` /
+`UNCERTAIN`. It is a composition: no classifier, no ranking, no model. Conflicts are shown,
+never resolved.
+
+**Evidence graph** (`app/evidence_graph.py`) — a read-only projection of relationships already
+established (OCR region → declaration → product → standard → requirement / certification /
+laboratory / source). 11 node types, 8 edge types, each edge carrying an explanation taken from
+the evidence. No model, no retrieval, no verdict vocabulary; nothing downstream reads it.
+
+</details>
+
+<details>
+<summary><b>Retrieval scoring reference</b></summary>
 
 Each query term is matched against a record's fields and the weights are summed
-(configurable in `app/retrieval/engine.py`): standard-number match `8` (`12` if the
-year also matches), title `4`, keyword `3`, category hint `2`, document name `1.5`,
-reference `1`, buried content mention `1`.
+(`RetrievalConfig` in `app/retrieval/engine.py`): standard-number match `8` (`12` if the year
+also matches), title `4`, keyword `3`, category hint `2`, document name `1.5`, reference `1`,
+content mention `1`.
 
-**Confidence** of the top hit, from its total score: `high` ≥ 7.5, `medium` ≥ 4.0,
-`low` ≥ 1.0, else `none`. If the top hit covers less than ~⅓ of the query terms the
-confidence is capped at `low`. When nothing matches: `confidence: "none"`,
-`abstained: true`, empty `results` — the system never invents a result.
+**Confidence** of the top hit: `high` ≥ 7.5, `medium` ≥ 4.0, `low` ≥ 1.0, else `none`. If the
+top hit covers less than ~⅓ of the query terms, confidence is capped at `low`. When nothing
+matches: `confidence: "none"`, `abstained: true`, empty `results`.
 
-**Inspection product identification** ([`app/product_identification.py`](backend/app/product_identification.py)):
-retrieval results are kept only when the label contains a multi-word product
-phrase of the record, so a single generic word ("water", "gram") can never pull in
-a standard. Phrases shared by several standards are category-level; keyword
-aliases need corroboration; otherwise → `REVIEW`.
+Inspection product identification keeps a result only when the label contains a multi-word
+product phrase of the record, so a single generic word ("water", "gram") can never pull in a
+standard.
+
+</details>
+
+<details>
+<summary><b>Repository layout</b></summary>
+
+```
+backend/            Python · FastAPI
+  app/              retrieval/, rag.py, product.py, certification*.py, laboratory.py, lab_registry.py,
+                    language.py, clauses.py, clause_groups.py, standard_currency.py, boundary.py,
+                    ocr.py, declarations.py, pipeline.py, hallmark.py, copilot.py, openrouter.py, …
+  migrations/       Alembic (PostgreSQL)
+  scripts/          check_knowledge, eval_retrieval, verify_snapshot, build-time fetch_* tools
+  tests/            plain-Python runners, bridged to pytest
+data/knowledge/     the knowledge base — one JSON file per category
+data/laboratories.json   BIS LIMS snapshot
+samples/ocr-labels/ sample label images
+frontend/           React 19 · TypeScript · Vite · Tailwind v4
+docs/history/       phase-by-phase design decisions
+```
+
+</details>
+
+---
+
+<div align="center">
+
+<sub><code>BUILT FOR SMART INDIA HACKATHON · PROBLEM STATEMENT SIH26107</code></sub><br/>
+<sub>MetrIQ is a research prototype. It is not affiliated with or endorsed by the Bureau of Indian Standards,
+and it does not make legal or compliance determinations.<br/>Always confirm against the official BIS source it links.</sub>
+
+</div>
